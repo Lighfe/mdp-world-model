@@ -1,0 +1,29 @@
+# Python-related files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env/
+.venv/
+
+# Data and results (often too large for GitHub)
+*.csv
+*.h5
+*.pkl
+datasets/raw/*
+datasets/processed/*
+!datasets/raw/.gitkeep
+!datasets/processed/.gitkeep
+
+# IDE-specific files
+.vscode/
+.idea/
+*.swp
+.ipynb_checkpoints/
+
+# Operating system files
+.DS_Store
+Thumbs.db
