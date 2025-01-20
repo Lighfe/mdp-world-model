@@ -63,34 +63,46 @@ class Grid:
             self.tf_grid_lines = copy.deepcopy(self.grid_lines)
 
     
-    def transform(self, coord):
+    def transform(self, coords):
         """
         Transforms a given coordinate using the transformation functions.
 
         Args: coord (tuple): Real-world coordinate (e.g., (x, y)).
         """
-        # TODO: Change transform to efficient vectorized version which can handle a set of vectors
-
+        
         if not self.transformed_bool:
-            return coord        #OR raise ValueError("No transformation functions defined.")
+            return coords       #OR raise ValueError("No transformation functions defined.")
+        coords = np.array(coords)
+        if coords.ndim == 1:
+            transformed_coords = np.array([self.transformation[dim](coords[dim]) for dim in range(self.dimension)])
         else:
-            return tuple(self.transformation[dim](coord[dim]) for dim in range(self.dimension))
+            transformed_coords = np.empty_like(coords)
+            for dim in range(self.dimension):
+                transformed_coords[:, dim] = np.vectorize(self.transformation[dim])(coords[:, dim])
+        return transformed_coords
+        
         
 
-    def inverse_transform(self, coord):
-        # TODO: Change transform to efficient vectorized version which can handle a set of vectors
+    def inverse_transform(self, coords):
         """
         Transforms a given coordinate from the transformed space using the inverse transformation functions.
 
         Args: coord (tuple): Transformed space coordinate (e.g., (x, y)).
         """
         if not self.transformed_bool:
-            return coord        #OR raise ValueError("No transformation functions defined.")
-        else:
-            return tuple(self.inverse_transformation[dim](coord[dim]) for dim in range(self.dimension))
+            return coords        #OR raise ValueError("No transformation functions defined.")
         
-
+        coords = np.array(coords)
+        if coords.ndim == 1:
+            original_coords = np.array([self.inverse_transformation[dim](coords[dim]) for dim in range(self.dimension)])
+        else:
+            original_coords = np.empty_like(coords)
+            for dim in range(self.dimension):
+                original_coords[:, dim] = np.vectorize(self.inverse_transformation[dim])(coords[:, dim])
+        return original_coords
+        
        
+
     def get_cell_index(self, coord, in_transformed_space = False):
         """
         Finds the grid cell index for a given coordinate.
@@ -101,6 +113,7 @@ class Grid:
 
         Returns: idx (tuple): The grid cell index (e.g., (i, j)).
         """
+        # TODO: Does this need to be vectorized?
 
         if len(coord) != self.dimension:
             raise ValueError("Coordinate dimensionality does not match space intervals.")
@@ -129,6 +142,7 @@ class Grid:
 
         Returns: coords (list of tuples): The coordinates of the grid cell.
         """
+        #TODO: Does this need to be vectorized?
 
         if not transformed_space:
             return [self.grid_lines[dim][i:i+2] for dim, i in enumerate(idx)]
@@ -138,6 +152,7 @@ class Grid:
    
     def get_initial_conditions(self, num_points_per_cell=1):
         """
+        Efficiently generates initial conditions for the whole grid.
         Returns a set of num_points_per_cell times num_grid_cells initial conditions for the grid.
 
         Args: num_points_per_cell (int): Number of initial conditions per grid cell.
@@ -145,7 +160,7 @@ class Grid:
         Returns: x (np.array): The initial conditions, each row is a point.
         """
 
-        #TODO: Change transform to efficient vectorized version
+        
         
         num_grid_cells = len(self.indices)
         
@@ -168,14 +183,15 @@ class Grid:
 
         X = np.add(X, repeated_lower_bounds_all_dim) 
 
-        X_original = np.array([self.inverse_transform(point) for point in X])
+        X_original = self.inverse_transform(X)
 
         return X_original
         
 
     def choose_random_point_from_cell(self, idx):
         """
-        Chooses a random point from a grid cell corresponding to the transformed space (because of unboundedness).
+        Chooses a single random point from a grid cell corresponding to the transformed space (because of unboundedness).
+        Not as efficient as get_initial_conditions, but useful for testing.
         
         Args: idx (tuple): The grid cell index (e.g., (i, j)).
 
@@ -253,7 +269,9 @@ if __name__ == "__main__":
 
     x = infgrid.get_initial_conditions(2)
     
+    
+    print(infgrid.inverse_transform(x))
     for r in x:
-        print(r)
+        print(infgrid.get_cell_index(r, in_transformed_space=False))
     
     
