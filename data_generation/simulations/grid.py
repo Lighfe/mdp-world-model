@@ -65,9 +65,10 @@ class Grid:
     
     def transform(self, coords):
         """
-        Transforms a given coordinate using the transformation functions.
+        Transforms a given coordinate or a set of such using the transformation functions.
 
-        Args: coord (tuple): Real-world coordinate (e.g., (x, y)).
+        Args: coords (tuple or array): Real-world coordinate (e.g., (x, y)).
+                                        If an array is given, the transformation is applied to each row (interpreted as a coordinate)
         """
         
         if not self.transformed_bool:
@@ -85,9 +86,10 @@ class Grid:
 
     def inverse_transform(self, coords):
         """
-        Transforms a given coordinate from the transformed space using the inverse transformation functions.
+        Transforms a given coordinate or a set of such from the transformed space using the inverse transformation functions.
 
-        Args: coord (tuple): Transformed space coordinate (e.g., (x, y)).
+        Args: coords (tuple or array): Transformed coordinate (e.g., (x, y)).
+                                        If an array is given, the transformation is applied to each row (interpreted as a coordinate)
         """
         if not self.transformed_bool:
             return coords        #OR raise ValueError("No transformation functions defined.")
