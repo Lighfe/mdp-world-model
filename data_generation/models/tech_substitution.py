@@ -89,7 +89,21 @@ class NumericalSolver:
         solution = result.x.reshape(n_samples, 3)
         return solution[:, :2]
     
-     
+
+    def get_derivative(self, X, control):
+        """
+        Return derivative for a sample of points X
+        
+        Args:   
+        X:         array of shape (n_samples, n_dim) containing observations [x1, x2]
+        control:   array of shape (1, n_samples)
+        """
+
+        derivative = self.solve_equilibrium(X, control)
+
+        return derivative
+
+
     def step(self, X, control, delta_t, num_steps=1):
         """
         Integrate system forward using rk4
