@@ -16,7 +16,7 @@ class Grid:
     Then, the grid lines are transformed back to the original space.
     """
     
-    def __init__(self, bounds, resolution, transformation=None, inverse_transformation=None):
+    def __init__(self, bounds, resolution, transformation=None, inverse_transformation=None, transformation_derivative=None):
         """
         Initializes the grid based on space intervals and resolution.
 
@@ -33,6 +33,7 @@ class Grid:
 
         self.transformation = transformation
         self.inverse_transformation = inverse_transformation
+        self.transformation_derivative = transformation_derivative
         self.transformed_bool = False
         self.tf_bounds = copy.deepcopy(bounds) #will be changed in case of transformation
 
