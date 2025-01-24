@@ -4,6 +4,8 @@ from ..models import tech_substitution as ts
 from . import grid as g
 from datetime import datetime
 
+#to run this file as a package: python -m data_generation.simulations.simulator while being in the mdp-world-model folder
+
 class Simulator:
     """
     Class for simulating trajectories on a grid.
@@ -36,12 +38,11 @@ class Simulator:
         Returns: df (DataFrame): A DataFrame containing the simulation results.
         """
 
-        X = self.grid.get_initial_conditions(num_samples_per_cell)
+        X, trajectory_ids = self.grid.get_initial_conditions(num_samples_per_cell)
         n_samples = X.shape[0]
         
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # TODO trajectory id should give information about the cell and sample number
-        trajectory_ids = np.arange(n_samples)
+        
         # NOTE: We should probably add hyper-parameter information somewhere and somehow, 
         # e.g., the transformation that was used to create the grid sample
 
@@ -185,3 +186,6 @@ def test_simulator():
         # (Add specific bounds based on your model)
         
     print("All tests passed!")
+
+if __name__ == "__main__":
+    test_simulator()
