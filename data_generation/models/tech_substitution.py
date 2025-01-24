@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.optimize import least_squares
+from joblib import Parallel, delayed
+from scipy.integrate import solve_ivp
 
 class TechnologySubstitution:
     def __init__(self, D0=1.0, delta=1.0, sigma=0.2, alpha=0.5, gamma1=1.0):
@@ -33,8 +35,7 @@ class NumericalSolver:
         n_samples = X.shape[0]
         
         # Reshape vars into y1, y2, p arrays
-        vars = vars.reshape(n_samples, 3)
-        y1, y2, p = vars[:, 0], vars[:, 1], vars[:, 2]
+        y1, y2, p = vars.reshape(n_samples, 3).T
         
         # Extract states
         x1, x2 = X[:, 0], X[:, 1]
@@ -42,13 +43,31 @@ class NumericalSolver:
         x2 = np.maximum(x2, 1e-10)
         
         # Compute equations for all samples
-        eq1 = self.model.gamma1 * y1**self.model.sigma / x1**self.model.alpha - p
-        eq2 = control * y2**self.model.sigma / x2**self.model.alpha - p
-        eq3 = y1 + y2 - (self.model.D0 - self.model.delta * p)
+        eq = np.empty(n_samples * 3)
+        eq[0::3] = self.model.gamma1 * y1**self.model.sigma / x1**self.model.alpha - p
+        eq[1::3] = control * y2**self.model.sigma / x2**self.model.alpha - p
+        eq[2::3] = y1 + y2 - (self.model.D0 - self.model.delta * p)
         
-        # Stack equations back into 1D array
-        return np.column_stack([eq1, eq2, eq3]).flatten()
+        return eq
     
+    def solve_single(self, i, x, c, initial_guess):
+        
+
+        result = least_squares(
+            lambda vars: self.equilibrium_equations(vars, x, c),
+            initial_guess,
+            bounds=([0,0,0], [np.inf,np.inf,np.inf]),
+            method='trf',
+            ftol=1e-6,
+            xtol=1e-6
+        )
+        
+        if not result.success:
+            raise ValueError(f"Failed to find market equilibrium: {result.message}")
+        
+        return result.x[:2]
+    
+
     def solve_equilibrium(self, X, control):
         """
         Numerical solve for production rates given observation and control
@@ -64,33 +83,28 @@ class NumericalSolver:
         assert control.shape == (n_samples,), \
             f"Control shape {control.shape} doesn't match n_samples={n_samples}"
         
+        results = np.zeros((n_samples, 2))   
+
         # Initial guess for each sample
         p_guess = self.model.D0 / (2 * self.model.delta)
         y_guess = self.model.D0 / 4
-        initial_guess = np.tile([y_guess, y_guess, p_guess], n_samples)
+        initial_guess = np.array([y_guess, y_guess, p_guess])
         
-        # Bounds
-        lb = np.tile([0.0, 0.0, 0.0], n_samples)
-        ub = np.tile([np.inf, np.inf, np.inf], n_samples)
-        
-        result = least_squares(
-            self.equilibrium_equations,
-            initial_guess,
-            args=(X, control),
-            bounds=(lb, ub),
-            method='trf',
-            ftol=1e-6,
-            xtol=1e-6
+        # Use parallel processing
+        #with Pool() as pool:
+        #    results = pool.map(self.solve_single, range(n_samples))
+
+        # CPU paralllization using joblib
+        results = Parallel(n_jobs=-1)(
+            delayed(self.solve_single)(i, X[i:i+1], control[i], initial_guess)
+            for i in range(n_samples)
         )
-        
-        if not result.success:
-            raise ValueError(f"Failed to find market equilibrium: {result.message}")
-        
-        solution = result.x.reshape(n_samples, 3)
-        return solution[:, :2]
+
+        return np.array(results)
     
 
     def get_derivative(self, X, control):
+        # NOTE: in this case this is exactly the same as solve_equilibrium, but not necessarily in other models
         """
         Return derivative for a sample of points X
         
@@ -127,22 +141,54 @@ class NumericalSolver:
         # initialize starting observation
         trajectory[0] = X
 
+        # first try for scipy.integrate.solve_ivp, was not faster than simple RK implmentation
+        if False: 
+            def system_derivative(t, y, ctrl):
+                """System derivative for integration"""
+                y_reshaped = y.reshape(-1, 2)  # Reshape to (n_samples, 2)
+                
+                # Get control for current time
+                step_idx = int(t / delta_t)
+                current_control = control[min(step_idx, num_steps-1)]
+                
+                # Calculate derivative using solve_equilibrium
+                dy = self.solve_equilibrium(y_reshaped, current_control)
+                return dy.flatten()  # Flatten for solver
+            
+            # Time points to evaluate at
+            t_eval = np.linspace(0, delta_t * num_steps, num_steps + 1)
+            
+            # Solve IVP
+            solution = solve_ivp(
+                system_derivative,
+                t_span=(0, delta_t * num_steps),
+                y0=X.flatten(), 
+                t_eval=t_eval, 
+                args=(control,), 
+                method='RK45',  # Can also try 'DOP853' or other methods
+                rtol=1e-6,
+                atol=1e-6
+            )
+            
+            # Reshape solution to match expected output format
+            trajectory = solution.y.T.reshape(num_steps + 1, -1, 2)
+
+
+
         # https://de.wikipedia.org/wiki/Klassisches_Runge-Kutta-Verfahren
-        # using simple version first because it's probably most performant
-        # NOTE: Might want to try more sophisticated scipy.integrate.solve_ivp
-        # related possible TODO: check if the calculations are accurate enough
-        
-        for step in range(num_steps):
-            x = trajectory[step]
-            c = control[step] # shape (n, samples)
-            
-            # RK4 stages
-            k1 = self.solve_equilibrium(x, c)
-            k2 = self.solve_equilibrium(x + 0.5 * delta_t * k1, c)
-            k3 = self.solve_equilibrium(x + 0.5 * delta_t * k2, c)
-            k4 = self.solve_equilibrium(x + delta_t * k3, c)
-            
-            # Update
-            trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+        # Didn't manage yet to make scipy implementation faster than this:
+        if True:
+            for step in range(num_steps):
+                x = trajectory[step]
+                c = control[step] # shape (n, samples)
+                
+                # RK4 stages
+                k1 = self.solve_equilibrium(x, c)
+                k2 = self.solve_equilibrium(x + 0.5 * delta_t * k1, c)
+                k3 = self.solve_equilibrium(x + 0.5 * delta_t * k2, c)
+                k4 = self.solve_equilibrium(x + delta_t * k3, c)
+                
+                # Update
+                trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
         return trajectory
