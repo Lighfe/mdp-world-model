@@ -2,14 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys
 
-sys.path.append("../simulations")
-
-# TODO make this import better!!!
-
-from grid import Grid
-
-
-
 
 def plot_2D_vector_field(vectorfield, bounds, resolution= 50, streamplot=True):
     """

@@ -3,7 +3,7 @@ import random
 import copy
 from itertools import product
 import matplotlib.pyplot as plt
-
+import sys
 
 
 
@@ -188,7 +188,13 @@ class Grid:
 
         X_original = self.inverse_transform(X)
 
-        return X_original
+        #Create indices
+        X_ids = []
+        for idx in self.indices:
+            for j in range(num_points_per_cell):
+                X_ids.append("-".join(map(str, idx))+ f"_{j}")
+
+        return (X_original, np.array(X_ids))
         
 
     def choose_random_point_from_cell(self, idx):
@@ -251,7 +257,7 @@ if __name__ == "__main__":
 
 # Example for the usage of the Grid class
     myinfbounds = [(0, np.inf), (0, np.inf), (0, np.inf)]
-    myresolution = [2, 2, 2]
+    myresolution = [100, 100, 100]
     myeasybounds = [(0,4), (0, 4), (0, 4), (0, 4)]
     myeasyresolution = [2, 2, 2, 2]
 
@@ -270,11 +276,14 @@ if __name__ == "__main__":
     infgrid = Grid(myinfbounds, myresolution, mytransformation, myinverse_transformation)
     easygrid = Grid(myeasybounds, myeasyresolution)
 
-    x = infgrid.get_initial_conditions(2)
-    
-    
-    print(infgrid.inverse_transform(x))
-    for r in x:
-        print(infgrid.get_cell_index(r, in_transformed_space=False))
-    
-    
+    mygrid = infgrid
+    x, x_ids = mygrid.get_initial_conditions(3)
+    rows = [mygrid.get_cell_index(row) for row in x]
+
+    #print(rows)
+    #print(ind_rep)
+    #print(x_ids)
+
+    #print(sys.getsizeof(x))
+    #print(sys.getsizeof(x_ids))
+
