@@ -1,3 +1,7 @@
+import json
+import time
+import platform
+import psutil
 import numpy as np
 import pandas as pd
 from ..models import tech_substitution as ts
@@ -19,7 +23,7 @@ class Simulator:
         self.x_dim = model.x_dim
         self.control_dim = model.control_dim
         self.results = self._init_df()
-        # do we need more?
+        self.configs = pd.DataFrame(columns=['run_id', 'metadata'])
 
     def _init_df(self):
         columns = ['run_id', 'trajectory_id', 't0', 't1']
@@ -27,6 +31,10 @@ class Simulator:
         columns.extend([f'c{i}' for i in range(self.control_dim)])
         columns.extend([f'y{i}' for i in range(self.x_dim)])
         return pd.DataFrame(columns=columns)
+    
+
+    
+
                 
 
     def simulate(self, control, delta_t, num_samples_per_cell=10, num_steps=1, save_result=False):   
@@ -37,6 +45,8 @@ class Simulator:
 
         Returns: df (DataFrame): A DataFrame containing the simulation results.
         """
+        # Start timing
+        start_time = time.time()
 
         X, trajectory_ids = self.grid.get_initial_conditions(num_samples_per_cell)
         n_samples = X.shape[0]
@@ -86,7 +96,39 @@ class Simulator:
         # Possibly store the resulting df in the self.result_df attribute (by adding it to the existing df)
         if save_result == True:
             self.results = pd.concat([self.results, df], ignore_index=True)
-            print("Saved results.")
+
+                # Collect all metadata in a dictionary
+            metadata = {
+                'configurations': {
+                    'grid': self.grid.get_config(),
+                    'solver': self.solver.get_config()
+                },
+                'simulation_params': {
+                    'n_samples': n_samples,
+                    'num_steps': num_steps
+                },
+                'performance': {
+                    'execution_time': time.time() - start_time,
+                    'peak_memory_mb': psutil.Process().memory_info().rss / (1024 * 1024)
+                },
+                'system': {
+                    'os': platform.system(),
+                    'cpu_count': psutil.cpu_count(logical=False)
+                    # 'gpu': get_gpu_info(),
+                    # 'ram': psutil.virtual_memory().total / (1024**3)
+                }
+            }    
+
+            # Create config entry with single JSON field
+            config_entry = pd.DataFrame({
+                'run_id': [run_id],
+                'metadata': [json.dumps(metadata)]
+            })
+            
+            # Add to configs dataframe
+            self.configs = pd.concat([self.configs, config_entry], ignore_index=True)
+
+            print("Saved results and config.")
 
         # NOTE: We could also make this function not return the df object, 
         # since it is already saving it anyway. Could instead give a status update
@@ -139,53 +181,3 @@ class Simulator:
 
         raise NotImplementedError("Storing results in sqlite database is not yet implemented.")
     
-def test_simulator():
-    """Test the Simulator class functionality"""
-    # Setup (you'll handle the imports)
-    grid = g.Grid(bounds=[(0.0, 100.0),(0.0, 100.0)], resolution=[2,2])  # to be provided
-    model = ts.TechnologySubstitution()  # to be provided 
-    solver = ts.NumericalSolver(model)  # to be provided
-    
-    # Initialize simulator
-    sim = Simulator(grid, model, solver)
-    
-    # Test case 1: Single scalar control
-    control = 0.5
-    delta_t = 0.1
-    num_steps = 3
-    df1 = sim.simulate(control, delta_t, num_steps=num_steps)
-    
-    # Test case 2: Time-varying control
-    control = np.array([0.5, 0.6, 0.7])  # one value per timestep
-    df2 = sim.simulate(control, delta_t, num_steps=num_steps)
-    
-    # Test case 3: Sample-specific control
-    num_samples = 40  # should match grid.get_initial_conditions() output
-    control = [0.5, 1.0, 0.8]  # one value per step
-    df3 = sim.simulate(control, delta_t, num_steps=num_steps, save_result=True)
-    print(sim.results)
-    
-    # Verify results
-    for df in [df1, df2, df3]:
-        # Check DataFrame structure
-        expected_cols = ['run_id', 'trajectory_id', 't0', 't1']
-        expected_cols.extend([f'x{i}' for i in range(model.x_dim)])
-        expected_cols.extend([f'c{i}' for i in range(model.control_dim)])
-        expected_cols.extend([f'y{i}' for i in range(model.x_dim)])
-        assert all(col in df.columns for col in expected_cols)
-        
-        # Check dimensions
-        assert len(df) == num_samples * num_steps
-        
-        # Check time steps
-        assert df['t0'].min() == 0.0
-        assert df['t1'].max() == delta_t * num_steps
-        assert len(df['trajectory_id'].unique()) == num_samples
-        
-        # Check values are within reasonable bounds
-        # (Add specific bounds based on your model)
-        
-    print("All tests passed!")
-
-if __name__ == "__main__":
-    test_simulator()

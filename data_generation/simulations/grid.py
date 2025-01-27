@@ -242,38 +242,4 @@ class Grid:
         return rnd_point
 
 
-if __name__ == "__main__":
-
-# Example for the usage of the Grid class
-    myinfbounds = [(0, np.inf), (0, np.inf), (0, np.inf)]
-    myresolution = [100, 100, 100]
-    myeasybounds = [(0,4), (0, 4), (0, 4), (0, 4)]
-    myeasyresolution = [2, 2, 2, 2]
-
-    def mytransformation(x):
-        if np.isinf(x):
-            return 1
-        else:
-            return x / (x+10)
-
-    def myinverse_transformation(y):
-        if y == 1:
-            return np.inf
-        else:
-            return -10*y / (y-1)
-
-    # NOTE: this will not work anymore
-    infgrid = Grid(myinfbounds, myresolution, mytransformation, myinverse_transformation)
-    easygrid = Grid(myeasybounds, myeasyresolution)
-
-    mygrid = infgrid
-    x, x_ids = mygrid.get_initial_conditions(3)
-    rows = [mygrid.get_cell_index(row) for row in x]
-
-    #print(rows)
-    #print(ind_rep)
-    #print(x_ids)
-
-    #print(sys.getsizeof(x))
-    #print(sys.getsizeof(x_ids))
 
