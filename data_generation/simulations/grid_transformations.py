@@ -21,6 +21,8 @@ def fractional_transformation(param):
             return 1
         else:
             return x / (x+param)
+        
+    frac_transformation.parameters = {'param': param}
 
     def inverse_frac_transformation(z):
         if z == 1:
@@ -35,4 +37,4 @@ def fractional_transformation(param):
             return param / (x+param)**2
         
     
-    return(frac_transformation, inverse_frac_transformation, frac_transformation_derivative)
+    return (frac_transformation, inverse_frac_transformation, frac_transformation_derivative)

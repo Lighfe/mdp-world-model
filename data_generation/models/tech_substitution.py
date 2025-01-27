@@ -8,19 +8,48 @@ class TechnologySubstitution:
         # dimensions
         self.x_dim = 2 # x1, x2
         self.control_dim = 1 # gamma2
-        # Params
+        # fixed params
         self.D0 = D0
         self.delta = delta
         self.sigma = sigma 
         self.alpha = alpha
         self.gamma1 = gamma1
-    
+
+    def get_config(self):
+        config = {
+            'model': self.__class__.__name__,
+            'x_dim': self.x_dim,
+            'control_dim': self.control_dim,
+            'D0': self.D0,
+            'delta': self.delta,
+            'sigma': self.sigma,
+            'alpha': self.alpha,
+            'gamma1': self.gamma1
+        }
+
+        return config
       
     
 class NumericalSolver:
     """"Root solver from scipy"""
     def __init__(self, model):
         self.model = model
+        # Params
+        self.ls_method = 'trf'
+        self.ftol = 1e-6
+        self.xtol = 1e-6
+        self.ivp_method = 'RK4' # not using scipy currently
+
+    def get_config(self):
+        config = {
+            'solver': self.__class__.__name__,
+            'model': self.model.get_config(),
+            'ls_method': 'trf',
+            'ftol': self.ftol,
+            'xtol': self.xtol,
+            'ivp_method': self.ivp_method
+        }
+        return config
 
     def equilibrium_equations(self, vars, X, control):
         """
@@ -57,9 +86,9 @@ class NumericalSolver:
             lambda vars: self.equilibrium_equations(vars, x, c),
             initial_guess,
             bounds=([0,0,0], [np.inf,np.inf,np.inf]),
-            method='trf',
-            ftol=1e-6,
-            xtol=1e-6
+            method=self.ls_method,
+            ftol=self.ftol,
+            xtol=self.xtol
         )
         
         if not result.success:
@@ -135,7 +164,6 @@ class NumericalSolver:
         # NOTE: The Simulator needs to take care that all inputs come in the correct format
         # possible TODO: step function can assume correct input, but maybe should add some asserts anyway
 
-
         # Create empty trajectory
         trajectory = np.zeros((num_steps + 1,) + X.shape)
         # initialize starting observation
@@ -165,7 +193,7 @@ class NumericalSolver:
                 y0=X.flatten(), 
                 t_eval=t_eval, 
                 args=(control,), 
-                method='RK45',  # Can also try 'DOP853' or other methods
+                method='RK45',
                 rtol=1e-6,
                 atol=1e-6
             )
@@ -173,22 +201,19 @@ class NumericalSolver:
             # Reshape solution to match expected output format
             trajectory = solution.y.T.reshape(num_steps + 1, -1, 2)
 
-
-
         # https://de.wikipedia.org/wiki/Klassisches_Runge-Kutta-Verfahren
         # Didn't manage yet to make scipy implementation faster than this:
-        if True:
-            for step in range(num_steps):
-                x = trajectory[step]
-                c = control[step] # shape (n, samples)
-                
-                # RK4 stages
-                k1 = self.solve_equilibrium(x, c)
-                k2 = self.solve_equilibrium(x + 0.5 * delta_t * k1, c)
-                k3 = self.solve_equilibrium(x + 0.5 * delta_t * k2, c)
-                k4 = self.solve_equilibrium(x + delta_t * k3, c)
-                
-                # Update
-                trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+        for step in range(num_steps):
+            x = trajectory[step]
+            c = control[step] # shape (n, samples)
+            
+            # RK4 stages
+            k1 = self.solve_equilibrium(x, c)
+            k2 = self.solve_equilibrium(x + 0.5 * delta_t * k1, c)
+            k3 = self.solve_equilibrium(x + 0.5 * delta_t * k2, c)
+            k4 = self.solve_equilibrium(x + delta_t * k3, c)
+            
+            # Update
+            trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
         return trajectory

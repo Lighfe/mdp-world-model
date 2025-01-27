@@ -2,9 +2,7 @@ import numpy as np
 import random
 import copy
 from itertools import product
-import matplotlib.pyplot as plt
 import sys
-
 
 
 class Grid:
@@ -16,52 +14,80 @@ class Grid:
     Then, the grid lines are transformed back to the original space.
     """
     
-    def __init__(self, bounds, resolution, transformation=None, inverse_transformation=None, transformation_derivative=None):
+    def __init__(self, bounds, resolution, grid_transformations=None):
         """
         Initializes the grid based on space intervals and resolution.
 
         Args:
             bounds (list of tuples): [(x_min, x_max), (y_min, y_max), ...] with np.inf for unboundedness.
             resolution (list of ints): Number of cells (divisions) in each dimension.
-            transformation (function or list of functions): Transformation functions for the grid coordinates.
-                                                            These functions should be able to handle np.inf.
+            grid_transformations (list of 3tuples functions): (transformation function, 
+                                                    inverse transformation function,
+                                                    transformation function derivative)
         """
         self.bounds = copy.deepcopy(bounds)
         self.dimension = len(bounds)
         self.resolution = resolution
         self.indices = list((product(*[range(res) for res in self.resolution])))
 
-        self.transformation = transformation
-        self.inverse_transformation = inverse_transformation
-        self.transformation_derivative = transformation_derivative
+        # initialize empty
+        # NOTE: Which of these are needed to be initialized empty in python?
+        self.transformations = None
+        self.inverse_transformations = None
+        self.transformation_derivatives = None
         self.transformed_bool = False
-        self.tf_bounds = copy.deepcopy(bounds) #will be changed in case of transformation
-
-        #Transformation
-        if self.transformation is not None:
-            
-            if isinstance(self.transformation, list):
-                if len(self.transformation) != self.dimension:
-                    raise ValueError("The number of transformation functions must match the grid dimension.")
-            elif callable(self.transformation):
-                self.transformation = [self.transformation] * self.dimension
-                if callable(self.inverse_transformation):
-                    self.inverse_transformation = [self.inverse_transformation] * self.dimension
-            else:
-                raise ValueError("Transformation must be a function or a list of functions.")
-            
-            
-            for i, bound in enumerate(self.bounds):
-                self.tf_bounds[i] = (self.transformation[i](bound[0]), self.transformation[i](bound[1]))
-
-            self.tf_grid_lines = [np.linspace(start, end, num+1) for (start, end), num in zip(self.tf_bounds, self.resolution)]
-            self.grid_lines = [np.vectorize(self.inverse_transformation[dim])(self.tf_grid_lines[dim]) for dim in range(self.dimension)]
-
-            self.transformed_bool = True
-
+        self.transformation_params = dict()
+        self.tf_bounds = copy.deepcopy(bounds)
+        self.grid_lines = None
+        self.tf_grid_lines = None
+        
+        if grid_transformations is not None:
+            self._init_transformations(grid_transformations)
         else:
             self.grid_lines = [np.linspace(start, end, num+1) for (start, end), num in zip(self.bounds, self.resolution)]
             self.tf_grid_lines = copy.deepcopy(self.grid_lines)
+
+
+    def _init_transformations(self, grid_transformations):
+        # check for correct format
+        if isinstance(grid_transformations, list):
+            if len(grid_transformations) != self.dimension:
+                raise ValueError("Number of transformation tuples must match grid dimension.")
+        # same functions used in every dimension
+        # TODO: Is this needed? Does this work this way?
+        elif callable(grid_transformations):
+            grid_transformations = [grid_transformations] * self.dimension
+
+
+        # Unzip functions
+        transformations, inverse_transformations, transformation_derivatives = zip(*grid_transformations)
+        self.transformations = transformations
+        self.inverse_transformations = inverse_transformations
+        self.transformation_derivatives = transformation_derivatives
+
+        # save parameters
+        self.transformation_params = [tf[0].parameters for tf in grid_transformations]
+        
+        # calculate transformed bounds
+        for i, bound in enumerate(self.bounds):
+            self.tf_bounds[i] = (self.transformations[i](bound[0]), self.transformations[i](bound[1]))
+
+        # creates gridlines in Z-space based on bounds and resolution
+        self.tf_grid_lines = [np.linspace(start, end, num+1) for (start, end), num in zip(self.tf_bounds, self.resolution)]
+        # gridlines in X-space
+        self.grid_lines = [np.vectorize(self.inverse_transformations[dim])(self.tf_grid_lines[dim]) for dim in range(self.dimension)]
+
+        self.transformed_bool = True
+
+    def get_config(self):
+        config = {
+            'bounds': self.bounds,
+            'dimension': self.dimension,
+            'resolution': self.resolution,
+            'transformations': [tf.__name__ for tf in self.transformations],
+            'transformation_params': self.transformation_params # list of dicts
+        }
+        return config
 
     
     def transform(self, coords):
@@ -214,43 +240,6 @@ class Grid:
             rnd_point = tuple(random.uniform(self.grid_lines[dim][i], self.grid_lines[dim][i+1]) for dim, i in enumerate(idx))
         
         return rnd_point
-    
-    
-    def plot_2_dimensions_of_grid_with_vectorfield(self, dim1 = 0, dim2 = 1, vectorfield=None, streamplot=False):
-        """
-        Plots the grid in 2 dimensions.
-
-        Args:
-            dim1 (int): Dimension to plot on the x-axis.
-            dim2 (int): Dimension to plot on the y-axis.
-            vectorfield (function): Vectorfield to plot on the grid.
-        
-        Problem: How to plot the vectorfield in the transformed space?
-        """
-        """
-        X = self.grid_lines[dim1]
-        Y = self.grid_lines[dim2]
-        X, Y = np.meshgrid(X, Y)
-
-        if vectorfield is None:
-            U, V = np.zeros_like(X), np.zeros_like(Y)
-        else:
-            U, V = vectorfield(X, Y)
-
-        plt.figure(figsize=(8, 8))
-        plt.quiver(X, Y, U, V, color='b', alpha=0.3)
-        plt.grid(True)
-
-        if streamplot:
-            plt.streamplot(X, Y, U, V, color='b', linewidth=0.7)
-
-        plt.show()
-       
-        """
-
-        #TODO: Implement this method
-
-        raise NotImplementedError("This method is not implemented yet.")
 
 
 if __name__ == "__main__":
@@ -273,6 +262,7 @@ if __name__ == "__main__":
         else:
             return -10*y / (y-1)
 
+    # NOTE: this will not work anymore
     infgrid = Grid(myinfbounds, myresolution, mytransformation, myinverse_transformation)
     easygrid = Grid(myeasybounds, myeasyresolution)
 
