@@ -16,6 +16,7 @@ class TechnologySubstitution:
         self.gamma1 = gamma1
 
     def get_config(self):
+        # TODO add git commit number
         config = {
             'model': self.__class__.__name__,
             'x_dim': self.x_dim,
@@ -66,10 +67,13 @@ class NumericalSolver:
         # Reshape vars into y1, y2, p arrays
         y1, y2, p = vars.reshape(n_samples, 3).T
         
-        # Extract states
+        # Extract observations
         x1, x2 = X[:, 0], X[:, 1]
         x1 = np.maximum(x1, 1e-10)
         x2 = np.maximum(x2, 1e-10)
+
+        # extract gamma2
+        gamma2 = control[:, 0]
         
         # Compute equations for all samples
         eq = np.empty(n_samples * 3)
@@ -80,7 +84,15 @@ class NumericalSolver:
         return eq
     
     def solve_single(self, i, x, c, initial_guess):
+        """
+        Solve equilibrium for a single sample
         
+        Args:
+            i: Sample index
+            x: Single sample state of shape (1, x_dim)
+            c: Single sample control of shape (control_dim,)
+            initial_guess: Initial guess for solver
+        """
 
         result = least_squares(
             lambda vars: self.equilibrium_equations(vars, x, c),
@@ -101,17 +113,17 @@ class NumericalSolver:
         """
         Numerical solve for production rates given observation and control
         
-        Parameters:
-        X: array of shape (n_samples, 2) containing observation [x1, x2]
-        control: control parameter gamma2
+        Args:
+            X: array of shape (n_samples, 2) containing observation [x1, x2]
+            control: array of shape (n_samples, control_dim)
         
         Returns:
-        Y: array of shape (n_samples, 2) containing production rates [y1, y2]
+            Y: array of shape (n_samples, 2) containing production rates [y1, y2]
         """
         n_samples = X.shape[0]
-        assert control.shape == (n_samples,), \
-            f"Control shape {control.shape} doesn't match n_samples={n_samples}"
-        
+        assert control.shape == (n_samples, self.model.control_dim), \
+            f"Control shape {control.shape} doesn't match (n_samples={n_samples}, control_dim={self.model.control_dim})"
+    
         results = np.zeros((n_samples, 2))   
 
         # Initial guess for each sample
@@ -153,7 +165,7 @@ class NumericalSolver:
 
         Parameters:
         X: array of shape (n_samples, n_dim) containing observations [x1, x2]
-        control: array of shape (num_steps, n_samples) 
+        control: array of shape (num_steps, n_samples, 1) 
         delta_t: duration of timestep
         num_steps: number of timesteps to integrate
 
@@ -205,7 +217,7 @@ class NumericalSolver:
         # Didn't manage yet to make scipy implementation faster than this:
         for step in range(num_steps):
             x = trajectory[step]
-            c = control[step] # shape (n, samples)
+            c = control[step] # shape (n_samples, control_dim)
             
             # RK4 stages
             k1 = self.solve_equilibrium(x, c)

@@ -31,19 +31,19 @@ class Simulator:
         columns.extend([f'c{i}' for i in range(self.control_dim)])
         columns.extend([f'y{i}' for i in range(self.x_dim)])
         return pd.DataFrame(columns=columns)
-    
-
-    
-
-                
 
     def simulate(self, control, delta_t, num_samples_per_cell=10, num_steps=1, save_result=False):   
         """
         Simulates the differential equation for a given initial condition and time period.
         
         Args:
+            control: control input in supported format
+            delta_t: time step size
+            num_samples_per_cell: Number of samples per grid cell
+            num_steps: Number of simulation steps
+            save_result: Whether to save results to internal storage
 
-        Returns: df (DataFrame): A DataFrame containing the simulation results.
+        Returns: df (DataFrame): simulation results
         """
         # Start timing
         start_time = time.time()
@@ -52,13 +52,11 @@ class Simulator:
         n_samples = X.shape[0]
         
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # NOTE: We should probably add hyper-parameter information somewhere and somehow, 
-        # e.g., the transformation that was used to create the grid sample
+
 
         # Convert control to full array format
         control = np.array(control)
-        control = self.create_control_array(control, num_steps, n_samples)
+        control = self.create_control_array(control, num_steps, n_samples, self.control_dim)
 
         # get full trajectory
         trajectory = self.solver.step(X, control, delta_t, num_steps)
@@ -82,9 +80,8 @@ class Simulator:
         # Add control dimensions
         for i in range(self.control_dim):
             # data[f'c{i}'] = np.repeat(control[:, i], num_steps)
-            data[f'c{i}'] = control.flatten(order='F')
+            data[f'c{i}'] = control[:,:,i].flatten(order='F')
         
-        # print(data) # debugging
 
         df = pd.DataFrame(data)
 
@@ -98,6 +95,7 @@ class Simulator:
             self.results = pd.concat([self.results, df], ignore_index=True)
 
                 # Collect all metadata in a dictionary
+                # TODO: add name of the classes
             metadata = {
                 'configurations': {
                     'grid': self.grid.get_config(),
@@ -136,32 +134,38 @@ class Simulator:
 
         return df
     
-    def create_control_array(self, control, num_steps, n_samples):
+    def create_control_array(self, control, num_steps, n_samples, control_dim):
         '''
-        Takes as input a np.array of different shapes
-        Returns array of shape (num_steps, n_samples)
-        '''
-        if control.ndim == 0:  # scalar
-            control = np.full((num_steps, n_samples), control)
-        elif control.ndim == 1:  # vector [0.5] or [0.5, 0.6, 0.7]
-            if len(control) == 1:
-                # Single value for all timesteps/samples
-                control = np.full((num_steps, n_samples), control[0])
-            elif len(control) == n_samples:
-                # Different value for each sample, same across timesteps
-                control = np.tile(control[np.newaxis, :], (num_steps, 1))
-            elif len(control) == num_steps:
-                # Different value for each timestep, same across samples
-                control = np.tile(control[:, np.newaxis], (1, n_samples))
-            else:
-                raise ValueError(f"Control length {len(control)} doesn't match either num_steps={num_steps} or n_samples={n_samples}")
-        elif control.ndim == 2 and control.shape == (1, 1): # edge case
-            control = np.full((num_steps, n_samples), control[0,0])
+        Args:
+            control (np.ndarray): Input control array of scalar, list or (num_steps, n_samples, control_dim)
+            num_steps (int): Number of simulation timesteps
+            n_samples (int): Number of samples being simulated
+            control_dim (int): Dimensionality of the control space
             
-        assert control.shape == (num_steps, n_samples), \
-            f"Control shape {control.shape} doesn't match (num_steps={num_steps}, n_samples={n_samples})"
+        Returns:
+            np.ndarray: Control array of shape (num_steps, n_samples, control_dim)
+        '''
+        # scalar input
+        if control.ndim == 0:
+            if control_dim != 1:
+                raise ValueError(f"Scalar control input requires control_dim=1, got {control_dim}")
+            # Create full array with scalar value
+            return np.full((num_steps, n_samples, control_dim), control)
+        # Case list input (as np.array)
+        elif control.ndim == 1:
+            if len(control) != control_dim:
+                raise ValueError(f"1D control input length must match control_dim={control_dim}")
+            # Repeat control values across all timesteps and samples
+            return np.tile(control.reshape(1, 1, control_dim), (num_steps, n_samples, 1))
+        # check input
+        else:
+            required_shape = (num_steps, n_samples, control_dim)
+            if control.shape != required_shape:
+                raise ValueError(
+                    f"Control array must have shape {required_shape}, got {control.shape}"
+                )
+            return control
         
-        return control
 
     
     def store_results_to_sqlite(self, filename='simulation_results.db'):
