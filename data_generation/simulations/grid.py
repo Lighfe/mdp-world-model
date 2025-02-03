@@ -102,11 +102,11 @@ class Grid:
             return coords       #OR raise ValueError("No transformation functions defined.")
         coords = np.array(coords)
         if coords.ndim == 1:
-            transformed_coords = np.array([self.transformation[dim](coords[dim]) for dim in range(self.dimension)])
+            transformed_coords = np.array([self.transformations[dim](coords[dim]) for dim in range(self.dimension)])
         else:
             transformed_coords = np.empty_like(coords)
             for dim in range(self.dimension):
-                transformed_coords[:, dim] = np.vectorize(self.transformation[dim])(coords[:, dim])
+                transformed_coords[:, dim] = np.vectorize(self.transformations[dim])(coords[:, dim])
         return transformed_coords
         
         
@@ -123,11 +123,11 @@ class Grid:
         
         coords = np.array(coords)
         if coords.ndim == 1:
-            original_coords = np.array([self.inverse_transformation[dim](coords[dim]) for dim in range(self.dimension)])
+            original_coords = np.array([self.inverse_transformations[dim](coords[dim]) for dim in range(self.dimension)])
         else:
             original_coords = np.empty_like(coords)
             for dim in range(self.dimension):
-                original_coords[:, dim] = np.vectorize(self.inverse_transformation[dim])(coords[:, dim])
+                original_coords[:, dim] = np.vectorize(self.inverse_transformations[dim])(coords[:, dim])
         return original_coords
         
        

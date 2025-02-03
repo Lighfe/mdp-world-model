@@ -73,7 +73,7 @@ class NumericalSolver:
         x2 = np.maximum(x2, 1e-10)
 
         # extract gamma2
-        gamma2 = control[:, 0]
+        gamma2 = control[0]
         
         # Compute equations for all samples
         eq = np.empty(n_samples * 3)

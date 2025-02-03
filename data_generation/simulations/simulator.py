@@ -4,8 +4,8 @@ import platform
 import psutil
 import numpy as np
 import pandas as pd
-from ..models import tech_substitution as ts
-from . import grid as g
+from data_generation.models import tech_substitution as ts
+from data_generation.simulations import grid as g
 from datetime import datetime
 
 #to run this file as a package: python -m data_generation.simulations.simulator while being in the mdp-world-model folder
@@ -62,26 +62,28 @@ class Simulator:
         trajectory = self.solver.step(X, control, delta_t, num_steps)
 
         # Create timestamps
-        times = np.arange(0, (num_steps + 1) * delta_t, delta_t)
+        times = np.linspace(0, num_steps * delta_t, num_steps + 1) # arange had floating point errors
         
         # Initialize data dictionary
         data = {
             'run_id': np.full(n_samples * num_steps, run_id),
             'trajectory_id': np.repeat(trajectory_ids, num_steps),
-            't0': np.tile(times[:-1], n_samples),
-            't1': np.tile(times[1:], n_samples)
+            't0': np.tile(times[:-1], n_samples),  
+            't1': np.tile(times[1:], n_samples),  
         }
         
-        # Add state and observation dimensions
+        # Add start observation
         for i in range(self.x_dim):
             data[f'x{i}'] = trajectory[:-1, :, i].flatten(order='F')
-            data[f'y{i}'] = trajectory[1:, :, i].flatten(order='F')
         
         # Add control dimensions
         for i in range(self.control_dim):
             # data[f'c{i}'] = np.repeat(control[:, i], num_steps)
             data[f'c{i}'] = control[:,:,i].flatten(order='F')
-        
+
+        # add result observations
+        for i in range(self.x_dim):
+            data[f'y{i}'] = trajectory[1:, :, i].flatten(order='F')
 
         df = pd.DataFrame(data)
 
@@ -150,13 +152,14 @@ class Simulator:
             if control_dim != 1:
                 raise ValueError(f"Scalar control input requires control_dim=1, got {control_dim}")
             # Create full array with scalar value
-            return np.full((num_steps, n_samples, control_dim), control)
+            control = np.full((num_steps, n_samples, 1), control)
         # Case list input (as np.array)
         elif control.ndim == 1:
             if len(control) != control_dim:
                 raise ValueError(f"1D control input length must match control_dim={control_dim}")
             # Repeat control values across all timesteps and samples
-            return np.tile(control.reshape(1, 1, control_dim), (num_steps, n_samples, 1))
+            control = control.reshape(1, 1, control_dim)
+            control = np.broadcast_to(control, (num_steps, n_samples, control_dim)) 
         # check input
         else:
             required_shape = (num_steps, n_samples, control_dim)
@@ -164,7 +167,8 @@ class Simulator:
                 raise ValueError(
                     f"Control array must have shape {required_shape}, got {control.shape}"
                 )
-            return control
+        
+        return control
         
 
     
