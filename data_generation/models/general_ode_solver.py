@@ -139,19 +139,19 @@ class NumericalSolver:
      
         current_params_dict = self.create_controlparams_dict(X.shape[0])
         initcon = X.transpose().flatten()
-                
+
+        t_span_start = 0        
         for i in range(0, num_steps):
 
             current_params_dict = self.update_controlparams_dict(current_params_dict, control[i,:,:])
-            t_span = [i, i+delta_t]
+            t_span = [t_span_start, t_span_start+delta_t]
             
             sol_vect = solve_ivp(self.model.odes_vectorized, t_span, initcon, args=(current_params_dict,), t_eval = t_span)
             
-            #Update Initial Condition
-            initcon = sol_vect.y[:,-1]
-            
             trajectory[i+1] = sol_vect.y[:,-1].reshape(X.shape).transpose()
 
-
-
+            #Update Initial Condition
+            initcon = sol_vect.y[:,-1]
+            t_span_start += delta_t
+            
         return trajectory
