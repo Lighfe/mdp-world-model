@@ -8,7 +8,7 @@ class FitzHughNagumoModel:
         
         # dimensions
         self.x_dim = 2 # v, w
-        self.control_dim = len(control_params) # gamma2
+        self.control_dim = len(control_params) 
         self.control_params = control_params
         
         # Params
@@ -117,7 +117,7 @@ class NumericalSolver:
         return current_dict
 
 
-    def step(self, X, control, delta_t, num_steps=1):
+    def step(self, X, control, delta_t, num_steps=1, steady_control=False):
         """
         Integrate system forward using rk4
 
@@ -139,6 +139,8 @@ class NumericalSolver:
      
         current_params_dict = self.create_controlparams_dict(X.shape[0])
         initcon = X.transpose().flatten()
+
+        # TODO: steady_control special case (for performance)
                 
         for i in range(0, num_steps):
 

@@ -159,7 +159,7 @@ class NumericalSolver:
         return derivative
 
 
-    def step(self, X, control, delta_t, num_steps=1):
+    def step(self, X, control, delta_t, num_steps=1, steady_control=False):
         """
         Integrate system forward using rk4
 

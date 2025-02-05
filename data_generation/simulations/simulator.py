@@ -22,6 +22,7 @@ class Simulator:
         self.solver = solver
         self.x_dim = model.x_dim
         self.control_dim = model.control_dim
+        self.steady_control = False
         self.results = self._init_df()
         self.configs = pd.DataFrame(columns=['run_id', 'metadata'])
 
@@ -153,6 +154,7 @@ class Simulator:
                 raise ValueError(f"Scalar control input requires control_dim=1, got {control_dim}")
             # Create full array with scalar value
             control = np.full((num_steps, n_samples, 1), control)
+            self.steady_control = True
         # Case list input (as np.array)
         elif control.ndim == 1:
             if len(control) != control_dim:
@@ -160,6 +162,7 @@ class Simulator:
             # Repeat control values across all timesteps and samples
             control = control.reshape(1, 1, control_dim)
             control = np.broadcast_to(control, (num_steps, n_samples, control_dim)) 
+            self.steady_control = True
         # check input
         else:
             required_shape = (num_steps, n_samples, control_dim)
