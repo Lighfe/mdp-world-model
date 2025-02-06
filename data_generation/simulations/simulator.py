@@ -60,7 +60,7 @@ class Simulator:
         control = self.create_control_array(control, num_steps, n_samples, self.control_dim)
 
         # get full trajectory
-        trajectory = self.solver.step(X, control, delta_t, num_steps)
+        trajectory = self.solver.step(X, control, delta_t, num_steps, self.steady_control)
 
         # Create timestamps
         times = np.linspace(0, num_steps * delta_t, num_steps + 1) # arange had floating point errors
@@ -170,6 +170,12 @@ class Simulator:
                 raise ValueError(
                     f"Control array must have shape {required_shape}, got {control.shape}"
                 )
+            # Compare each timestep against the first timestep
+            # If all True, control is steady
+            self.steady_control = np.all(
+                np.all(control == control[0:1], axis=2),  # Compare all control dimensions
+                axis=0  # Compare all samples
+            ).all()
         
         return control
         
