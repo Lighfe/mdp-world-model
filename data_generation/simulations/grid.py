@@ -279,3 +279,46 @@ def fractional_transformation(param):
     
     return (frac_transformation, inverse_frac_transformation, frac_transformation_derivative)
 
+
+def logistic_transformation(param_dict= {'k': 1, 'x_0': 0} ):
+    """
+    Generates the logistics transformation z=1/(1+exp(-k*(x-x_0))), its inverse and its derivate for given parameters k and x_0.
+        k is the logistic growth rate, the steepness of the curve; and
+        x_0 is the x value of the function's midpoint.
+        For k = 1 and x_0 = 0 this returns the expit function.
+
+    Useful for space compression in the case [np.inf, np.inf]
+    See https://en.wikipedia.org/wiki/Logistic_function
+
+    Args:
+        param_dict (dict): containing the parameters 'k'(scalar) and 'x_0'(np.array) e.g. {'k': 1, 'x_0': 0}
+    Returns:
+        tuple: A tuple containing three functions:
+            - logistic_trafo (function): Transforms an input x using the formula above.
+            - inverse_logistic_trafo (function): Computes the inverse of the fractional transformation.
+            - logistic_trafo_derivative (function): Computes the derivative of the fractional transformation.
+    
+    """
+    k = param_dict.get('k')
+    x_0 = param_dict.get('x_0')
+
+    
+
+    def logistic_trafo(x):
+        return 1 / (1 + np.exp(-k*(x-x_0)))
+    
+    logistic_trafo.parameters = param_dict
+    
+    def inverse_logicistic_trafo(x):
+        if x == 1 or x == 0:
+            return np.inf
+        else:
+            return (x_0 * k - np.log((1/x - 1))) / k
+    
+    def logistic_trafo_derivative(x):
+        return k * np.exp(k*(x-x_0)) / (1 + np.exp(k*(x-x_0)))**2
+    
+
+    return (logistic_trafo, inverse_logicistic_trafo, logistic_trafo_derivative)
+
+
