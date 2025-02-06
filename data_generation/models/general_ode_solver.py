@@ -4,19 +4,27 @@ from scipy.integrate import solve_ivp
 
 
 class FitzHughNagumoModel:
+
     def __init__(self, a = 0.7, b = 1.6, epsilon = 0.08, I = 0.35, control_params=[]):
-        
+        """
+        Create the FitzHughNagumo Model corresponding to the given default values and later control parameters.
+        Later, it will be important to hand-over the control parameters always in the same order as specified here.
+
+        Args: a, b, epsilon, I (scalars): default parameters
+              control_params (list of strings): list of strings with expected entries in ["a", "b", "epsilon", "I" ]
+        """
         # dimensions
         self.x_dim = 2 # v, w
         self.control_dim = len(control_params) 
         self.control_params = control_params
         
         # Params
-        self.a = a if 'a' not in control_params else None
-        self.b = b if 'b' not in control_params else None
-        self.epsilon = epsilon if 'epsilon' not in control_params else None
-        self.I = I if 'I' not in control_params else None
-        self.params = {'a': self.a, 'b': self.b, 'epsilon':self.epsilon, 'I':self.I}
+        self.params = dict()
+        self.params['a'] = a if 'a' not in control_params else None
+        self.params['b'] = b if 'b' not in control_params else None
+        self.params['epsilon'] = epsilon if 'epsilon' not in control_params else None
+        self.params['I'] = I if 'I' not in control_params else None
+
 
     def get_config(self):
         config = {
@@ -24,55 +32,66 @@ class FitzHughNagumoModel:
             'x_dim': self.x_dim,
             'control_dim': self.control_dim,
             'control_params': self.control_params,
-            'a': self.a,
-            'b': self.b,
-            'epsilon': self.epsilon,
-            'I': self.I,
+            'a': self.params['a'],
+            'b':  self.params['b'],
+            'epsilon': self.params['epsilon'],
+            'I': self.params['I'] ,
         }
         return config
         
     def odes(self, t, z, control_params):
         """
-        Compute the derivatives for a system of ordinary differential equations (ODEs).
-        Parameters:
-        t (float): The current time.
-        z (list or array-like): The current state of the system, where z[0] is v and z[1] is w.
-        control_params (dict): A dictionary containing control parameters with possible keys:
-            - 'a': Parameter a (default is self.a)
-            - 'b': Parameter b (default is self.b)
-            - 'epsilon': Parameter epsilon (default is self.epsilon)
-            - 'I': Parameter I (default is self.I)
+        Compute the derivatives for a 2-dimensional vector [v,w] and a dictionary of parameter.
+        
+        Args:
+            t (float): The current time. (Doesn't matter here, the system is time-independet)
+            z (2-dim list or array-like): The current state of the system, where z[0] is v and z[1] is w.
+            control_params (dict): A dictionary containing control parameters with possible keys:
+                - 'a': Parameter a (default is self.a)
+                - 'b': Parameter b (default is self.b)
+                - 'epsilon': Parameter epsilon (default is self.epsilon)
+                - 'I': Parameter I (default is self.I)
         Returns:
-        list: A list containing the derivatives [dvdt, dwdt], where:
-            - dvdt is the derivative of v with respect to time.
-            - dwdt is the derivative of w with respect to time.
+            np.array (2dim): A np.array containing the derivatives [dvdt, dwdt]
         """
 
         # Extract control parameters with default values
-        a = control_params.get('a', self.a)
-        b = control_params.get('b', self.b)
-        epsilon = control_params.get('epsilon',self.epsilon)
-        I = control_params.get('I', self.I)
+        a = control_params.get('a', self.params['a'])
+        b = control_params.get('b', self.params['b'])
+        epsilon = control_params.get('epsilon',self.params['epsilon'])
+        I = control_params.get('I', self.params['I'])
         
         v, w = z
         dvdt = v - (v**3) / 3 - w + I
         dwdt = epsilon * (v + a - b * w)
-        return [dvdt, dwdt]
+        return np.array([dvdt, dwdt])
     
     
     def odes_vectorized(self, t, Z, control_params):
-        # Z has to be provided as np.array([v1, v2, ..., vn, w1, w2, ..., wn])
-        # control_params_dict as a dictionary where each entry is a scalar or a np.array of length n (number samples)
+        """
+        Compute the derivatives of the state variables v and w for a system of ODEs in a vectorized manner.
+        Args:
+            t(float): The current time (not used in the computation but required by the ODE solver interface).
+            Z ( 1D np.array): state variables, structured as [v1, v2, ..., vn, w1, w2, ..., wn].
+            control_params(dict) : 
+                A dictionary containing the system parameters. Each entry is a numpy array of length n (number of samples).
+                Expected keys are: 'a', 'b', 'epsilon' and 'I' with default values in self.params
+        Returns:
         
+        np.array
+            A 1D numpy array containing the derivatives of the state variables, structured as [dv1/dt, dv2/dt, ..., dvn/dt, dw1/dt, dw2/dt, ..., dwn/dt].
+        """
+
         v, w = Z[:int(len(Z)/2)], Z[int(len(Z)/2):]  
         n_samples = len(v)
         
         # Extract control parameters with default values
-        a = control_params.get('a', np.full(n_samples, self.a))
-        b = control_params.get('b', np.full(n_samples, self.b))
-        epsilon = control_params.get('epsilon', np.full(n_samples, self.epsilon))
-        I = control_params.get('I', np.full(n_samples, self.I))
+        a = control_params.get('a', np.full(n_samples, self.params['a']))
+        b = control_params.get('b', np.full(n_samples, self.params['b']))
+        epsilon = control_params.get('epsilon', np.full(n_samples, self.params['epsilon']))
+        I = control_params.get('I', np.full(n_samples, self.params['I']))
 
+        #ODEs
         dvdt = v - (v**3) / 3 - w + I
         dwdt = epsilon * (v + a - b * w)
 
@@ -81,11 +100,23 @@ class FitzHughNagumoModel:
     
 
 class NumericalSolver:
+    """
+    General numerical integration of a system of ordinary differential equations (ODEs) 
+        using the Runge-Kutta method via scipy.integrate.solve_ivp()
+    """
     def __init__(self, model):
         self.model = model
 
     
     def create_params_dict(self, n_samples):
+        """
+        Create a dictionary of the current parameters for the model.
+        For control parameters add value none, for default parameters create array of length n_samples.
+        Args:
+            n_samples (int): The number of samples for which each parameter vector has to be created
+        Returns:
+            dict: A dictionary containing the parameters and their corresponding values.
+        """
         
         params_dict = dict()
 
@@ -98,6 +129,13 @@ class NumericalSolver:
         return params_dict
 
     def update_params_dict(self, current_dict, controlstep):
+        """
+        Update the params dict for a given control.
+        Args:
+            current_dict (dict): as in self.create_params_dict
+            controlstep (2dim np.array): controlarray of shape (n_samples, control_dim), 
+                                            has to be in the correct order corresponding to self.model.control_params
+        """
         
         for i, p in enumerate(self.model.control_params):
             current_dict[p] = controlstep[:,i]
@@ -112,7 +150,7 @@ class NumericalSolver:
         
         Args:   
         X:         array of shape (n_samples, n_dim) containing observations [x1, x2]
-        control:   dictionary where each entry is a scalar or a np.array of length n (number samples)
+        control:   np.array of shape(1, n_samples, control_dim)
         """
         current_params_dict = self.create_params_dict(X.shape[0])
         current_params_dict = self.update_params_dict(current_params_dict, control)
@@ -121,7 +159,6 @@ class NumericalSolver:
         return derivative.reshape(X.shape).transpose()
     
     
-
 
     def step(self, X, control, delta_t, num_steps=1, steady_control=False):
         """
@@ -132,6 +169,7 @@ class NumericalSolver:
         control: np.array of shape(num_steps, n_samples, control_dim)
         delta_t: duration of timestep
         num_steps: number of timesteps to integrate
+        steady_control (bool): If the control is the same throughout the whole simulation
 
         Return:
         Trajectory: array of shape (num_steps+1, n_samples, n_dim) containing all observations
@@ -146,7 +184,6 @@ class NumericalSolver:
         current_params_dict = self.create_params_dict(X.shape[0])
         initcon = X.transpose().flatten()
 
-        # TODO: steady_control special case (for performance)
         if steady_control:
             params_dict = self.update_params_dict(current_params_dict, control[0]) # dim (n_samples, control_dim), 0 arbitrary since all same
             # Time points to evaluate at
@@ -159,23 +196,26 @@ class NumericalSolver:
                 t_eval = t_eval,
                 args = (params_dict,),
                 method='RK45')
-            
+                        
             trajectory = solution.y.T.reshape(num_steps + 1, -1, 2)
+        else:
+            t_span_start = 0        
+            for i in range(0, num_steps):
 
+                current_params_dict = self.update_params_dict(current_params_dict, control[i,:,:])
+                t_span = [t_span_start, t_span_start+delta_t]
+                                
+                sol_vect = solve_ivp(self.model.odes_vectorized, 
+                                     t_span, 
+                                     initcon, 
+                                     args=(current_params_dict,), 
+                                     t_eval = t_span,
+                                     method = 'RK45')
+                                
+                trajectory[i+1] = sol_vect.y[:,-1].reshape(X.shape)
 
-
-        t_span_start = 0        
-        for i in range(0, num_steps):
-
-            current_params_dict = self.update_params_dict(current_params_dict, control[i,:,:])
-            t_span = [t_span_start, t_span_start+delta_t]
-            
-            sol_vect = solve_ivp(self.model.odes_vectorized, t_span, initcon, args=(current_params_dict,), t_eval = t_span)
-            
-            trajectory[i+1] = sol_vect.y[:,-1].reshape(X.shape).transpose()
-
-            #Update Initial Condition
-            initcon = sol_vect.y[:,-1]
-            t_span_start += delta_t
-            
+                #Update Initial Condition
+                initcon = sol_vect.y[:,-1]
+                t_span_start += delta_t
+                
         return trajectory
