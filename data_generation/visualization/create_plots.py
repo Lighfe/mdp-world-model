@@ -133,14 +133,14 @@ def plot_2D_vector_field_over_grid(grid,
             X2lin = X2lin[1:]
         
         X1, X2 = np.meshgrid(X1lin, X2lin)
-        X1_org = np.vectorize(grid.inverse_transformation[dim1])(X1)
-        X2_org = np.vectorize(grid.inverse_transformation[dim2])(X2)
+        X1_org = np.vectorize(grid.inverse_transformations[dim1])(X1)
+        X2_org = np.vectorize(grid.inverse_transformations[dim2])(X2)
     
         U_org, V_org = create_2D_vectorfield(X1_org, X2_org, control=control, solver=solver)
         
         #Transform the vectorfield, multiply with Jacobian of transformation
-        U = np.multiply(np.vectorize(grid.transformation_derivative)(X1_org), U_org)
-        V = np.multiply(np.vectorize(grid.transformation_derivative)(X2_org), V_org)
+        U = np.multiply(np.vectorize(grid.transformation_derivatives[dim1])(X1_org), U_org)
+        V = np.multiply(np.vectorize(grid.transformation_derivatives[dim2])(X2_org), V_org)
 
     else:
         
@@ -163,12 +163,12 @@ def plot_2D_vector_field_over_grid(grid,
     if grid.transformed_bool:
         #Set ticklabels according to original space
         xtick_pos = np.linspace(bounds[0][0], bounds[0][1], 9)
-        xlabels = [round(grid.inverse_transformation[dim1](tick),1) for tick in xtick_pos]
+        xlabels = [round(grid.inverse_transformations[dim1](tick),1) for tick in xtick_pos]
         ax.set_xticks(xtick_pos)
         ax.set_xticklabels(xlabels)
 
         ytick_pos = np.linspace(bounds[1][0], bounds[1][1], 9)
-        ylabels = [round(grid.inverse_transformation[dim1](tick),2) for tick in ytick_pos]
+        ylabels = [round(grid.inverse_transformations[dim1](tick),2) for tick in ytick_pos]
         ax.set_yticks(ytick_pos)
         ax.set_yticklabels(ylabels)
 
@@ -180,8 +180,8 @@ def plot_2D_vector_field_over_grid(grid,
     ax.spines['right'].set_visible(False)
     ax.spines['bottom'].set_position(('data', bounds[0][0]))
     ax.spines['left'].set_position(('data', bounds[1][0]))
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
+    ax.set_xlim(left=bounds[0][0])
+    ax.set_ylim(bottom=bounds[1][0])
     if display_grid:
         ax.grid(True, which='both', linestyle='--', linewidth=0.5)
 

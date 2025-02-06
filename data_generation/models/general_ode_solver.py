@@ -4,7 +4,7 @@ from scipy.integrate import solve_ivp
 
 
 class FitzHughNagumoModel:
-    def __init__(self, a = 0.7, b = 1.6, epsilon = 0.08, I = 0.35, control_params=None):
+    def __init__(self, a = 0.7, b = 1.6, epsilon = 0.08, I = 0.35, control_params=[]):
         
         # dimensions
         self.x_dim = 2 # v, w
@@ -84,6 +84,28 @@ class NumericalSolver:
     def __init__(self, model):
         self.model = model
 
+    
+    def create_params_dict(self, n_samples):
+        
+        params_dict = dict()
+
+        for p in self.model.params.keys():
+            if p not in self.model.control_params:
+                params_dict[p] = np.full(n_samples, self.model.params[p])
+            else:
+                params_dict[p] = None
+       
+        return params_dict
+
+    def update_params_dict(self, current_dict, controlstep):
+        
+        for i, p in enumerate(self.model.control_params):
+            current_dict[p] = controlstep[:,i]
+            
+        return current_dict
+
+
+
     def get_derivative(self, X, control):
         """
         Return derivative for a sample of points X
@@ -92,29 +114,13 @@ class NumericalSolver:
         X:         array of shape (n_samples, n_dim) containing observations [x1, x2]
         control:   dictionary where each entry is a scalar or a np.array of length n (number samples)
         """
-        derivative = self.model.odes_vectorized(0, X.transpose().flatten(), control)
+        current_params_dict = self.create_params_dict(X.shape[0])
+        current_params_dict = self.update_params_dict(current_params_dict, control)
+        derivative = self.model.odes_vectorized(0, X.transpose().flatten(), current_params_dict)
 
         return derivative.reshape(X.shape).transpose()
     
     
-    def create_controlparams_dict(self, n_samples):
-        
-        controlparams_dict = dict()
-
-        for p in self.model.params.keys():
-            if p not in self.model.control_params:
-                controlparams_dict[p] = np.full(n_samples, self.model.params[p])
-            else:
-                controlparams_dict[p] = None
-       
-        return controlparams_dict
-
-    def update_controlparams_dict(self, current_dict, controlstep):
-        
-        for i, p in enumerate(self.model.control_params):
-            current_dict[p] = controlstep[:,i]
-            
-        return current_dict
 
 
     def step(self, X, control, delta_t, num_steps=1, steady_control=False):
@@ -137,7 +143,7 @@ class NumericalSolver:
         # initialize starting observation
         trajectory[0] = X
      
-        current_params_dict = self.create_controlparams_dict(X.shape[0])
+        current_params_dict = self.create_params_dict(X.shape[0])
         initcon = X.transpose().flatten()
 
         # TODO: steady_control special case (for performance)
@@ -145,7 +151,7 @@ class NumericalSolver:
         t_span_start = 0        
         for i in range(0, num_steps):
 
-            current_params_dict = self.update_controlparams_dict(current_params_dict, control[i,:,:])
+            current_params_dict = self.update_params_dict(current_params_dict, control[i,:,:])
             t_span = [t_span_start, t_span_start+delta_t]
             
             sol_vect = solve_ivp(self.model.odes_vectorized, t_span, initcon, args=(current_params_dict,), t_eval = t_span)
