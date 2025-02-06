@@ -202,7 +202,7 @@ class NumericalSolver:
                 t_eval=t_eval, 
                 args=(control,), 
                 method='RK45'
-                # rtol=1e-6, # @Karolin, what accuracy is needed here and in general?
+                # rtol=1e-6, # @Karolin, what accuracy is needed here and in general? Maybe we should talk about this with Jobst, I guess it depends on the problem
                 # atol=1e-6 # @Karolin, what accuracy is needed here and in general?
             )
             

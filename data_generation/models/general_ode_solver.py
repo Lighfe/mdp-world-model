@@ -147,6 +147,22 @@ class NumericalSolver:
         initcon = X.transpose().flatten()
 
         # TODO: steady_control special case (for performance)
+        if steady_control:
+            params_dict = self.update_params_dict(current_params_dict, control[0]) # dim (n_samples, control_dim), 0 arbitrary since all same
+            # Time points to evaluate at
+            t_eval = np.linspace(0, delta_t * num_steps, num_steps + 1)
+
+            solution = solve_ivp(
+                self.model.odes_vectorized,
+                t_span = (0, delta_t * num_steps),
+                y0 = initcon,
+                t_eval = t_eval,
+                args = (params_dict,),
+                method='RK45')
+            
+            trajectory = solution.y.T.reshape(num_steps + 1, -1, 2)
+
+
 
         t_span_start = 0        
         for i in range(0, num_steps):
