@@ -180,52 +180,50 @@ class NumericalSolver:
         trajectory = np.zeros((num_steps + 1,) + X.shape)
         # initialize starting observation
         trajectory[0] = X
+        n_samples = X.shape[0]
 
-        # first try for scipy.integrate.solve_ivp, was not faster than simple RK implmentation
-        if False: 
-            def system_derivative(t, y, ctrl):
-                """System derivative for integration"""
-                y_reshaped = y.reshape(-1, 2)  # Reshape to (n_samples, 2)
-                
-                # Get control for current time
-                step_idx = int(t / delta_t)
-                current_control = control[min(step_idx, num_steps-1)]
-                
-                # Calculate derivative using solve_equilibrium
-                dy = self.solve_equilibrium(y_reshaped, current_control)
-                return dy.flatten()  # Flatten for solver
-            
+        if steady_control: 
+            control = control[0] # dim (n_samples, control_dim), 0 arbitrary since all same
             # Time points to evaluate at
             t_eval = np.linspace(0, delta_t * num_steps, num_steps + 1)
+
+            # Create wrapper function for solve_ivp
+            def dxdt(t, x_flat, control):
+                # Reshape flat array back to (n_samples, 2) for solve_equilibrium
+                x_2d = x_flat.reshape(n_samples, 2)
+                dx = self.solve_equilibrium(x_2d, control)
+                return dx.flatten()  # Return flattened for solve_ivp
             
             # Solve IVP
             solution = solve_ivp(
-                system_derivative,
+                dxdt,
                 t_span=(0, delta_t * num_steps),
-                y0=X.flatten(), 
+                y0=X.flatten(), # y is solve_ivp naming, NOT y from equations
                 t_eval=t_eval, 
                 args=(control,), 
-                method='RK45',
-                rtol=1e-6,
-                atol=1e-6
+                method='RK45'
+                # rtol=1e-6, # @Karolin, what accuracy is needed here and in general?
+                # atol=1e-6 # @Karolin, what accuracy is needed here and in general?
             )
             
             # Reshape solution to match expected output format
             trajectory = solution.y.T.reshape(num_steps + 1, -1, 2)
 
-        # https://de.wikipedia.org/wiki/Klassisches_Runge-Kutta-Verfahren
-        # Didn't manage yet to make scipy implementation faster than this:
-        for step in range(num_steps):
-            x = trajectory[step]
-            c = control[step] # shape (n_samples, control_dim)
-            
-            # RK4 stages
-            k1 = self.solve_equilibrium(x, c)
-            k2 = self.solve_equilibrium(x + 0.5 * delta_t * k1, c)
-            k3 = self.solve_equilibrium(x + 0.5 * delta_t * k2, c)
-            k4 = self.solve_equilibrium(x + delta_t * k3, c)
-            
-            # Update
-            trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+        else:
+            # for time-varying controls I'm using less accurate integration method
+            # https://de.wikipedia.org/wiki/Klassisches_Runge-Kutta-Verfahren
+            # Didn't manage yet to make scipy implementation faster than this:
+            for step in range(num_steps):
+                x = trajectory[step]
+                c = control[step] # shape (n_samples, control_dim)
+                
+                # RK4 stages
+                k1 = self.solve_equilibrium(x, c)
+                k2 = self.solve_equilibrium(x + 0.5 * delta_t * k1, c)
+                k3 = self.solve_equilibrium(x + 0.5 * delta_t * k2, c)
+                k4 = self.solve_equilibrium(x + delta_t * k3, c)
+                
+                # Update
+                trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
         return trajectory
