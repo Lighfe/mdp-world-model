@@ -1,12 +1,13 @@
 import json
 import time
+from datetime import datetime
 import platform
 import psutil
 import numpy as np
 import pandas as pd
 from data_generation.models import tech_substitution as ts
 from data_generation.simulations import grid as g
-from datetime import datetime
+from datasets.database import get_engine, init_db, create_results_table
 
 #to run this file as a package: python -m data_generation.simulations.simulator while being in the mdp-world-model folder
 
@@ -95,6 +96,11 @@ class Simulator:
 
         # Possibly store the resulting df in the self.result_df attribute (by adding it to the existing df)
         if save_result == True:
+
+            # Initialize empty DataFrame with correct dtypes if needed
+            if self.results.empty:
+                self.results = pd.DataFrame(columns=df.columns).astype(df.dtypes)
+
             self.results = pd.concat([self.results, df], ignore_index=True)
 
                 # Collect all metadata in a dictionary
@@ -182,19 +188,59 @@ class Simulator:
 
     
     def store_results_to_sqlite(self, filename='simulation_results.db'):
+        """Store simulation results in SQLite database using SQLAlchemy"""
         
-        '''
-        Store the results of the simulation in a sqlite database, NOT YET IMPLEMENTED.
-        Args:
-            filename (str): The name of the sqlite database file.
-        '''
-
-
-        if self.results is None:
+        if self.results.empty:
             raise ValueError("No results to store.")
-        
-        
-        
 
-        raise NotImplementedError("Storing results in sqlite database is not yet implemented.")
-    
+        # Extract model metadata
+        metadata = json.loads(self.configs.iloc[0]['metadata'])
+        model_config = metadata['configurations']['solver']['model']
+        model_name = model_config['model']
+        control_params = model_config.get('control_params', [])
+
+        # Create results table name
+        control_params_str = '_'.join(control_params) if control_params else 'no_control'
+        results_table_name = f"{model_name}_{control_params_str}"
+        
+        # Setup database
+        engine = get_engine(filename)
+        
+        # Create results table
+        results_table = create_results_table(
+            results_table_name, 
+            x_dim=self.x_dim,
+            control_dim=self.control_dim
+        )
+        
+        # Create all tables
+        init_db(engine)
+        
+        try:
+            # Restructure configs data to match schema and convert dicts to JSON strings
+            configs_data = pd.DataFrame({
+                'run_id': self.configs['run_id'],
+                'configurations': self.configs['metadata'].apply(
+                    lambda x: json.dumps(json.loads(x)['configurations'])
+                ),
+                'simulation_params': self.configs['metadata'].apply(
+                    lambda x: json.dumps(json.loads(x)['simulation_params'])
+                ),
+                'performance': self.configs['metadata'].apply(
+                    lambda x: json.dumps(json.loads(x)['performance'])
+                ),
+                'system': self.configs['metadata'].apply(
+                    lambda x: json.dumps(json.loads(x)['system'])
+                )
+            })
+            
+            # Store data
+            configs_data.to_sql('configs', engine, index=False, if_exists='append')
+            self.results.to_sql(results_table_name, engine, index=False, if_exists='append')
+            
+        except Exception as e:
+            print(f"Error storing results: {e}")
+            raise
+
+
+
