@@ -1,18 +1,22 @@
 import numpy as np
 from scipy.spatial import ConvexHull
 from sklearn.neighbors import KernelDensity
+import matplotlib.pyplot as plt
 
 class CoverageAnalyzer:
-    def __init__(self, bin_edges=None, n_bins=20):
+    def __init__(self, n_bins=20, space_type='Z', max_value=1e6):
         """
         Initialize coverage analyzer
         
         Args:
-            bin_edges: List of arrays defining bin edges for each dimension
-            n_bins: Number of bins to use if bin_edges not provided
+            n_bins: Number of bins per dimension
+            space_type: 'Z' for transformed space [0,1], 'X' for original space
+            max_value: Upper bound for X space binning (only used if space_type='X')
         """
-        self.bin_edges = bin_edges
         self.n_bins = n_bins
+        self.space_type = space_type
+        self.max_value = max_value
+        self.bin_edges = None
         
     def compute_coverage_metrics(self, points):
         """
@@ -26,12 +30,22 @@ class CoverageAnalyzer:
         """
         n_points, n_dims = points.shape
         
-        # Create bin edges if not provided
+        # Create bin edges based on space type
         if self.bin_edges is None:
-            self.bin_edges = [np.linspace(np.min(points[:, i]), 
-                                        np.max(points[:, i]), 
-                                        self.n_bins + 1) 
-                            for i in range(n_dims)]
+            if self.space_type == 'Z':
+                # For Z-space, always use [0,1] range
+                self.bin_edges = [np.linspace(0, 1, self.n_bins + 1) 
+                                for _ in range(n_dims)]
+            else:
+                # For X-space, use logarithmic binning from min to max_value
+                self.bin_edges = []
+                for i in range(n_dims):
+                    min_val = max(np.min(points[:, i]), 1e-10)  # Avoid log(0)
+                    self.bin_edges.append(
+                        np.exp(np.linspace(np.log(min_val),
+                                         np.log(self.max_value),
+                                         self.n_bins + 1))
+                    )
         
         # Compute histogram
         hist, _ = np.histogramdd(points, bins=self.bin_edges)
@@ -59,39 +73,38 @@ class CoverageAnalyzer:
             metrics['effective_volume'] = np.exp(-np.mean(log_dens))
         except:
             metrics['effective_volume'] = None
-
             
         return metrics
     
     def plot_2d_coverage(self, points, dims=(0,1)):
-        """
-        Create 2D visualization of coverage for specified dimensions
+        """Create 2D visualization of coverage"""
         
-        Args:
-            points: Array of shape (n_points, n_dims)
-            dims: Tuple of two dimensions to plot
+        # TODO find a way to visualize X space
+        if self.space_type == 'X':
+            raise NotImplementedError("X-space plotting not yet implemented")
         
-        Returns:
-            fig, ax: matplotlib figure and axis objects
-        """
-        import matplotlib.pyplot as plt
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
         
-        # Create 2D histogram
-        hist, xedges, yedges = np.histogram2d(
+        # Scatter plot with increased visibility
+        ax1.scatter(points[:, dims[0]], points[:, dims[1]], alpha=0.5, s=5)
+        ax1.set_title('Raw Data Points')
+        
+        # Use pre-defined bin edges for histogram
+        hist, _, _ = np.histogram2d(
             points[:, dims[0]], 
             points[:, dims[1]],
             bins=[self.bin_edges[dims[0]], self.bin_edges[dims[1]]]
         )
         
-        # Plot heatmap
-        fig, ax = plt.subplots()
-        im = ax.imshow(hist.T, origin='lower', aspect='auto',
-                      extent=[xedges[0], xedges[-1], 
-                             yedges[0], yedges[-1]])
-        plt.colorbar(im, ax=ax)
+        # Create meshgrid from bin edges
+        X, Y = np.meshgrid(self.bin_edges[dims[0]][:-1], self.bin_edges[dims[1]][:-1])
+        im = ax2.pcolormesh(X, Y, hist.T, shading='auto')
+        plt.colorbar(im, ax=ax2)
+        ax2.set_title('Coverage Density')
         
-        ax.set_xlabel(f'Dimension {dims[0]}')
-        ax.set_ylabel(f'Dimension {dims[1]}')
-        ax.set_title('Coverage Density')
-        
-        return fig, ax
+        for ax in [ax1, ax2]:
+            ax.set_xlabel(f'Dimension {dims[0]}')
+            ax.set_ylabel(f'Dimension {dims[1]}')
+            
+        plt.tight_layout()
+        return fig, (ax1, ax2)
