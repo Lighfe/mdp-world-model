@@ -151,9 +151,10 @@ class NumericalSolver:
         
         Args:   
         X:         array of shape (n_samples, n_dim) containing observations [x1, x2]
-        control:   array of shape (1, n_samples)
+        control:   scalar, list or array of shape (control_dim)
         """
-
+        
+        control = np.array(control).reshape(X.shape[0],self.model.control_dim)
         derivative = self.solve_equilibrium(X, control)
 
         return derivative
