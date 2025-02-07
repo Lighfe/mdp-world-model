@@ -150,8 +150,10 @@ class NumericalSolver:
         
         Args:   
         X:         array of shape (n_samples, n_dim) containing observations [x1, x2]
-        control:   np.array of shape(1, n_samples, control_dim)
+        control:   scalar, list or array of shape (control_dim)
         """
+        
+        control = np.array(control).reshape(X.shape[0],self.model.control_dim)
         current_params_dict = self.create_params_dict(X.shape[0])
         current_params_dict = self.update_params_dict(current_params_dict, control)
         derivative = self.model.odes_vectorized(0, X.transpose().flatten(), current_params_dict)
