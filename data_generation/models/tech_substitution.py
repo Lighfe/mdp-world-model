@@ -14,6 +14,7 @@ class TechnologySubstitution:
         self.sigma = sigma 
         self.alpha = alpha
         self.gamma1 = gamma1
+        self.control_params = ['gamma2']
 
     def get_config(self):
         # TODO add git commit number
@@ -21,6 +22,7 @@ class TechnologySubstitution:
             'model': self.__class__.__name__,
             'x_dim': self.x_dim,
             'control_dim': self.control_dim,
+            'control_params': self.control_params,
             'D0': self.D0,
             'delta': self.delta,
             'sigma': self.sigma,
