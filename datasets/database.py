@@ -40,7 +40,7 @@ def create_results_table(name, x_dim, control_dim):
     for i in range(x_dim):
         columns.append(Column(f'y{i}', SQLITE_FLOAT))
         
-    return Table(name, metadata, *columns)
+    return Table(name, metadata, *columns, extend_existing=True)
 
 def get_engine(filename):
     """Create SQLAlchemy engine"""
