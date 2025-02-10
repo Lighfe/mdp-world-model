@@ -17,8 +17,8 @@ class FitzHughNagumoModel:
     # in wikipedia 1/epsilon = tau = 12.5 and I = R*I_ext
     # Experiment with 3 actions 
     # 1) b=2, I = 0.35 ---- two basins of attraction
-    # 2) b=0.8, I=0.5  ---- limit cycle
-    # 3) b=1.5, I=0.0  ---- single stable fix point, if far away 
+    # 2) b=1.5, I=0.0  ---- single stable fix point
+    # 3) b=0.8, I=0.5  ---- limit cycle
 
         # dimensions
         self.x_dim = 2 # v, w
@@ -117,7 +117,7 @@ class NumericalSolver:
         # Params
         self.rtol = 1e-3 
         self.atol = 1e-6
-        self.ivp_method = 'scipy.solve_ivp(RK45)' # not using scipy currently
+        self.ivp_method = 'scipy.solve_ivp(RK45)'
 
 
     def get_config(self):
