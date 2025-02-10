@@ -114,6 +114,21 @@ class NumericalSolver:
     def __init__(self, model):
         self.model = model
 
+        # Params
+        self.rtol = 1e-3 
+        self.atol = 1e-6
+        self.ivp_method = 'scipy.solve_ivp(RK45)' # not using scipy currently
+
+
+    def get_config(self):
+        config = {
+            'solver': self.__class__.__name__,
+            'model': self.model.get_config(),
+            'rtol': self.rtol,
+            'atol': self.atol,
+            'ivp_method': self.ivp_method
+        }
+        return config
     
     def create_params_dict(self, n_samples):
         """
