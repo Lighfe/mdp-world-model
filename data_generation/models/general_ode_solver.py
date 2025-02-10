@@ -5,7 +5,7 @@ from scipy.integrate import solve_ivp
 
 class FitzHughNagumoModel:
 
-    def __init__(self, a = 0.7, b = 1.6, epsilon = 0.08, I = 0.35, control_params=[]):
+    def __init__(self, a = 0.7, b = 2.0, epsilon = 0.08, I = 0.35, control_params=[]):
         """
         Create the FitzHughNagumo Model corresponding to the given default values and later control parameters.
         Later, it will be important to hand-over the control parameters always in the same order as specified here.
@@ -13,6 +13,13 @@ class FitzHughNagumoModel:
         Args: a, b, epsilon, I (scalars): default parameters
               control_params (list of strings): list of strings with expected entries in ["a", "b", "epsilon", "I" ]
         """
+    # https://en.wikipedia.org/wiki/FitzHugh%E2%80%93Nagumo_model
+    # in wikipedia 1/epsilon = tau = 12.5 and I = R*I_ext
+    # Experiment with 3 actions 
+    # 1) b=2, I = 0.35 ---- two basins of attraction
+    # 2) b=0.8, I=0.5  ---- limit cycle
+    # 3) b=1.5, I=0.0  ---- single stable fix point, if far away 
+
         # dimensions
         self.x_dim = 2 # v, w
         self.control_dim = len(control_params) 
