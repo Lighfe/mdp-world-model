@@ -241,40 +241,40 @@ class Grid:
         
         return rnd_point
 
-def fractional_transformation(param):
+def fractional_transformation(x0):
     """
-    Generates the fractional transformation z=x/(x+param), its inverse and its derivate for a given parameter.
-    Useful for space compression in the case [0, np.inf], cannot be used for spaces which include x = -param.
+    Generates the fractional transformation z=x/(x+x0), its inverse and its derivate for a given center x0.
+    Useful for space compression in the case [0, np.inf], cannot be used for spaces which include x = -x0.
+    Also known as Scale Odds Transformation
     
     Args:
         param (float, > 0): The parameter to be used in the fractional transformations
     Returns:
         tuple: A tuple containing three functions:
-            - frac_transformation (function): Transforms an input x using the formula x / (x + param).
+            - frac_transformation (function): Transforms an input x using the formula x / (x + x0).
             - inverse_frac_transformation (function): Computes the inverse of the fractional transformation.
             - frac_transformation_derivative (function): Computes the derivative of the fractional transformation.
     
     """
-
     def frac_transformation(x):
         if np.isinf(x):
             return 1
         else:
-            return x / (x+param)
+            return x / (x+x0)
         
-    frac_transformation.parameters = {'param': param}
+    frac_transformation.parameters = {'param': x0}
 
     def inverse_frac_transformation(z):
         if z == 1:
             return np.inf
         else:
-            return -param*z / (z-1)
+            return -x0*z / (z-1)
         
     def frac_transformation_derivative(x):
         if np.isinf(x):
             return 0
         else:
-            return param / (x+param)**2
+            return x0 / (x+x0)**2
         
     
     return (frac_transformation, inverse_frac_transformation, frac_transformation_derivative)
@@ -322,3 +322,111 @@ def logistic_transformation(param_dict= {'k': 1, 'x_0': 0} ):
     return (logistic_trafo, inverse_logicistic_trafo, logistic_trafo_derivative)
 
 
+
+
+def tangent_transformation(x0, alpha=0.5):
+    """
+    Generates the alphaed tangent transformation from x-space [0, ∞) to z-space [0, 1),
+    its inverse, and its derivative. The transformation is defined so that the center
+    x0 corresponds to z = 0.5.
+    
+    The mapping is:
+        Forward Transformation (x -> z):
+            z(x) = (2/π) * arctan[(x/x0)^alpha]
+        Inverse Transformation (z -> x):
+            x(z) = x0 * [ tan((π/2)*z) ]^(1/alpha)
+        Derivative (dz/dx):
+            dz/dx = (2/(π*x0)) * alpha * (x/x0)^(alpha-1) / [1 + (x/x0)^(2*alpha)]
+    
+    Args:
+        x0 (float > 0): The center parameter such that the inverse transformation of 0.5 is x0.
+        alpha (float > 0): alpha parameter to adjust the spread. When alpha=1, this
+                             reduces to the usual tangent transformation.
+        
+    Returns:
+        tuple: A tuple containing three functions:
+            - transformation(x): Maps x in [0, ∞) to z in [0,1).
+            - inverse_transformation(z): Maps z in [0,1) to x in [0, ∞).
+            - derivative(x): The derivative dz/dx.
+    """
+
+    #NOTE: there is also a symmetric verison of this around 0 (which could be shifted by adding +x0)
+
+    
+    def transformation(x):
+        # Maps x (in [0, ∞)) to z (in [0, 1)).
+        if np.isinf(x):
+            return 1
+        else:
+            return (2/np.pi) * np.arctan((x / x0)**alpha)
+    
+    transformation.parameters = {'x0': x0, 'alpha': alpha}
+    
+    def inverse_transformation(z):
+        # Maps z (in [0, 1)) to x (in [0, ∞)).
+        if z == 1:
+            return np.inf
+        else:
+            return x0 * (np.tan((np.pi/2) * z))**(1/alpha)
+    
+    def derivative(x):
+        # Computes dz/dx.
+        if np.isinf(x):
+            return 0
+        else:
+            ratio = x / x0 + 1e-10
+            return (2 * alpha / (np.pi * x0)) * (ratio**(alpha - 1)) / (1 + ratio**(2 * alpha))
+    
+    return (transformation, inverse_transformation, derivative)
+
+def negative_log_transformation(x0, alpha=0.5):
+    """
+    Generates the alphaed negative logarithm transformation from x-space [0, ∞) to z-space [0, 1),
+    its inverse, and its derivative. The transformation is defined so that the center
+    x0 corresponds to z = 0.5.
+    
+    The mapping is:
+        Forward Transformation (x -> z):
+            z(x) = 1 - exp[ - ln2 * (x/x0)^alpha ]
+        Inverse Transformation (z -> x):
+            x(z) = x0 * [ - (1/ln2) * ln(1 - z) ]^(1/alpha)
+        Derivative (dz/dx):
+            dz/dx = (ln2 * alpha / x0) * (x/x0)^(alpha - 1) * exp[ - ln2 * (x/x0)^alpha ]
+    
+    Args:
+        x0 (float > 0): The center parameter such that the inverse transformation of 0.5 is x0.
+        alpha (float > 0): alpha parameter to adjust the spread. When alpha=1, this
+                             reduces to the usual negative logarithm transformation.
+        
+    Returns:
+        tuple: A tuple containing three functions:
+            - transformation(x): Maps x in [0, ∞) to z in [0,1).
+            - inverse_transformation(z): Maps z in [0,1) to x in [0, ∞).
+            - derivative(x): The derivative dz/dx.
+    """
+    
+    def transformation(x):
+        # Maps x (in [0, ∞)) to z (in [0, 1)).
+        if np.isinf(x):
+            return 1
+        else:
+            return 1 - np.exp(- np.log(2) * (x / x0)**alpha)
+    
+    transformation.parameters = {'x0': x0, 'alpha': alpha}
+    
+    def inverse_transformation(z):
+        # Maps z (in [0, 1)) to x (in [0, ∞)).
+        if z == 1:
+            return np.inf
+        else:
+            return x0 * ((-1/np.log(2)) * np.log(1 - z))**(1/alpha)
+    
+    def derivative(x):
+        # Computes dz/dx.
+        if np.isinf(x):
+            return 0
+        else:
+            ratio = x / x0
+            return (np.log(2) * alpha / x0) * (ratio**(alpha - 1)) * np.exp(- np.log(2) * (ratio)**alpha)
+    
+    return (transformation, inverse_transformation, derivative)
