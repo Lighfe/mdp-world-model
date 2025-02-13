@@ -98,7 +98,7 @@ class CoverageAnalyzer:
         
         # Create meshgrid from bin edges
         X, Y = np.meshgrid(self.bin_edges[dims[0]][:-1], self.bin_edges[dims[1]][:-1])
-        im = ax2.pcolormesh(X, Y, hist.T, shading='auto')
+        im = ax2.pcolormesh(X, Y, hist.T, shading='auto', vmax=5)
         plt.colorbar(im, ax=ax2)
         ax2.set_title('Coverage Density')
         

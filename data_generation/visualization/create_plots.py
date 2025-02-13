@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
+from scipy.interpolate import RectBivariateSpline
 import sys
 
 
@@ -85,12 +87,15 @@ def plot_2D_vector_field_over_grid(grid,
                                    resolution=51,
                                    streamplot_colour = 'darkblue',
                                    vectorfield_colour = 'mediumblue', 
-                                   title='2D Vector Field', 
+                                   title='2D Vector Field',
+                                   axis_names =['X1-Axis','X2-Axis'], 
                                    ax = None,
                                    save_to = None, 
                                    display_vectorfield=True, 
                                    display_grid=True, 
-                                   display_vectorfield_magnitude=False):
+                                   display_vectorfield_magnitude=False,
+                                   display_nullclines=False,
+                                   nullcline_colors=('red', 'green')):
     """
     Plots a 2D vector field over a specified grid.
     
@@ -148,7 +153,14 @@ def plot_2D_vector_field_over_grid(grid,
         U, V = create_2D_vectorfield(X1, X2, control=control, solver=solver)
     
     
+    # Plot streamlines
     ax.streamplot(X1, X2, U, V, color=streamplot_colour, linewidth=0.7, density=1, arrowsize=0.8)
+
+    # Plot nullclines if requested
+    if display_nullclines:
+        # Use contour to find nullclines (U=0, V=0 curves)
+        ax.contour(X1, X2, U, levels=[0], colors=[nullcline_colors[0]], linewidths=1, alpha=0.7)
+        ax.contour(X1, X2, V, levels=[0], colors=[nullcline_colors[1]], linewidths=1, alpha=0.7)
     
 
     if display_vectorfield:
@@ -172,8 +184,8 @@ def plot_2D_vector_field_over_grid(grid,
         ax.set_yticks(ytick_pos)
         ax.set_yticklabels(ylabels)
 
-    ax.set_xlabel('X1-axis')
-    ax.set_ylabel('X2-axis')
+    ax.set_xlabel(axis_names[0])
+    ax.set_ylabel(axis_names[1])
     ax.set_title(title, pad=20)
     
     ax.spines['top'].set_visible(False)
