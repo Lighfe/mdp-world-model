@@ -18,6 +18,9 @@ datasets/processed/*
 !datasets/raw/.gitkeep
 !datasets/processed/.gitkeep
 
+# Visualizations
+data_generation/visualization/figures/*
+
 # IDE-specific files
 .vscode/
 .idea/
