@@ -195,7 +195,11 @@ def plot_2D_vector_field_over_grid(grid,
     ax.set_xlim(left=bounds[0][0])
     ax.set_ylim(bottom=bounds[1][0])
     if display_grid:
-        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+        # Changed this to the actual grid lines
+        for x in grid.tf_grid_lines[0]:
+            ax.axvline(x, color='gray', linestyle='--', alpha=0.4, linewidth=0.7)
+        for y in grid.tf_grid_lines[1]:
+            ax.axhline(y, color='gray', linestyle='--', alpha=0.4, linewidth=0.7)
 
     if save_to != None:
         fig.savefig(save_to)
