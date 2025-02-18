@@ -2,16 +2,16 @@ import os
 import sys
 parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 sys.path.append(parent_dir)
-from pathlib import Path
 
 import sqlite3
 import pandas as pd
 import json
 import numpy as np
 
-
 from data_generation.simulations.grid import Grid, logistic_transformation, fractional_transformation
-from data_generation.simulations.grid import fractional_transformation as frac_transformation
+from data_generation.models.tech_substitution import TechnologySubstitution, NumericalSolver
+#TODO: Add the other models and solvers and transformations here, but the solvers must have different names!!!
+
 
 
 def get_data_from_database(db_path, table_name, run_ids):
@@ -42,20 +42,8 @@ def get_data_from_database(db_path, table_name, run_ids):
     return (df, configs_dict)
 
 
-def reconstruct_data(df, configs_dict, run_ids):
-    # TODO find better dataformat for the c column
-    
-    # Check if all configurations are the same
-    all_equal = all(configs_dict[run_id] == configs_dict[run_ids[0]] for run_id in run_ids)
-    print("All configurations are the same:", all_equal)
-
-    # Reconstruct the grid
-    grid_dict = configs_dict[run_ids[0]]['grid']
-    bounds = grid_dict['bounds']
-    resolution = grid_dict['resolution']
-    transformations = [globals()[name](params['param']) for name, params in zip(grid_dict['transformations'], grid_dict['transformation_params'])]
-    grid = Grid(bounds, resolution, transformations)
-
+def reconstruct_xyc(df):
+    # TODO should we use another dataformat for the c column (has to be hashable!)?
     # Reconstruct data points and cells
     x_columns = [col for col in df.columns if col.startswith('x')]
     y_columns = [col for col in df.columns if col.startswith('y')]
@@ -64,14 +52,40 @@ def reconstruct_data(df, configs_dict, run_ids):
     df['y'] = df.apply(lambda row: np.array([row[col] for col in y_columns]), axis=1)
     df['c'] = df.apply(lambda row: tuple(row[col] for col in c_columns), axis=1)
     df = df.drop(columns=x_columns+y_columns+c_columns)
-    df['x_cell'] = df['x'].apply(grid.get_cell_index)
-    df['y_cell'] = df['y'].apply(grid.get_cell_index)
-
+    
     return df
 
 
-
-def prepare_data(db_path, table_name, run_ids):
+def get_and_reconstruct_data(db_path, table_name, run_ids):
     df, configs_dict = get_data_from_database(db_path, table_name, run_ids)
-    df = reconstruct_data(df, configs_dict, run_ids)
-    return df, configs_dict
+    df = reconstruct_xyc(df)
+    return (df, configs_dict)
+
+
+def reconstruct_solver_and_grid(run_id, configs_dict):
+    #Reconstruct the grid and solver from the configs_dict for a specific run_id
+
+    co_grid = configs_dict[run_id]['grid']
+    co_solver = configs_dict[run_id]['solver']
+
+    bounds = co_grid['bounds']
+    resolution = co_grid['resolution']
+    transformations = [globals()[name](params['param']) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
+    grid = Grid(bounds, resolution, transformations)
+
+    # Extract class names
+    model_class_name = co_solver['model']['model']
+    solver_class_name = co_solver['solver']
+
+    # Dynamically get the class from globals() (assuming they are defined in the current script)
+    ModelClass = globals()[model_class_name]
+    SolverClass = globals()[solver_class_name]
+
+    # Extract model parameters (excluding non-model parameters like 'model', 'x_dim', etc.)
+    model_params = {k: v for k, v in co_solver['model'].items() if k not in ['model', 'x_dim', 'control_dim', 'control_params']}
+
+    # Instantiate the model and solver
+    model = ModelClass(**model_params)
+    solver = SolverClass(model)
+
+    return grid, solver
