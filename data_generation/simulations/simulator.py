@@ -1,12 +1,13 @@
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 import platform
 import psutil
 import numpy as np
 import pandas as pd
 from data_generation.models import tech_substitution as ts
-from data_generation.simulations import grid as g
+from data_generation.simulations.grid import Grid
 from datasets.database import get_engine, init_db, create_results_table
 
 #to run this file as a package: python -m data_generation.simulations.simulator while being in the mdp-world-model folder
@@ -242,4 +243,55 @@ class Simulator:
             raise
 
 
+def run_and_store_simulations(output_dir, 
+                              bounds, 
+                              transformations, 
+                              model, 
+                              solver, 
+                              control, 
+                              resolution, 
+                              num_samples_per_cell, 
+                              num_steps, 
+                              delta_t):
+    """Simulate and store simulation results in a SQLite database.
+    
+    Args:
+        output_dir (str or Path): Absolute path to output directory
+        bounds (list): List of tuples containing the lower and upper bounds of the grid
+        transformations (list): List of transformation functions
+        model : Model to simulate
+        solver(model): Solver to use, already initialized with the model
+        control (scalar or array): Control parameters for the simulation
+        resolution (list of ints): Number of grid cells per dimension
+        num_samples_per_cell (int): Number of samples per grid cell
+        num_steps (int): Number of simulation steps
+        delta_t (float): Time step size
+    """
+    # Setup paths
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create grid and simulator
+    grid = Grid(bounds, resolution, transformations)
+    simulator = Simulator(grid, model, solver)
+    
+    # Run simulation
+    results = simulator.simulate(
+        control=control,
+        delta_t=delta_t,
+        num_samples_per_cell=num_samples_per_cell,
+        num_steps=num_steps,
+        save_result=True
+    )
+    
+    # Store results
+    db_path = output_path / f'simulation_results.db'
+    simulator.store_results_to_sqlite(db_path)
+    
+    print(f"Stored {len(results)} rows of simulation data in {db_path}")
+    print("\nConfigs data:")
+    print(simulator.configs.head())
+    print("\nResults data:")
+    print(simulator.results.head())
 
+    return simulator

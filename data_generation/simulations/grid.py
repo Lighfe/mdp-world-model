@@ -241,6 +241,7 @@ class Grid:
         
         return rnd_point
 
+# TODO the transformation functions should be named exactly as the generating function
 def fractional_transformation(x0):
     """
     Generates the fractional transformation z=x/(x+x0), its inverse and its derivate for a given center x0.
@@ -256,28 +257,28 @@ def fractional_transformation(x0):
             - frac_transformation_derivative (function): Computes the derivative of the fractional transformation.
     
     """
-    def frac_transformation(x):
+    def fractional_transformation(x):
         if np.isinf(x):
             return 1
         else:
             return x / (x+x0)
         
-    frac_transformation.parameters = {'param': x0}
+    fractional_transformation.parameters = {'param': x0}
 
-    def inverse_frac_transformation(z):
+    def inverse_fractional_transformation(z):
         if z == 1:
             return np.inf
         else:
             return -x0*z / (z-1)
         
-    def frac_transformation_derivative(x):
+    def fractional_transformation_derivative(x):
         if np.isinf(x):
             return 0
         else:
             return x0 / (x+x0)**2
         
     
-    return (frac_transformation, inverse_frac_transformation, frac_transformation_derivative)
+    return (fractional_transformation, inverse_fractional_transformation, fractional_transformation_derivative)
 
 
 def logistic_transformation(param_dict= {'k': 1, 'x_0': 0} ):
@@ -304,22 +305,22 @@ def logistic_transformation(param_dict= {'k': 1, 'x_0': 0} ):
 
     
 
-    def logistic_trafo(x):
+    def logistic_transformation(x):
         return 1 / (1 + np.exp(-k*(x-x_0)))
     
-    logistic_trafo.parameters = param_dict
+    logistic_transformation.parameters = param_dict
     
-    def inverse_logicistic_trafo(x):
+    def inverse_logistic_transformation(x):
         if x == 1 or x == 0:
             return np.inf
         else:
             return (x_0 * k - np.log((1/x - 1))) / k
     
-    def logistic_trafo_derivative(x):
+    def logistic_transformation_derivative(x):
         return k * np.exp(k*(x-x_0)) / (1 + np.exp(k*(x-x_0)))**2
     
 
-    return (logistic_trafo, inverse_logicistic_trafo, logistic_trafo_derivative)
+    return (logistic_transformation, inverse_logistic_transformation, logistic_transformation_derivative)
 
 
 
@@ -353,23 +354,23 @@ def tangent_transformation(x0, alpha=0.5):
     #NOTE: there is also a symmetric verison of this around 0 (which could be shifted by adding +x0)
 
     
-    def transformation(x):
+    def tangent_transformation(x):
         # Maps x (in [0, ∞)) to z (in [0, 1)).
         if np.isinf(x):
             return 1
         else:
             return (2/np.pi) * np.arctan((x / x0)**alpha)
     
-    transformation.parameters = {'x0': x0, 'alpha': alpha}
+    tangent_transformation.parameters = {'x0': x0, 'alpha': alpha}
     
-    def inverse_transformation(z):
+    def inverse_tangent_transformation(z):
         # Maps z (in [0, 1)) to x (in [0, ∞)).
         if z == 1:
             return np.inf
         else:
             return x0 * (np.tan((np.pi/2) * z))**(1/alpha)
     
-    def derivative(x):
+    def tangent_transformation_derivative(x):
         # Computes dz/dx.
         if np.isinf(x):
             return 0
@@ -377,7 +378,7 @@ def tangent_transformation(x0, alpha=0.5):
             ratio = x / x0 + 1e-10
             return (2 * alpha / (np.pi * x0)) * (ratio**(alpha - 1)) / (1 + ratio**(2 * alpha))
     
-    return (transformation, inverse_transformation, derivative)
+    return (tangent_transformation, inverse_tangent_transformation, tangent_transformation_derivative)
 
 def negative_log_transformation(x0, alpha=0.5):
     """
@@ -405,23 +406,23 @@ def negative_log_transformation(x0, alpha=0.5):
             - derivative(x): The derivative dz/dx.
     """
     
-    def transformation(x):
+    def negative_log_transformation(x):
         # Maps x (in [0, ∞)) to z (in [0, 1)).
         if np.isinf(x):
             return 1
         else:
             return 1 - np.exp(- np.log(2) * (x / x0)**alpha)
     
-    transformation.parameters = {'x0': x0, 'alpha': alpha}
+    negative_log_transformation.parameters = {'x0': x0, 'alpha': alpha}
     
-    def inverse_transformation(z):
+    def inverse_negative_log_transformation(z):
         # Maps z (in [0, 1)) to x (in [0, ∞)).
         if z == 1:
             return np.inf
         else:
             return x0 * ((-1/np.log(2)) * np.log(1 - z))**(1/alpha)
     
-    def derivative(x):
+    def negative_log_transformation_derivative(x):
         # Computes dz/dx.
         if np.isinf(x):
             return 0
@@ -429,4 +430,4 @@ def negative_log_transformation(x0, alpha=0.5):
             ratio = x / x0
             return (np.log(2) * alpha / x0) * (ratio**(alpha - 1)) * np.exp(- np.log(2) * (ratio)**alpha)
     
-    return (transformation, inverse_transformation, derivative)
+    return (negative_log_transformation, inverse_negative_log_transformation, negative_log_transformation_derivative)
