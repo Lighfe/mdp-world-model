@@ -104,7 +104,6 @@ class Simulator:
             self.results = pd.concat([self.results, df], ignore_index=True)
 
                 # Collect all metadata in a dictionary
-                # TODO: add name of the classes
             metadata = {
                 'configurations': {
                     'grid': self.grid.get_config(),

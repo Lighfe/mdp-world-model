@@ -13,10 +13,8 @@ venv/
 *.csv
 *.h5
 *.pkl
-datasets/raw/*
-datasets/processed/*
-!datasets/raw/.gitkeep
-!datasets/processed/.gitkeep
+datasets/results/*
+!datasets/results/.gitkeep
 
 # Visualizations
 data_generation/visualization/figures/*
