@@ -106,7 +106,7 @@ class FitzHughNagumoModel:
         return np.append(dvdt, dwdt)
     
 
-class NumericalSolver:
+class GeneralODENumericalSolver:
     """
     General numerical integration of a system of ordinary differential equations (ODEs) 
         using the Runge-Kutta method via scipy.integrate.solve_ivp()
