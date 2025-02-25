@@ -144,6 +144,142 @@ class Simulator:
 
         return df
     
+
+    def simulate_with_stopping_criteria(self, control, delta_t, stopping_criteria, num_samples_per_cell=10,  max_steps=1000, num_steps=1, save_result=False):   
+        """
+        Simulates the differential equation for a given initial condition and time period.
+        
+        Args:
+            control: control input in supported format
+            delta_t: time step size
+            stopping_criteria: Function to determine if the simulation should stop
+            num_samples_per_cell: Number of samples per grid cell
+            max_steps: Maximum number of simulation steps
+            num_steps: Number of simulation steps
+            save_result: Whether to save results to internal storage
+
+        Returns: df (DataFrame): simulation results
+        """
+        # Start timing
+        start_time = time.time()
+
+        X, trajectory_ids = self.grid.get_initial_conditions(num_samples_per_cell)
+        n_samples = X.shape[0]
+        
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Convert control to full array format
+        direct_control = np.array(control)
+        control = self.create_control_array(direct_control, num_steps, n_samples, self.control_dim)
+
+        # Simulate until Stopping Criteria is met
+        total_steps = 0
+        all_trajectories = np.expand_dims(X, axis=0)
+        X_cell_ids = np.apply_along_axis(self.grid.get_cell_index, 1, X)
+        all_cell_indices = np.expand_dims(X_cell_ids, axis=0)
+
+        while total_steps < max_steps:
+            trajectory = self.solver.step(X, control, delta_t, num_steps, self.steady_control)
+
+            all_trajectories = np.concatenate((all_trajectories,trajectory[1:]))
+            all_cell_indices = np.concatenate((all_cell_indices, np.apply_along_axis(self.grid.get_cell_index, 2, trajectory[1:])))
+                        
+            total_steps += num_steps
+            
+            
+            # Check stopping criteria
+            if stopping_criteria(all_cell_indices):
+                break
+            if total_steps >= max_steps:
+                print(f"Caution: Maximum number of steps reached ({max_steps})")
+
+            X = trajectory[-1]
+            
+        # After stopping, process everything into a DataFrame
+        
+        # Create timestamps 
+        times = np.linspace(0, total_steps * delta_t, total_steps + 1) 
+
+        # Create total control array
+        total_control = self.create_control_array(direct_control, total_steps, n_samples, self.control_dim)
+        
+        # Initialize data dictionary
+        data = {
+            'run_id': np.full(n_samples * total_steps, run_id),
+            'trajectory_id': np.repeat(trajectory_ids, total_steps),
+            't0': np.tile(times[:-1], n_samples),  
+            't1': np.tile(times[1:], n_samples),  
+        }
+        
+        # Add start observation
+        for i in range(self.x_dim):
+            data[f'x{i}'] = all_trajectories[:-1, :, i].flatten(order='F')
+        
+        # Add control dimensions
+        for i in range(self.control_dim):
+            # data[f'c{i}'] = np.repeat(control[:, i], num_steps)
+            data[f'c{i}'] = total_control[:,:,i].flatten(order='F')
+
+        # add result observations
+        for i in range(self.x_dim):
+            data[f'y{i}'] = all_trajectories[1:, :, i].flatten(order='F')
+        
+        df = pd.DataFrame(data)
+
+        print(f"Simulation complete:\n"
+          f"- {n_samples} samples × {total_steps} timesteps = {n_samples * total_steps} total rows\n"
+          f"- State dimensions: {self.x_dim}\n"
+          f"- Control dimensions: {self.control_dim}")
+
+        # Possibly store the resulting df in the self.result_df attribute (by adding it to the existing df)
+        if save_result == True:
+
+            # Initialize empty DataFrame with correct dtypes if needed
+            if self.results.empty:
+                self.results = pd.DataFrame(columns=df.columns).astype(df.dtypes)
+
+            self.results = pd.concat([self.results, df], ignore_index=True)
+
+                # Collect all metadata in a dictionary
+                # TODO: add name of the classes
+            metadata = {
+                'configurations': {
+                    'grid': self.grid.get_config(),
+                    'solver': self.solver.get_config()
+                },
+                'simulation_params': {
+                    'n_samples': n_samples,
+                    'num_steps': num_steps
+                },
+                'performance': {
+                    'execution_time': time.time() - start_time,
+                    'peak_memory_mb': psutil.Process().memory_info().rss / (1024 * 1024)
+                },
+                'system': {
+                    'os': platform.system(),
+                    'cpu_count': psutil.cpu_count(logical=False)
+                    # 'gpu': get_gpu_info(),
+                    # 'ram': psutil.virtual_memory().total / (1024**3)
+                }
+            }    
+
+            # Create config entry with single JSON field
+            config_entry = pd.DataFrame({
+                'run_id': [run_id],
+                'metadata': [json.dumps(metadata)]
+            })
+            
+            # Add to configs dataframe
+            self.configs = pd.concat([self.configs, config_entry], ignore_index=True)
+
+            print("Saved results and config.")
+
+        # NOTE: We could also make this function not return the df object, 
+        # since it is already saving it anyway. Could instead give a status update
+        # or even return nothing
+
+        return df, all_cell_indices
+    
     def create_control_array(self, control, num_steps, n_samples, control_dim):
         '''
         Args:
