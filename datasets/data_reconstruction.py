@@ -9,8 +9,8 @@ import json
 import numpy as np
 
 from data_generation.simulations.grid import Grid, logistic_transformation, fractional_transformation
-from data_generation.models.tech_substitution import TechnologySubstitution, NumericalSolver
-#TODO: Add the other models and solvers and transformations here, but the solvers must have different names!!!
+from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
+
 
 
 
