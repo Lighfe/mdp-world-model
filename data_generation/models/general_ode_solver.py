@@ -206,7 +206,7 @@ class GeneralODENumericalSolver:
         trajectory[0] = X
      
         current_params_dict = self.create_params_dict(X.shape[0])
-        initcon = X.transpose().flatten()
+        initcon = X.flatten('F') 
 
         if steady_control:
             params_dict = self.update_params_dict(current_params_dict, control[0]) # dim (n_samples, control_dim), 0 arbitrary since all same
@@ -219,9 +219,11 @@ class GeneralODENumericalSolver:
                 y0 = initcon,
                 t_eval = t_eval,
                 args = (params_dict,),
-                method='RK45')
-                        
-            trajectory = solution.y.T.reshape(num_steps + 1, -1, 2)
+                method='RK45') 
+            n_samples = X.shape[0]
+            n_dim = X.shape[1]         
+            trajectory = solution.y.reshape(n_dim, n_samples, num_steps +1).transpose(2,1,0)    
+            
         else:
             t_span_start = 0        
             for i in range(0, num_steps):
@@ -235,9 +237,11 @@ class GeneralODENumericalSolver:
                                      args=(current_params_dict,), 
                                      t_eval = t_span,
                                      method = 'RK45')
-                                
-                trajectory[i+1] = sol_vect.y[:,-1].reshape(X.shape)
 
+                n_samples = X.shape[0]
+                n_dim = X.shape[1]             
+                trajectory[i+1] = sol_vect.y[:,-1].reshape(n_dim, n_samples).T #changed test it
+                
                 #Update Initial Condition
                 initcon = sol_vect.y[:,-1]
                 t_span_start += delta_t
