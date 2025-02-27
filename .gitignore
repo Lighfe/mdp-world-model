@@ -17,6 +17,7 @@ datasets/raw/*
 datasets/processed/*
 !datasets/raw/.gitkeep
 !datasets/processed/.gitkeep
+data_generation/tests/plots/*
 
 # Visualizations
 data_generation/visualization/figures/*

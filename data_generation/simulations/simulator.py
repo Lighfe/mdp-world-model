@@ -180,8 +180,8 @@ class Simulator:
 
         while total_steps < max_steps:
             trajectory = self.solver.step(X, control, delta_t, num_steps, self.steady_control)
-
-            all_trajectories = np.concatenate((all_trajectories,trajectory[1:]))
+            #print(trajectory)
+            all_trajectories = np.concatenate((all_trajectories,trajectory[1:]), axis=0)
             all_cell_indices = np.concatenate((all_cell_indices, np.apply_along_axis(self.grid.get_cell_index, 2, trajectory[1:])))
                         
             total_steps += num_steps
@@ -194,6 +194,7 @@ class Simulator:
                 print(f"Caution: Maximum number of steps reached ({max_steps})")
 
             X = trajectory[-1]
+            #print("X", X)
             
         # After stopping, process everything into a DataFrame
         
