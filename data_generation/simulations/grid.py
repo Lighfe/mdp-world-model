@@ -178,7 +178,29 @@ class Grid:
         else:
             return [self.tf_grid_lines[dim][i:i+2] for dim, i in enumerate(idx)]
 
-   
+    
+    def get_cell_centers(self, transformed_space=False):
+        """
+        Computes the set of all grid cell centers in the transformed or the original space.
+
+        Args:
+            transformed_space (bool): If True, computes centers in the transformed space; otherwise, in the original space.
+
+        Returns:
+            centers (np.array of dim (n_cells, n_dim)): A list of the center coordinates of each grid cell.
+        """
+
+        centers_1d = [(lines[:-1] + lines[1:]) / 2 for lines in self.tf_grid_lines]  # Compute midpoints
+        
+        # Generate all possible center coordinates using Cartesian product
+        centers = np.array(list(product(*centers_1d)))
+
+        if transformed_space == False:
+            centers = self.inverse_transform(centers)
+
+        return centers
+
+
     def get_initial_conditions(self, num_points_per_cell=1):
         """
         Efficiently generates initial conditions for the whole grid.
