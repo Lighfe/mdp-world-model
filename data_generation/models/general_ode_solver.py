@@ -180,7 +180,7 @@ class GeneralODENumericalSolver:
         current_params_dict = self.update_params_dict(current_params_dict, control)
         derivative = self.model.odes_vectorized(0, X.transpose().flatten(), current_params_dict)
 
-        return derivative.reshape(X.shape).transpose()
+        return derivative.reshape(X.shape[1], X.shape[0]).transpose()
     
     
 
