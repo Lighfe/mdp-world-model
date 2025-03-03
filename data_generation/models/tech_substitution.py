@@ -230,3 +230,9 @@ class NumericalSolver:
                 trajectory[step + 1] = x + (delta_t / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
         return trajectory
+
+    def f_v(self, y):
+        # returns market share of technology 2
+        # NOTE: "real" market share would be how much is produced at one time step (derivative). But x or y does not have this information, lacks c and delta_t.
+        y1, y2 = y
+        return y2 / (y1+y2 +1e-10)

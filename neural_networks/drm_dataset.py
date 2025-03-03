@@ -1,0 +1,158 @@
+import os
+import sys
+from pathlib import Path
+
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, SubsetRandomSampler
+import numpy as np
+from sqlalchemy import create_engine, select, MetaData
+from sqlalchemy.orm import Session
+
+# Define project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+    print(f"Added {PROJECT_ROOT} to Python path")
+
+class TechSubstitutionDataset(Dataset):
+    def __init__(self, db_path, tech_sub_solver):
+        """
+        Dataset for loading tech substitution data from SQLite database using SQLAlchemy
+        
+        Args:
+            db_path: Path to the SQLite database
+            tech_sub_solver: NumericalSolver instance for calculating v_true
+        """
+        self.db_path = db_path
+        self.tech_sub_solver = tech_sub_solver
+        
+        # Create SQLAlchemy engine
+        self.engine = create_engine(f"sqlite:///{db_path}")
+        
+        # Reflect database structure
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+        
+        # Find the tech table - assuming it has 'tech' in the name
+        tech_tables = [table for name, table in metadata.tables.items() if 'tech' in name.lower()]
+        if not tech_tables:
+            # If no table with 'tech' in name, just use the first table
+            tech_tables = list(metadata.tables.values())
+            if not tech_tables:
+                raise ValueError("No tables found in the database")
+        
+        self.table = tech_tables[0]
+        print(f"Using table: {self.table.name}")
+        print(f"Columns: {[column.name for column in self.table.columns]}")
+        
+        # Count total rows
+        with Session(self.engine) as session:
+            self.length = session.query(self.table).count()
+            print(f"Found {self.length} rows in the dataset")
+        
+        # Validate first few entries
+        self._validate_samples()
+    
+    def _validate_samples(self, num_samples=5):
+        """Check first few samples for any issues"""
+        print(f"Validating first {num_samples} samples:")
+        try:
+            for i in range(min(num_samples, len(self))):
+                x, c, y, v_true = self[i]
+                print(f"Sample {i}: x={x.numpy()}, c={c.numpy()}, y={y.numpy()}, v_true={v_true.numpy()}")
+                # Check for NaN values
+                if (torch.isnan(x).any() or torch.isnan(c).any() or 
+                    torch.isnan(y).any() or torch.isnan(v_true).any()):
+                    print(f"WARNING: NaN values detected in sample {i}")
+        except Exception as e:
+            print(f"Error validating samples: {e}")
+    
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        # SQLAlchemy query for this index
+        with Session(self.engine) as session:
+            query = select(
+                self.table.c.x0, 
+                self.table.c.x1, 
+                self.table.c.c0, 
+                self.table.c.y0, 
+                self.table.c.y1
+            ).offset(idx).limit(1)
+            
+            result = session.execute(query).fetchone()
+            
+        if result is None:
+            raise IndexError(f"Index {idx} out of bounds")
+        
+        # Extract data
+        x0, x1, c0, y0, y1 = result
+        
+        # Convert to tensors
+        x = torch.tensor([x0, x1], dtype=torch.float32)
+        c = torch.tensor([c0], dtype=torch.float32)
+        y = torch.tensor([y0, y1], dtype=torch.float32)
+        
+        # Calculate v_true using the solver's f_v function
+        v_true = self.tech_sub_solver.f_v(np.array([y0, y1]))
+        v_true = torch.tensor([v_true], dtype=torch.float32)
+        
+        # Check for NaN values
+        if (torch.isnan(x).any() or torch.isnan(c).any() or 
+            torch.isnan(y).any() or torch.isnan(v_true).any()):
+            print(f"WARNING: NaN values found in sample {idx}: x={x}, c={c}, y={y}, v_true={v_true}")
+            # Replace NaNs with zeros
+            x = torch.nan_to_num(x, nan=0.0)
+            c = torch.nan_to_num(c, nan=0.0)
+            y = torch.nan_to_num(y, nan=0.0)
+            v_true = torch.nan_to_num(v_true, nan=0.0)
+        
+        return x, c, y, v_true
+
+def create_data_loaders(db_path, tech_sub_solver, batch_size=32, val_size=1000, seed=42):
+    """
+    Create training and validation data loaders from the database
+    
+    Args:
+        db_path: Path to the SQLite database
+        tech_sub_solver: NumericalSolver instance
+        batch_size: Batch size for training
+        val_size: Number of samples to use for validation
+        seed: Random seed for reproducibility
+    
+    Returns:
+        train_loader, val_loader: DataLoader objects for training and validation
+    """
+    
+    # Create the dataset
+    dataset = TechSubstitutionDataset(db_path, tech_sub_solver)
+    
+    # Prepare indices for training and validation
+    indices = list(range(len(dataset)))
+    np.random.seed(seed)
+    np.random.shuffle(indices)
+    
+    # Take exactly val_size samples for validation
+    val_size = min(val_size, len(dataset) // 5)  # Ensure validation set isn't too large
+    train_indices = indices[val_size:]
+    val_indices = indices[:val_size]
+    
+    print(f"Training set: {len(train_indices)} samples")
+    print(f"Validation set: {len(val_indices)} samples")
+    
+    # Create loaders
+    train_loader = DataLoader(
+        dataset, 
+        batch_size=batch_size,
+        sampler=SubsetRandomSampler(train_indices)
+    )
+    
+    val_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=SubsetRandomSampler(val_indices)
+    )
+    
+    return train_loader, val_loader

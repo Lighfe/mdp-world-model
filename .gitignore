@@ -16,6 +16,9 @@ venv/
 datasets/results/*
 !datasets/results/.gitkeep
 
+# Model checkpoints and visualizations
+/neural_networks/output/*
+
 # Visualizations
 data_generation/visualization/figures/*
 

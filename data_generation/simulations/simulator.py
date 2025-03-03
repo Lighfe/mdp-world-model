@@ -244,6 +244,7 @@ class Simulator:
 
 
 def run_and_store_simulations(output_dir, 
+                              db_name,
                               bounds, 
                               transformations, 
                               model, 
@@ -285,7 +286,7 @@ def run_and_store_simulations(output_dir,
     )
     
     # Store results
-    db_path = output_path / f'simulation_results.db'
+    db_path = output_path / db_name
     simulator.store_results_to_sqlite(db_path)
     
     print(f"Stored {len(results)} rows of simulation data in {db_path}")
