@@ -175,7 +175,7 @@ class GeneralODENumericalSolver:
         control:   scalar, list or array of shape (control_dim)
         """
         
-        control = self.create_control_array_for_derivativ(np.array(control), X.shape[0])#np.array(control).reshape(X.shape[0],self.model.control_dim)
+        control = self.create_control_array_for_derivative(np.array(control), X.shape[0])#np.array(control).reshape(X.shape[0],self.model.control_dim)
         current_params_dict = self.create_params_dict(X.shape[0])
         current_params_dict = self.update_params_dict(current_params_dict, control)
         derivative = self.model.odes_vectorized(0, X.transpose().flatten(), current_params_dict)
