@@ -234,5 +234,18 @@ class NumericalSolver:
     def f_v(self, y):
         # returns market share of technology 2
         # NOTE: "real" market share would be how much is produced at one time step (derivative). But x or y does not have this information, lacks c and delta_t.
-        y1, y2 = y
+            # If y is a tuple or list, convert to an array for consistent handling
+        if isinstance(y, (tuple, list)):
+            y = np.array(y)
+
+        # Now y is a NumPy array.
+        if y.ndim == 1:
+            # Expecting a single pair: (y1, y2)
+            y1, y2 = y
+        elif y.ndim == 2 and y.shape[1] == 2:
+            # Expecting an array of shape (n, 2)
+            y1 = y[:, 0]
+            y2 = y[:, 1]
+        else:
+            raise ValueError("Input must be a tuple of two values or an array of shape (n, 2)")
         return y2 / (y1+y2 +1e-10)

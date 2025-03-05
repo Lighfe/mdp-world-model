@@ -83,3 +83,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python run_simulation.py --resolution 10 10 --samples-per-cell 20 --num-steps 5 --delta-t 15.0 --control 1.0 --db-name tech_toy2.db

@@ -111,36 +111,43 @@ class TechSubstitutionDataset(Dataset):
         
         return x, c, y, v_true
 
-def create_data_loaders(db_path, tech_sub_solver, batch_size=32, val_size=1000, seed=42):
+def create_data_loaders(db_path, tech_sub_solver, batch_size=64, val_size=1000, test_size=1000, seed=42):
     """
-    Create training and validation data loaders from the database
+    Create training, validation, and test data loaders from the database
     
     Args:
         db_path: Path to the SQLite database
         tech_sub_solver: NumericalSolver instance
         batch_size: Batch size for training
         val_size: Number of samples to use for validation
+        test_size: Number of samples to use for final testing
         seed: Random seed for reproducibility
     
     Returns:
-        train_loader, val_loader: DataLoader objects for training and validation
+        train_loader, val_loader, test_loader: DataLoader objects for training, validation and testing
     """
     
     # Create the dataset
     dataset = TechSubstitutionDataset(db_path, tech_sub_solver)
     
-    # Prepare indices for training and validation
+    # Prepare indices for training, validation, and testing
     indices = list(range(len(dataset)))
     np.random.seed(seed)
     np.random.shuffle(indices)
     
-    # Take exactly val_size samples for validation
-    val_size = min(val_size, len(dataset) // 5)  # Ensure validation set isn't too large
-    train_indices = indices[val_size:]
-    val_indices = indices[:val_size]
+    # Ensure sizes aren't too large for the dataset
+    total_reserved = min(val_size + test_size, len(dataset) // 2)
+    val_size = min(val_size, total_reserved // 2)
+    test_size = min(test_size, total_reserved - val_size)
+    
+    # Split indices
+    test_indices = indices[:test_size]
+    val_indices = indices[test_size:test_size + val_size]
+    train_indices = indices[test_size + val_size:]
     
     print(f"Training set: {len(train_indices)} samples")
     print(f"Validation set: {len(val_indices)} samples")
+    print(f"Test set: {len(test_indices)} samples")
     
     # Create loaders
     train_loader = DataLoader(
@@ -155,4 +162,10 @@ def create_data_loaders(db_path, tech_sub_solver, batch_size=32, val_size=1000, 
         sampler=SubsetRandomSampler(val_indices)
     )
     
-    return train_loader, val_loader
+    test_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=SubsetRandomSampler(test_indices)
+    )
+    
+    return train_loader, val_loader, test_loader
