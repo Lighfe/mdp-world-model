@@ -94,7 +94,8 @@ def train_drm_model(db_path,
                     hidden_dim=128,
                     checkpoint_every=10,
                     initial_div_weight=0.5,
-                    min_div_weight=0.05):
+                    min_div_weight=0.05,
+                    use_diversity_loss=False):
     """
     Full training function for the Discrete Representations Model with stability improvements
     
@@ -185,12 +186,13 @@ def train_drm_model(db_path,
     print(f"Using device: {device}")
     model.to(device)
     
-    # Use the stable loss function
+    # use loss function
     loss_fn = StableDRMLoss(
         state_loss_weight=1.0, 
-        value_loss_weight=1.0,
-        initial_diversity_weight=0.5,  # Adjust as needed
-        min_diversity_weight=0.05      # Adjust as needed
+        value_loss_weight=0.0,
+        initial_diversity_weight=initial_div_weight,
+        min_diversity_weight=min_div_weight,
+        use_diversity_loss=use_diversity_loss 
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -222,9 +224,10 @@ def train_drm_model(db_path,
         train_state_loss = 0.0
         train_value_loss = 0.0
         train_div_loss = 0.0
-        # Update diversity weight
-        current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
-        print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {current_div_weight:.4f}")
+        if loss_fn.use_diversity_loss:
+            # Update diversity weight
+            current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
+            print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {current_div_weight:.4f}")
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
             # Move data to device
@@ -350,10 +353,15 @@ def train_drm_model(db_path,
         history["val_div_loss"].append(val_div_loss)
         
         # Print progress
-        print(f"Epoch {epoch+1}/{epochs} - "
-              f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, Div: {train_div_loss:.4f}) - "
-              f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, Div: {val_div_loss:.4f})")
-        
+        if loss_fn.use_diversity_loss:
+            print(f"Epoch {epoch+1}/{epochs} - "
+                f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, Div: {train_div_loss:.4f}) - "
+                f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, Div: {val_div_loss:.4f})")
+        else:
+            print(f"Epoch {epoch+1}/{epochs} - "
+                f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}) - "
+                f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f})")
+
         # Check for improvement
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -546,7 +554,13 @@ if __name__ == "__main__":
     parser.add_argument('--num_states', type=int, default=4, help='Number of discrete states')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension size')
 
-    parser.add_argument('--initial_div_weight', type=float, default=0.5, help='Initial diversity loss weight')
+    parser.add_argument('--use_diversity_loss', action='store_true', 
+                        help='Whether to use diversity regularization')
+    parser.add_argument('--no_diversity_loss', dest='use_diversity_loss', 
+                        action='store_false', help='Disable diversity regularization')
+    parser.set_defaults(use_diversity_loss=False)
+
+    parser.add_argument('--initial_div_weight', type=float, default=1.0, help='Initial diversity loss weight')
     parser.add_argument('--min_div_weight', type=float, default=0.05, help='Minimum diversity loss weight')
     
     args = parser.parse_args()
