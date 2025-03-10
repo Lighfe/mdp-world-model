@@ -189,7 +189,7 @@ def train_drm_model(db_path,
     # use loss function
     loss_fn = StableDRMLoss(
         state_loss_weight=1.0, 
-        value_loss_weight=0.0,
+        value_loss_weight=10.0,
         initial_diversity_weight=initial_div_weight,
         min_diversity_weight=min_div_weight,
         use_diversity_loss=use_diversity_loss 
