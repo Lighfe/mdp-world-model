@@ -103,7 +103,8 @@ def train_drm_model(db_path,
                     value_loss_weight=3.0,
                     initial_div_weight=0.5,
                     min_div_weight=0.05,
-                    use_diversity_loss=False):
+                    use_diversity_loss=False,
+                    predictor_type='control_gate'):
     """
     Full training function for the Discrete Representations Model with stability improvements
     
@@ -177,7 +178,8 @@ def train_drm_model(db_path,
         obs_dim=2,
         control_dim=1,
         num_states=num_states,
-        hidden_dim=hidden_dim
+        hidden_dim=hidden_dim,
+        predictor_type=predictor_type
     )
     
     # Initialize model weights properly
@@ -615,6 +617,10 @@ if __name__ == "__main__":
 
     parser.add_argument('--initial_div_weight', type=float, default=1.0, help='Initial diversity loss weight')
     parser.add_argument('--min_div_weight', type=float, default=0.05, help='Minimum diversity loss weight')
+
+    parser.add_argument('--predictor_type', type=str, default='control_gate', 
+                        choices=['standard', 'control_gate'],
+                        help='Type of predictor to use (standard or control_gate)')
     
     args = parser.parse_args()
 

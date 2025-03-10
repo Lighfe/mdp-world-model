@@ -25,7 +25,7 @@ from data_generation.simulations.grid import tangent_transformation
 
 
 def visualize_state_space(model, output_path, transformations=None, device='cpu',
-                         num_points=100, num_states=None):
+                         num_points=1000, num_states=None):
     """
     Visualize the state probabilities in z-space (transformed space) with x-space coordinate labels.
     
@@ -159,7 +159,7 @@ def analyze_state_transitions(model,
                               transformations,
                               control_values=[0.5, 1.0],
                               z_bounds=[(0, 1), (0, 1)],
-                              num_points=32,
+                              num_points=1000,
                               assignment_method='argmax',
                               device='cpu'):
     """
