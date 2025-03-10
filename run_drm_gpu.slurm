@@ -43,7 +43,8 @@ python -m neural_networks.train_drm datasets/results/tech_sim.db \
     --num_states=3 \
     --hidden_dim=128 \
     --state_loss_weight=1.0 \
-    --value_loss_weight=1.0
+    --value_loss_weight=10.0 \
+    --predictor_type=control_gate
 
 # Print completion information
 echo "Job1 finished at $(date)"
@@ -61,7 +62,8 @@ python -m neural_networks.train_drm datasets/results/tech_sim.db \
     --num_states=3 \
     --hidden_dim=128 \
     --state_loss_weight=1.0 \
-    --value_loss_weight=3.0
+    --value_loss_weight=10.0 \
+    --predictor_type=control_gate
 
 # Print completion information
 echo "Job2 finished at $(date)"
@@ -79,7 +81,27 @@ python -m neural_networks.train_drm datasets/results/tech_sim.db \
     --num_states=3 \
     --hidden_dim=128 \
     --state_loss_weight=1.0 \
-    --value_loss_weight=10.0
+    --value_loss_weight=10.0 \
+    --predictor_type=control_gate
 
 # Print completion information
 echo "Job3 finished at $(date)"
+
+# Run trai
+echo "Starting training with standard predictor without control gate"
+python -m neural_networks.train_drm datasets/results/tech_sim.db \
+    --output_dir=neural_networks/output \
+    --val_size=2000 \
+    --test_size=2000 \
+    --batch_size=128 \
+    --epochs=100 \
+    --lr=0.0001 \
+    --patience=10 \
+    --num_states=3 \
+    --hidden_dim=128 \
+    --state_loss_weight=1.0 \
+    --value_loss_weight=10.0 \
+    --predictor_type=standard
+
+# Print completion information
+echo "Job4 finished at $(date)"
