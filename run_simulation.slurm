@@ -7,8 +7,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8        # Request 8 CPU cores
 #SBATCH --mem=16G                # Request 16GB memory
-#SBATCH --output=sim_run_%j.out
-#SBATCH --error=sim_run_%j.err
+#SBATCH --output=log/sim_run_%j.out
+#SBATCH --error=log/sim_run_%j.err
 
 # Print job info
 echo "Job started at $(date)"
