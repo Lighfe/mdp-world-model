@@ -31,9 +31,63 @@ class ControlGate(nn.Module):
         modulated_features = scale * features + shift
         
         return modulated_features
+    
+class BasePredictor(nn.Module):
+    """Base class for predictor implementations"""
+    def __init__(self, num_states, control_dim, hidden_dim):
+        super().__init__()
+        self.num_states = num_states
+        self.control_dim = control_dim
+        self.hidden_dim = hidden_dim
+    
+    def forward(self, s_x, c):
+        """
+        Predict next state representation
+        Args:
+            s_x: Current state probabilities (batch_size, num_states)
+            c: Control input (batch_size, control_dim)
+        Returns:
+            s_y_pred: Predicted next state probabilities (batch_size, num_states)
+        """
+        raise NotImplementedError("Subclasses must implement forward")
+    
+class StandardPredictor(BasePredictor):
+    """Standard predictor using concatenation of state and control"""
+    def __init__(self, num_states, control_dim, hidden_dim):
+        super().__init__(num_states, control_dim, hidden_dim)
+        self.predictor = nn.Sequential(
+            nn.Linear(num_states + control_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_states)
+        )
+
+        def forward(self, s_x, c):
+            predictor_input = torch.cat([s_x, c], dim=1)
+            logits = self.predictor(predictor_input)
+            s_y_pred = F.softmax(logits, dim=1)
+            return s_y_pred
+        
+class ControlGatePredictor(BasePredictor):
+    """Predictor using control gate to modulate features"""
+    def __init__(self, num_states, control_dim, hidden_dim):
+        super().__init__(num_states, control_dim, hidden_dim)
+        self.predictor_input = nn.Linear(num_states, hidden_dim)
+        self.control_gate = ControlGate(hidden_dim, control_dim)
+        self.predictor_hidden = nn.Linear(hidden_dim, hidden_dim)
+        self.predictor_output = nn.Linear(hidden_dim, num_states)
+    
+    def forward(self, s_x, c):
+        features = F.relu(self.predictor_input(s_x))
+        gated_features = self.control_gate(features, c)
+        hidden = F.relu(self.predictor_hidden(gated_features))
+        logits = self.predictor_output(hidden)
+        s_y_pred = F.softmax(logits, dim=1)
+        return s_y_pred
 
 class DiscreteRepresentationsModel(nn.Module):
-    def __init__(self, obs_dim=2, control_dim=1, num_states=4, hidden_dim=64):
+    def __init__(self, obs_dim=2, control_dim=1, num_states=4, hidden_dim=64, predictor_type='control_gate'):
         """
         Initialize the Discrete Representations architecture with three components:
         1. Encoder: Maps observations to state probabilities via softmax
@@ -45,6 +99,7 @@ class DiscreteRepresentationsModel(nn.Module):
             control_dim: Dimension of the control input c
             num_states: Number of discrete states to model (number of logits)
             hidden_dim: Hidden layer size
+            predictor_type: Type of predictor ('standard' or 'control_gate')
         """
         super(DiscreteRepresentationsModel, self).__init__()
         
@@ -57,20 +112,13 @@ class DiscreteRepresentationsModel(nn.Module):
             nn.Linear(hidden_dim, num_states)  # Logits for state probabilities
         )
         
-        # Predictor network: maps current state probabilities and control to next state probabilities
-        """self.predictor = nn.Sequential(
-            nn.Linear(num_states + control_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, num_states)
-        )"""
-
-        # Predictor components (using control gate instead of Sequential)
-        self.predictor_input = nn.Linear(num_states, hidden_dim)
-        self.control_gate = ControlGate(hidden_dim, control_dim)
-        self.predictor_hidden = nn.Linear(hidden_dim, hidden_dim)
-        self.predictor_output = nn.Linear(hidden_dim, num_states)
+        # Create appropriate predictor based on type
+        if predictor_type == 'standard':
+            self.predictor = StandardPredictor(num_states, control_dim, hidden_dim)
+        elif predictor_type == 'control_gate':
+            self.predictor = ControlGatePredictor(num_states, control_dim, hidden_dim)
+        else:
+            raise ValueError(f"Unknown predictor type: {predictor_type}")
         
         # Value network: extracts information from the predicted state probabilities
         # For tech substitution, we might want to predict market share of technology 2
