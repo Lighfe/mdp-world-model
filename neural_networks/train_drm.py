@@ -5,7 +5,9 @@ import time
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from datetime import datetime
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,6 +24,8 @@ from neural_networks.drm_dataset import create_data_loaders
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel
 from data_generation.models.tech_substitution import TechnologySubstitution, NumericalSolver
+from data_generation.simulations.grid import tangent_transformation
+from neural_networks.drm_viz import visualize_state_space, analyze_state_transitions, visualize_transition_matrices
 
 
 def plot_training_curves(history, save_path=None):
@@ -82,8 +86,10 @@ def plot_training_curves(history, save_path=None):
     
     plt.show()
 
+
 def train_drm_model(db_path, 
-                    output_dir="./neural_networks/output", 
+                    output_dir="./neural_networks/output",
+                    run_id=None,
                     val_size=2000,
                     test_size=2000, 
                     batch_size=64, 
@@ -93,6 +99,8 @@ def train_drm_model(db_path,
                     num_states=4,
                     hidden_dim=128,
                     checkpoint_every=10,
+                    state_loss_weight=1.0, 
+                    value_loss_weight=3.0,
                     initial_div_weight=0.5,
                     min_div_weight=0.05,
                     use_diversity_loss=False):
@@ -136,9 +144,8 @@ def train_drm_model(db_path,
     
     # Initialize time and run ID
     start_time = time.time()
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(output_dir, f"run_{run_id}")
-    os.makedirs(output_dir, exist_ok=True)
+    if run_id is None:
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Fix Python path to import TechnologySubstitution
     # Get the current file's directory
@@ -188,8 +195,8 @@ def train_drm_model(db_path,
     
     # use loss function
     loss_fn = StableDRMLoss(
-        state_loss_weight=1.0, 
-        value_loss_weight=10.0,
+        state_loss_weight=state_loss_weight, 
+        value_loss_weight=value_loss_weight,
         initial_diversity_weight=initial_div_weight,
         min_diversity_weight=min_div_weight,
         use_diversity_loss=use_diversity_loss 
@@ -535,8 +542,52 @@ def train_drm_model(db_path,
     # Calculate training time
     training_time = time.time() - start_time
     print(f"Training completed in {training_time:.2f} seconds")
-    
-    return model, history
+
+
+    # Visualizations
+    transformation = tangent_transformation(3.0, 0.5)
+
+    # 1. Visualize the state space
+    state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
+    visualize_state_space(
+        model=model,
+        output_path=state_vis_path,
+        transformations=[
+            transformation,  # For x1 dimension
+            transformation   # For x2 dimension
+        ],
+        device=device,
+        num_states=num_states
+    )
+
+    # Analyze and visualize state transitions with argmax assignment
+    control_values = [0.5, 1.0]  # Example control values, adjust as needed
+    argmax_transitions = analyze_state_transitions(
+        model=model,
+        transformations=[
+            transformation,  # For x1 dimension
+            transformation   # For x2 dimension
+        ],
+        control_values=control_values,
+        assignment_method='argmax',
+        device=device
+    )
+    argmax_vis_path = os.path.join(output_dir, f"argmax_transitions_{run_id}.png")
+    visualize_transition_matrices(argmax_transitions, control_values, argmax_vis_path)
+
+    # 3. Analyze and visualize state transitions with soft assignment
+    soft_transitions = analyze_state_transitions(
+        model=model,
+        transformations=[
+            transformation,  # For x1 dimension
+            transformation   # For x2 dimension
+        ],
+        control_values=control_values,
+        assignment_method='soft',
+        device=device
+    )
+    soft_vis_path = os.path.join(output_dir, f"soft_transitions_{run_id}.png")
+    visualize_transition_matrices(soft_transitions, control_values, soft_vis_path)
 
 if __name__ == "__main__":
     import argparse
@@ -559,16 +610,35 @@ if __name__ == "__main__":
     parser.add_argument('--no_diversity_loss', dest='use_diversity_loss', 
                         action='store_false', help='Disable diversity regularization')
     parser.set_defaults(use_diversity_loss=False)
+    parser.add_argument('--state_loss_weight', type=float, default=1.0, help='Stateloss weight')
+    parser.add_argument('--value_loss_weight', type=float, default=3.0, help='Value loss weight')
 
     parser.add_argument('--initial_div_weight', type=float, default=1.0, help='Initial diversity loss weight')
     parser.add_argument('--min_div_weight', type=float, default=0.05, help='Minimum diversity loss weight')
     
     args = parser.parse_args()
+
+    # Create the run_id and complete output directory
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_output_dir = Path(args.output_dir)
+    if not base_output_dir.is_absolute():
+        base_output_dir = Path.cwd() / base_output_dir
+    
+    # Create the final output directory with run_id
+    output_dir = base_output_dir / f"run_{run_id}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save the config BEFORE training
+    args_dict = vars(args)
+    args_dict['run_id'] = run_id  # Add run_id to the saved config
+    with open(output_dir / f"config_{run_id}.json", 'w') as f:
+        json.dump(args_dict, f, indent=4)
     
     # Train the model
     model, history = train_drm_model(
         db_path=args.db_path,
-        output_dir=args.output_dir,
+        output_dir=str(output_dir),
+        run_id=run_id,
         val_size=args.val_size,
         test_size=args.test_size,
         batch_size=args.batch_size,
@@ -577,6 +647,8 @@ if __name__ == "__main__":
         early_stopping_patience=args.patience,
         num_states=args.num_states,
         hidden_dim=args.hidden_dim,
+        state_loss_weight=args.state_loss_weight, 
+        value_loss_weight=args.value_loss_weight,
         initial_div_weight=args.initial_div_weight,
         min_div_weight=args.min_div_weight
     )
