@@ -19,9 +19,10 @@ datasets/processed/*
 !datasets/processed/.gitkeep
 data_generation/tests/plots/*
 
+
 # Visualizations
 data_generation/visualization/figures/*
-
+clustering/plots/*
 # IDE-specific files
 .vscode/
 .idea/
