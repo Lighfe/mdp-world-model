@@ -201,6 +201,37 @@ class Grid:
         return centers
 
 
+    def get_neighbors(self, neighborhood_type='moore'):
+        """
+        Creates a dictionary mapping each grid cell to its neighbors for arbitrary dimensions.
+
+        Parameters:  
+        neighborhood_type: 'moore' (includes diagonals) or 'neumann' (axis-aligned only).
+
+        Returns:
+        - Dictionary where keys are coordinate tuples, and values are lists of neighboring coordinate tuples.
+        """
+        neighbors_dict = {}
+        
+        # Generate all possible direction shifts
+        direction_shifts = list(product([-1, 0, 1], repeat=self.dimension))  # All possible shifts
+        direction_shifts.remove((0,) * self.dimension)  # Remove the (0,0,..,0) case (itself)
+
+        if neighborhood_type == 'neumann':
+            direction_shifts = [shift for shift in direction_shifts if sum(abs(x) for x in shift) == 1]
+
+        for index in product(*(range(s) for s in self.resolution)):  # Iterate over all grid cells
+            neighbors = []
+            for shift in direction_shifts:
+                neighbor = tuple(idx + s for idx, s in zip(index, shift))
+                if all(0 <= neighbor[d] < self.resolution[d] for d in range(self.dimension)):  # Boundary check
+                    neighbors.append(neighbor)
+            neighbors_dict[index] = neighbors
+
+        return neighbors_dict
+
+
+
     def get_initial_conditions(self, num_points_per_cell=1):
         """
         Efficiently generates initial conditions for the whole grid.
