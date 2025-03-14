@@ -93,6 +93,8 @@ def plot_2D_vector_field_over_grid(grid,
                                    save_to = None, 
                                    display_vectorfield=True, 
                                    display_grid=True, 
+                                   display_streamplot=True,
+                                   broken_streamlines = True,
                                    display_vectorfield_magnitude=False,
                                    display_nullclines=False,
                                    nullcline_colors=('red', 'green')):
@@ -154,7 +156,8 @@ def plot_2D_vector_field_over_grid(grid,
     
     
     # Plot streamlines
-    ax.streamplot(X1, X2, U, V, color=streamplot_colour, linewidth=0.7, density=1, arrowsize=0.8)
+    if display_streamplot:
+        ax.streamplot(X1, X2, U, V, color=streamplot_colour, linewidth=0.7, density=1, arrowsize=0.8, broken_streamlines=broken_streamlines)
 
     # Plot nullclines if requested
     if display_nullclines:
@@ -197,9 +200,9 @@ def plot_2D_vector_field_over_grid(grid,
     if display_grid:
         # Changed this to the actual grid lines
         for x in grid.tf_grid_lines[0]:
-            ax.axvline(x, color='gray', linestyle='--', alpha=0.4, linewidth=0.7)
+            ax.axvline(x, color='gray', linestyle='--', alpha=0.5, linewidth=0.7)
         for y in grid.tf_grid_lines[1]:
-            ax.axhline(y, color='gray', linestyle='--', alpha=0.4, linewidth=0.7)
+            ax.axhline(y, color='gray', linestyle='--', alpha=0.5, linewidth=0.7)
 
     if save_to != None:
         fig.savefig(save_to)

@@ -33,7 +33,7 @@ class TechnologySubstitution:
         return config
       
     
-class NumericalSolver:
+class TechSubNumericalSolver:
     """"Root solver from scipy"""
     def __init__(self, model):
         self.model = model
