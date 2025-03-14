@@ -621,8 +621,8 @@ if __name__ == "__main__":
     parser.add_argument('--min_div_weight', type=float, default=0.05, help='Minimum diversity loss weight')
 
     parser.add_argument('--predictor_type', type=str, default='control_gate', 
-                        choices=['standard', 'control_gate'],
-                        help='Type of predictor to use (standard or control_gate)')
+                        choices=['standard', 'control_gate', 'bilinear'],
+                        help='Type of predictor to use (standard, control_gate or bilinear)')
     
     args = parser.parse_args()
 
