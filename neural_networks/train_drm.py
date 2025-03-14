@@ -591,6 +591,8 @@ def train_drm_model(db_path,
     soft_vis_path = os.path.join(output_dir, f"soft_transitions_{run_id}.png")
     visualize_transition_matrices(soft_transitions, control_values, soft_vis_path)
 
+    return model, history
+
 if __name__ == "__main__":
     import argparse
     

@@ -69,6 +69,33 @@ class StandardPredictor(BasePredictor):
             s_y_pred = F.softmax(logits, dim=1)
             return s_y_pred
         
+class BilinearPredictor(BasePredictor):
+    """Predictor that directly uses encoded state with control interaction"""
+    def __init__(self, num_states, control_dim, hidden_dim):
+        super().__init__(num_states, control_dim, hidden_dim)
+        # Only encode control - use state representation directly
+        self.control_encoder = nn.Linear(control_dim, hidden_dim)
+        
+        # Interaction layer - captures how control affects each state dimension
+        self.interaction = nn.Bilinear(num_states, hidden_dim, hidden_dim)
+        
+        # Output processing
+        self.hidden = nn.Linear(hidden_dim, hidden_dim)
+        self.output = nn.Linear(hidden_dim, num_states)
+    
+    def forward(self, s_x, c):
+        # Process control
+        control_features = F.relu(self.control_encoder(c))
+        
+        # Directly use s_x with control features to model interaction
+        interaction = self.interaction(s_x, control_features)
+        
+        # Further processing
+        hidden = F.relu(self.hidden(interaction))
+        logits = self.output(hidden)
+        s_y_pred = F.softmax(logits, dim=1)
+        return s_y_pred
+        
 class ControlGatePredictor(BasePredictor):
     """Predictor using control gate to modulate features"""
     def __init__(self, num_states, control_dim, hidden_dim):
@@ -117,6 +144,8 @@ class DiscreteRepresentationsModel(nn.Module):
             self.predictor = StandardPredictor(num_states, control_dim, hidden_dim)
         elif predictor_type == 'control_gate':
             self.predictor = ControlGatePredictor(num_states, control_dim, hidden_dim)
+        elif predictor_type == 'bilinear':
+            self.predictor = BilinearPredictor(num_states, control_dim, hidden_dim)
         else:
             raise ValueError(f"Unknown predictor type: {predictor_type}")
         
