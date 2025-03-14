@@ -38,37 +38,8 @@ class Patchwork:
         Initializes a dictionary with the neighbors of each patch.
         """
         cell_nb = self.grid.get_neighbors()
-        patch_nb = {self.cell_to_patchindex[cell]: [self.cell_to_patchindex[n] for n in neighbors] for cell, neighbors in cell_nb.items()}
+        patch_nb = {self.cell_to_patchindex[cell]: set(self.cell_to_patchindex[n] for n in neighbors) for cell, neighbors in cell_nb.items()}
         return patch_nb      
-
-    def _switch_from_control_to_action(self, df):
-        """
-        Switches the control column of the df to an action column, where each action is an integer, starting from 0.
-        Returns additionally a dictionary mapping actions to controls.
-
-        Args:
-            df (DataFrame): The DataFrame containing the simulation data, already prepared with columns 'x', 'y', 'c'.
-        Returns:
-            action_to_control_dict (dict): A dictionary mapping actions to controls.
-            df (DataFrame): The DataFrame with the 'c' column replaced by the 'a' column and the corresponding mapping.
-        """
-        unique_controls = df['c'].unique()
-        action_to_control_dict = {action_idx: control for action_idx, control in enumerate(unique_controls)}
-        df['a'] = df['c'].map({control: action_idx for action_idx, control in action_to_control_dict.items()})
-        df = df.drop(columns=['c'])
-        return action_to_control_dict, df
-
-
-    def _add_cell_and_patch_ids_in_df(self, df):
-        """
-        Adds columns 'x_cell', 'y_cell', 'x_patch_id', 'y_patch_id' to the DataFrame df.
-        'cells' always refer to the grid cells (=their coordinates), 'patch_id' refers to the index of the patch in the list of patches.
-        """
-        df['x_cell'] = df['x'].apply(self.grid.get_cell_index)
-        df['y_cell'] = df['y'].apply(self.grid.get_cell_index)
-        df['x_patch_id'] = df['x_cell'].map(self.cell_to_patchindex)
-        df['y_patch_id'] = df['y_cell'].map(self.cell_to_patchindex)
-        return df
     
     def _init_tp(self, df):
         """
@@ -106,16 +77,15 @@ class Patchwork:
         """
         Initializes a dictionary with the predecessors of each patch based on the transition probabilities.
         Only patches with non-zero probabilities are considered.
-        The dictionary is nested: predecessors[s'] = [(s, a), ...] for each s' that can be reached from s with action a.
+        The dictionary is nested: predecessors[s'][a] = [s_1,s_2, ...] with s_i being the patches that reach s' with action a.
         """
-        #TODO: Maybe change this to a more nested structure, where the actions are also stored in a middle layer P[s'][a] = [s1,s2, ...]
-
+        
         predecessors = dict()
-        for s in self.trans_probs:
-            for a in self.trans_probs[s]:
-                for s_prime in self.trans_probs[s][a]:
+        for s in self.trans_probs.keys():
+            for a in self.trans_probs[s].keys():
+                for s_prime in self.trans_probs[s][a].keys():
                     if self.trans_probs[s][a][s_prime] > 0: #should be unnecessary, but for numerical safety (we only want to add predecessors for non-zero probabilities)
-                        predecessors.setdefault(s_prime, []).append((s, a))
+                        predecessors.setdefault(s_prime, {}).setdefault(int(a), set()).add(s)
                     else:
                         raise ValueError('There exists a Zero Probability in the Transition Probabilities Dict')
         return predecessors
@@ -135,6 +105,53 @@ class Patchwork:
             entropy_dict[s]['avg'] = sum(entropy_dict[s].values()) / len(entropy_dict[s].values())
         
         return entropy_dict
+
+    def _init_adjacent_cells_losses(self):
+        """
+        Initializes a SortedValueDict with the entropy loss of merging adjacent patches.
+        The dictionary is sorted by the entropy loss and provides efficient functions for:
+            - insert(key,value): Inserting a key-value pair.
+            - extract_min(): Extracting the key-value pair with the smallest value.
+            - remove_by_key(key): Removing the key-value pair with the given key.
+        """
+        adjacent_cells_losses = SortedValueDict()
+        for cell, neighbors in self.patch_neighbors.items():
+            for neighbor in neighbors:
+                if neighbor > cell: #only calculate once for each pair
+                    adjacent_cells_losses.insert((cell, neighbor),self.calculate_entropy_loss(cell, neighbor))
+        return  adjacent_cells_losses 
+    
+    #****************************************************************************************************************
+    #Helper Functions for _init Functions  **************************************************************************
+    #****************************************************************************************************************
+
+    def _switch_from_control_to_action(self, df):
+        """
+        Switches the control column of the df to an action column, where each action is an integer, starting from 0.
+        Returns additionally a dictionary mapping actions to controls.
+
+        Args:
+            df (DataFrame): The DataFrame containing the simulation data, already prepared with columns 'x', 'y', 'c'.
+        Returns:
+            action_to_control_dict (dict): A dictionary mapping actions to controls.
+            df (DataFrame): The DataFrame with the 'c' column replaced by the 'a' column and the corresponding mapping.
+        """
+        unique_controls = df['c'].unique()
+        action_to_control_dict = {action_idx: control for action_idx, control in enumerate(unique_controls)}
+        df['a'] = df['c'].map({control: action_idx for action_idx, control in action_to_control_dict.items()})
+        df = df.drop(columns=['c'])
+        return action_to_control_dict, df
+    
+    def _add_cell_and_patch_ids_in_df(self, df):
+        """
+        Adds columns 'x_cell', 'y_cell', 'x_patch_id', 'y_patch_id' to the DataFrame df.
+        'cells' always refer to the grid cells (=their coordinates), 'patch_id' refers to the index of the patch in the list of patches.
+        """
+        df['x_cell'] = df['x'].apply(self.grid.get_cell_index)
+        df['y_cell'] = df['y'].apply(self.grid.get_cell_index)
+        df['x_patch_id'] = df['x_cell'].map(self.cell_to_patchindex)
+        df['y_patch_id'] = df['y_cell'].map(self.cell_to_patchindex)
+        return df
     
     def get_prob_distr_over_all_actions(self, patch):
         ''' Probably won't be used in the final version'''
@@ -146,6 +163,10 @@ class Patchwork:
                 combined_probs[y] =combined_probs.get(y, 0) + prob / len(self.trans_probs[patch].keys())  # Weighted sum
         return combined_probs
 
+
+    #****************************************************************************************************************
+    #Functions for the Clustering Algorithm  **************************************************************************
+    #****************************************************************************************************************
     
     def compute_merged_entropy(self, patch1,patch2, newpatch = 'new'):
         """
@@ -182,8 +203,6 @@ class Patchwork:
 
         return merged_entropy_dict, merged_probs
 
-    
-
     def calculate_entropy_loss(self, patch1, patch2):
         """
         Calculates the relevance-weighted entropy loss of merging patch1 and patch2.
@@ -203,19 +222,169 @@ class Patchwork:
 
         return entropy_loss
 
-
-    def _init_adjacent_cells_losses(self):
+    def merge_adjacent_patches(self, patch1, patch2, newpatch):
         """
-        Initializes a SortedValueDict with the entropy loss of merging adjacent patches.
-        The dictionary is sorted by the entropy loss and provides efficient functions for:
-            - insert(key,value): Inserting a key-value pair.
-            - extract_min(): Extracting the key-value pair with the smallest value.
-            - remove_by_key(key): Removing the key-value pair with the given key.
+        Merges the two adjacent patches patch1, patch2 into newpatch.
+        Update all relevant data structures accordingly.
         """
-        adjacent_cells_losses = SortedValueDict()
-        for cell, neighbors in self.patch_neighbors.items():
-            for neighbor in neighbors:
-                if neighbor > cell: #only calculate once for each pair
-                    adjacent_cells_losses.insert((cell, neighbor),self.calculate_entropy_loss(cell, neighbor))
-        return  adjacent_cells_losses 
         
+        merged_entropy_dict, merged_probs = self.compute_merged_entropy(patch1, patch2, newpatch)
+        self._update_trans_probabilities(patch1, patch2, newpatch, merged_probs)
+        self._update_entropy_dict(patch1, patch2, newpatch, merged_entropy_dict)
+        self._update_patch_relevances(patch1, patch2, newpatch)
+
+        self._update_predecessors(patch1, patch2, newpatch)
+        self._update_patch_neighbors(patch1, patch2, newpatch)
+        self._update_adjacent_cells_losses(patch1, patch2, newpatch)
+
+        self._update_parents(patch1, patch2, newpatch)
+
+        return 
+           
+    def step(self):
+        """
+        Performs one step of the clustering algorithm.
+        Merges the two adjacent patches with the smallest entropy loss.
+        """
+        
+        patch1, patch2 = self.adjacent_cells_losses.extract_min()[0]
+        print('Merging patches:', patch1, patch2)
+        if patch1 is None or patch2 is None:
+            print('No more patches to merge')
+            return 
+        
+        newpatch = self.current_patches[-1] + 1
+        self.current_patches.append(newpatch)
+
+        self.merge_adjacent_patches(patch1, patch2, newpatch)
+
+        self.current_patches.remove(patch1)
+        self.current_patches.remove(patch2)
+        
+        return 
+
+
+    #****************************************************************************************************************
+    #Helper Functions for the Clustering Algorithm  *******************************************************************
+    #****************************************************************************************************************
+
+    def _update_trans_probabilities(self, patch1, patch2, newpatch, merged_probs):
+        """
+        Updates the transition probabilities for merging patch1 and patch2 into newpatch.
+        The transition probabilities of patch1 and patch2 are removed from the dictionary.
+        
+        self.predecessors[s][a] = [s_1, s_2, ...] for each s_i that reaches s with action a.
+        """
+
+        # Create newpatch entry
+        self.trans_probs[newpatch] = merged_probs
+
+        # Update the transition probabilities of the predecessors of patch1 and patch2, remove old ones
+        for patch in [patch1, patch2]:
+            for a in self.predecessors[patch]:
+                for predecessor in self.predecessors[patch][a]:
+                    self.trans_probs[predecessor][a][newpatch] =  self.trans_probs[predecessor][a].get(newpatch,0) + self.trans_probs[predecessor][a][patch]
+                    del self.trans_probs[predecessor][a][patch]
+
+        # Remove patch1 and patch2 entries
+        del self.trans_probs[patch1]
+        del self.trans_probs[patch2]
+
+        return 
+    
+    def _update_entropy_dict(self, patch1, patch2, newpatch, merged_entropy_dict):
+        """
+        Updates the entropy dictionary for merging patch1 and patch2 into newpatch.
+        The entropies of patch1 and patch2 are removed from the dictionary.
+        """
+        self.entropy_dict[newpatch] = merged_entropy_dict
+        del self.entropy_dict[patch1]
+        del self.entropy_dict[patch2]
+
+        return
+    
+    def _update_patch_relevances(self, patch1, patch2, newpatch):
+        """
+        Updates the patch relevances for merging patch1 and patch2 into newpatch.
+        The relevance of newpatch is the sum of the relevances of patch1 and patch2.
+        The relevances of patch1 and patch2 are removed from the dictionary.
+        """
+        self.patch_relevances[newpatch] = self.patch_relevances[patch1] + self.patch_relevances[patch2]
+        del self.patch_relevances[patch1]
+        del self.patch_relevances[patch2]
+
+        return
+    
+    def _update_predecessors(self, patch1, patch2, newpatch):
+        """
+        Updates the predecessors dictionary for merging patch1 and patch2 into newpatch.
+        The predecessors of newpatch are the union of the predecessors of patch1 and patch2.
+        Additionally, the predecessors-set of all patches where patch1 or patch2 are predecessors is updated by replacing patch1 or/and patch2 with newpatch.
+        The predecessors of patch1 and patch2 are removed from the dictionary.
+        """
+        # Update all predecessors of newpatch (prior predecessors of patch1 and patch2)
+        self.predecessors[newpatch] = dict()
+        for patch in [patch1, patch2]:
+            for a, patch_predecessors in self.predecessors[patch].items():
+                self.predecessors[newpatch].setdefault(a, set()).update(patch_predecessors)
+
+        # Update the predecessors-set of all patches where patch1 or patch2 are predecessors
+        for a, action_trans_probs in self.trans_probs[newpatch].items():
+            for s_prime in action_trans_probs:
+                self.predecessors[s_prime][a].add(newpatch)
+                self.predecessors[s_prime][a].discard(patch1) #removes or does nothing
+                self.predecessors[s_prime][a].discard(patch2) #removes or does nothing
+           
+        # Remove patch1 and patch2 entries rom the predecessors dictionary
+        del self.predecessors[patch1]
+        del self.predecessors[patch2]
+
+        return
+    
+    def _update_parents(self, patch1, patch2, newpatch):
+        """
+        Updates the parents dictionary for merging patch1 and patch2 into newpatch.
+        The parents of newpatch are  patch1 and patch2."""
+        #TODO maybe change to a nested dictionary/list/set of parents of parents
+
+        self.parents[newpatch] = (patch1, patch2)
+        return
+    
+    def _update_patch_neighbors(self, patch1, patch2, newpatch):
+        """
+        Updates the patch neighbors dictionary for merging patch1 and patch2 into newpatch.
+        The neighbors of newpatch are the union of the neighbors of patch1 and patch2 without themselves (patch1 and patch2).
+        Additionally, the neighbors-set of all patches where patch1 or patch2 are neighbors is updated by replacing patch1 or/and patch2 with newpatch.
+        The entries of patch1 and patch2 are removed from the dictionary.
+        """
+        
+        # Update the neighbors-set of all patches where patch1 or patch2 are neighbors
+        for patch in [patch1, patch2]:
+            for neighbor in self.patch_neighbors[patch]:
+                if neighbor != patch1 and neighbor != patch2:
+                    self.patch_neighbors[neighbor].add(newpatch)
+                    self.patch_neighbors[neighbor].remove(patch)
+            
+        # Update all neighbors of newpatch (prior neighbors of patch1 and patch2)
+        self.patch_neighbors[newpatch] = self.patch_neighbors[patch1].union(self.patch_neighbors[patch2])
+        self.patch_neighbors[newpatch].remove(patch1)
+        self.patch_neighbors[newpatch].remove(patch2)
+
+        return
+    
+    def _update_adjacent_cells_losses(self, patch1, patch2, newpatch):
+        """
+        Updates the adjacent cells losses dictionary for merging patch1 and patch2 into newpatch.
+        That is, the entries for the adjacent patches of newpatch are added to the dictionary.
+        And the entries which contain patch1 and patch2 are removed from the dictionary.
+            (Here the entry for (patch1,patch2) is already removed in the merge_adjacent_patches function.)
+        """
+        
+        for neighbor in self.patch_neighbors[newpatch]:
+            # Create newpatch entries
+            self.adjacent_cells_losses.insert((neighbor, newpatch) , self.calculate_entropy_loss(neighbor, newpatch)) #always neighbor < newpatch 
+            # Remove all patch1 and patch2 entries
+            for patch in [patch1, patch2]:
+                key = tuple(sorted((patch, neighbor)))
+                self.adjacent_cells_losses.remove_by_key(key)
+        return
