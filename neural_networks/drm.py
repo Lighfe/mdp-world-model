@@ -155,24 +155,9 @@ class DiscreteRepresentationsModel(nn.Module):
         Returns:
             s_y_pred: Predicted next state probabilities
         """
-        """# Concatenate current state probabilities with control input
-        predictor_input = torch.cat([s_x, c], dim=1)
-        logits = self.predictor(predictor_input)
-        s_y_pred = F.softmax(logits, dim=1)
-        return s_y_pred"""
 
-        # First layer processing state representation
-        features = F.relu(self.predictor_input(s_x))
-        # Apply control gate to modulate features based on control
-        gated_features = self.control_gate(features, c)
-        # Second hidden layer
-        hidden = F.relu(self.predictor_hidden(gated_features))
-        # Output layer
-        logits = self.predictor_output(hidden)
-        # Apply softmax to get probabilities
-        s_y_pred = F.softmax(logits, dim=1)
+        return self.predictor(s_x, c)
 
-        return s_y_pred
     
     def compute_value(self, s_y):
         """
