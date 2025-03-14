@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from neural_networks.drm_dataset import create_data_loaders
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel
-from data_generation.models.tech_substitution import TechnologySubstitution, NumericalSolver
+from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.simulations.grid import tangent_transformation
 
 
@@ -39,7 +39,6 @@ def visualize_state_space(model, output_path, transformations=None, device='cpu'
     """
     if transformations is None:
         # Default to tangent transformation if none provided
-        from data_generation.simulations.grid import tangent_transformation
         transformations = [
             tangent_transformation(1.0, 0.5),  # For x1 dimension
             tangent_transformation(1.0, 0.5)   # For x2 dimension

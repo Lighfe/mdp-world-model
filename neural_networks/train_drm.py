@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from neural_networks.drm_dataset import create_data_loaders
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel
-from data_generation.models.tech_substitution import TechnologySubstitution, NumericalSolver
+from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.simulations.grid import tangent_transformation
 from neural_networks.drm_viz import visualize_state_space, analyze_state_transitions, visualize_transition_matrices
 
@@ -163,7 +163,7 @@ def train_drm_model(db_path,
     
     # Import the TechnologySubstitution model and NumericalSolver
     tech_sub_model = TechnologySubstitution()
-    tech_sub_solver = NumericalSolver(tech_sub_model)
+    tech_sub_solver = TechSubNumericalSolver(tech_sub_model)
     
     # Create data loaders
     train_loader, val_loader, test_loader = create_data_loaders(
