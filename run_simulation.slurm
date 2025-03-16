@@ -30,7 +30,7 @@ echo "Starting simulation with control=0.5..."
 python run_simulation.py \
     --use-importance \
     --importance-method angular \
-    --min_samples_per_cell 10 \
+    --min-samples-per-cell 10 \
     --importance-alpha 0.5 \
     --possible-controls 0.5 1.0 \
     --total-samples 10000 \
@@ -44,7 +44,7 @@ echo "Starting simulation with control=1.0..."
 python run_simulation.py \
     --use-importance \
     --importance-method angular \
-    --min_samples_per_cell 10 \
+    --min-samples-per-cell 10 \
     --importance-alpha 0.5 \
     --possible-controls 0.5 1.0 \
     --total-samples 10000 \

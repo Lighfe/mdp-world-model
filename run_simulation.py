@@ -32,7 +32,7 @@ def main():
     parser.add_argument('--use-importance', action='store_true',
                         help='Use importance-based sampling')
     parser.add_argument('--importance-method', type=str, default='angular', 
-                        choices=['angular', 'norm', 'component_wise'],
+                        choices=['angular', 'component_wise'],
                         help='Method to calculate importance measure')
     parser.add_argument('--importance-alpha', type=float, default=1.0,
                         help='Alpha parameter for importance calculation (power transformation, 0-1)')
