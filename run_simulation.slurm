@@ -28,22 +28,30 @@ export OMP_PROC_BIND=true
 # Run the simulation script with control=0.5
 echo "Starting simulation with control=0.5..."
 python run_simulation.py \
-    --resolution 10 10 \
-    --samples-per-cell 50 \
-    --num-steps 2 \
+    --use-importance \
+    --importance-method angular \
+    --min_samples_per_cell 10 \
+    --importance-alpha 0.5 \
+    --possible-controls 0.5 1.0 \
+    --total-samples 10000 \
+    --num-steps 1 \
     --delta-t 2.65 \
     --control 0.5 \
-    --db-name tech_sim.db
+    --db-name tech_importance_angular.db
 
 # Run the simulation script with control=1.0
 echo "Starting simulation with control=1.0..."
 python run_simulation.py \
-    --resolution 10 10 \
-    --samples-per-cell 50 \
-    --num-steps 2 \
+    --use-importance \
+    --importance-method angular \
+    --min_samples_per_cell 10 \
+    --importance-alpha 0.5 \
+    --possible-controls 0.5 1.0 \
+    --total-samples 10000 \
+    --num-steps 1 \
     --delta-t 2.65 \
     --control 1.0 \
-    --db-name tech_sim.db
+    --db-name tech_importance_angular.db
 
 # Print completion information
 echo "Job finished at $(date)"

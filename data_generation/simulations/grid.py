@@ -262,6 +262,43 @@ class Grid:
             rnd_point = tuple(random.uniform(self.grid_lines[dim][i], self.grid_lines[dim][i+1]) for dim, i in enumerate(idx))
         
         return rnd_point
+    
+    def choose_multiple_random_points_from_cell(self, idx, n_samples):
+        """
+        Chooses multiple random points from a grid cell at once.
+        
+        Args: 
+            idx (tuple): The grid cell index (e.g., (i, j))
+            n_samples (int): Number of samples to generate
+        
+        Returns: 
+            np.array: Array of random points in original coordinates, shape (n_samples, dimension)
+        """
+        if n_samples <= 0:
+            return np.empty((0, self.dimension))
+        
+        # Get the cell boundaries in transformed space
+        if self.transformed_bool:
+            cell_bounds = [(self.tf_grid_lines[dim][i], self.tf_grid_lines[dim][i+1]) 
+                        for dim, i in enumerate(idx)]
+            
+            # Generate random points in transformed space
+            tf_points = np.zeros((n_samples, self.dimension))
+            for dim, (lower, upper) in enumerate(cell_bounds):
+                tf_points[:, dim] = np.random.uniform(lower, upper, n_samples)
+            
+            # Transform back to original space
+            return self.inverse_transform(tf_points)
+        else:
+            cell_bounds = [(self.grid_lines[dim][i], self.grid_lines[dim][i+1]) 
+                        for dim, i in enumerate(idx)]
+            
+            # Generate random points directly in original space
+            points = np.zeros((n_samples, self.dimension))
+            for dim, (lower, upper) in enumerate(cell_bounds):
+                points[:, dim] = np.random.uniform(lower, upper, n_samples)
+            
+            return points
 
 # TODO the transformation functions should be named exactly as the generating function
 def fractional_transformation(x0):
