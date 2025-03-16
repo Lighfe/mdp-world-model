@@ -16,3 +16,4 @@ dependencies:
   - joblib=1.4.2
   - pytorch=2.5.1
   - pytorch-cuda=12.1
+  - psutil
