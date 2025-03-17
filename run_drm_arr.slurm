@@ -49,7 +49,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
 --hidden_dim=128 \
 --state_loss_weight=1.0 \
 --value_loss_weight=2.0 \
---predictor_type=bilinear
+--predictor_type=control_gate
 
 # Print completion information
 echo "Job finished at $(date)"
