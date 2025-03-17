@@ -100,8 +100,8 @@ class ControlGatePredictor(BasePredictor):
     """Predictor using control gate to modulate features"""
     def __init__(self, num_states, control_dim, hidden_dim):
         super().__init__(num_states, control_dim, hidden_dim)
-        self.predictor_input = nn.Linear(num_states, hidden_dim)
-        self.control_gate = ControlGate(hidden_dim, control_dim)
+        # apply control gate directly on the state embedding
+        self.control_gate = ControlGate(num_states, control_dim)
         self.predictor_hidden = nn.Linear(hidden_dim, hidden_dim)
         self.predictor_output = nn.Linear(hidden_dim, num_states)
     
