@@ -33,7 +33,7 @@ export OMP_PROC_BIND=true
 
 # Run training script
 echo "Starting training job $SLURM_ARRAY_TASK_ID..."
-python -m neural_networks.train_drm datasets/results/tech_sim.db \
+python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
 --output_dir=neural_networks/output \
 --val_size=2000 \
 --test_size=2000 \
