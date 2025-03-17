@@ -6,12 +6,18 @@ import sys
 
 
 class Grid:
-
-    """ 
-    Grid Class implementation for finite and infinite grids, with the possibility of transformations.
-
-    If a transformation is defined, the grid is constructed in the transformed space with the given resolution.
-    Then, the grid lines are transformed back to the original space.
+    """
+    Grid Class implementation for finite and infinite grids, with optional transformations.
+    
+    Coordinate System:
+    - Uses Cartesian coordinates where [0, 0] is the bottom-left corner
+    - First index is x-axis (horizontal)
+    - Second index is y-axis (vertical)
+    - Additional dimensions follow the same pattern
+    - This differs from numpy's default indexing where [0, 0] is top-left
+    
+    If a transformation is defined, the grid is constructed in the transformed space 
+    with the given resolution. The grid lines are then transformed back to the original space.
     """
     
     def __init__(self, bounds, resolution, grid_transformations=None):
@@ -265,7 +271,7 @@ class Grid:
     
     def choose_multiple_random_points_from_cell(self, idx, n_samples):
         """
-        Chooses multiple random points from a grid cell at once.
+        Efficiently generates multiple random points from a grid cell at once.
         
         Args: 
             idx (tuple): The grid cell index (e.g., (i, j))
@@ -277,28 +283,28 @@ class Grid:
         if n_samples <= 0:
             return np.empty((0, self.dimension))
         
-        # Get the cell boundaries in transformed space
         if self.transformed_bool:
-            cell_bounds = [(self.tf_grid_lines[dim][i], self.tf_grid_lines[dim][i+1]) 
-                        for dim, i in enumerate(idx)]
+            # Get cell boundaries in transformed space
+            cell_bounds = np.array([(self.tf_grid_lines[dim][i], self.tf_grid_lines[dim][i+1]) 
+                        for dim, i in enumerate(idx)])
             
-            # Generate random points in transformed space
-            tf_points = np.zeros((n_samples, self.dimension))
-            for dim, (lower, upper) in enumerate(cell_bounds):
-                tf_points[:, dim] = np.random.uniform(lower, upper, n_samples)
+            # Generate all random points at once (more efficient than dimension-by-dimension)
+            # Generate in [0,1) range, then scale and shift to cell bounds
+            random_points = np.random.random((n_samples, self.dimension))
+            ranges = cell_bounds[:, 1] - cell_bounds[:, 0]
+            tf_points = random_points * ranges + cell_bounds[:, 0]
             
             # Transform back to original space
             return self.inverse_transform(tf_points)
         else:
-            cell_bounds = [(self.grid_lines[dim][i], self.grid_lines[dim][i+1]) 
-                        for dim, i in enumerate(idx)]
+            # Get cell boundaries in original space
+            cell_bounds = np.array([(self.grid_lines[dim][i], self.grid_lines[dim][i+1]) 
+                        for dim, i in enumerate(idx)])
             
-            # Generate random points directly in original space
-            points = np.zeros((n_samples, self.dimension))
-            for dim, (lower, upper) in enumerate(cell_bounds):
-                points[:, dim] = np.random.uniform(lower, upper, n_samples)
-            
-            return points
+            # Generate all random points at once
+            random_points = np.random.random((n_samples, self.dimension))
+            ranges = cell_bounds[:, 1] - cell_bounds[:, 0]
+            return random_points * ranges + cell_bounds[:, 0]
 
 # TODO the transformation functions should be named exactly as the generating function
 def fractional_transformation(x0):

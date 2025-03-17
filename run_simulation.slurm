@@ -28,30 +28,98 @@ export OMP_PROC_BIND=true
 # Run the simulation script with control=0.5
 echo "Starting simulation with control=0.5..."
 python run_simulation.py \
+    --resolution 30 30 \
     --use-importance \
     --importance-method angular \
-    --min-samples-per-cell 10 \
+    --min-samples-per-cell 1 \
+    --importance-alpha 1.0 \
+    --possible-controls 0.5 1.0 \
+    --total-samples 10000 \
+    --num-steps 1 \
+    --delta-t 2.65 \
+    --control 0.5 \
+    --db-name tech_angular_xtr.db
+
+# Run the simulation script with control=1.0
+echo "Starting simulation with control=1.0..."
+python run_simulation.py \
+    --resolution 30 30 \
+    --use-importance \
+    --importance-method angular \
+    --min-samples-per-cell 1 \
+    --importance-alpha 1.0 \
+    --possible-controls 0.5 1.0 \
+    --total-samples 10000 \
+    --num-steps 1 \
+    --delta-t 2.65 \
+    --control 1.0 \
+    --db-name tech_angular_xtr.db
+
+# Print completion information
+echo "Job finished at $(date)"
+
+# Run the simulation script with control=0.5
+echo "Starting simulation with control=0.5..."
+python run_simulation.py \
+    --resolution 30 30 \
+    --use-importance \
+    --importance-method angular \
+    --min-samples-per-cell 2 \
     --importance-alpha 0.5 \
     --possible-controls 0.5 1.0 \
     --total-samples 10000 \
     --num-steps 1 \
     --delta-t 2.65 \
     --control 0.5 \
-    --db-name tech_importance_angular.db
+    --db-name tech_angular_med.db
 
 # Run the simulation script with control=1.0
 echo "Starting simulation with control=1.0..."
 python run_simulation.py \
+    --resolution 30 30 \
     --use-importance \
     --importance-method angular \
-    --min-samples-per-cell 10 \
+    --min-samples-per-cell 2 \
     --importance-alpha 0.5 \
     --possible-controls 0.5 1.0 \
     --total-samples 10000 \
     --num-steps 1 \
     --delta-t 2.65 \
     --control 1.0 \
-    --db-name tech_importance_angular.db
+    --db-name tech_angular_med.db
+
+# Print completion information
+echo "Job finished at $(date)"
+
+# Run the simulation script with control=0.5
+echo "Starting simulation with control=0.5..."
+python run_simulation.py \
+    --resolution 30 30 \
+    --use-importance \
+    --importance-method angular \
+    --min-samples-per-cell 5 \
+    --importance-alpha 0.3 \
+    --possible-controls 0.5 1.0 \
+    --total-samples 10000 \
+    --num-steps 1 \
+    --delta-t 2.65 \
+    --control 0.5 \
+    --db-name tech_angular_lt.db
+
+# Run the simulation script with control=1.0
+echo "Starting simulation with control=1.0..."
+python run_simulation.py \
+    --resolution 30 30 \
+    --use-importance \
+    --importance-method angular \
+    --min-samples-per-cell 5 \
+    --importance-alpha 0.3 \
+    --possible-controls 0.5 1.0 \
+    --total-samples 10000 \
+    --num-steps 1 \
+    --delta-t 2.65 \
+    --control 1.0 \
+    --db-name tech_angular_lt.db
 
 # Print completion information
 echo "Job finished at $(date)"

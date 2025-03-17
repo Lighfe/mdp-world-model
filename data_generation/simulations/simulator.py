@@ -13,6 +13,8 @@ from datasets.database import get_engine, init_db, create_results_table
 #to run this file as a package: python -m data_generation.simulations.simulator while being in the mdp-world-model folder
 
 class Simulator:
+    # TODO sample data
+    # TODO add alpha
     """
     Class for simulating trajectories on a grid.
     Expects a grid object from the Grid class.
@@ -80,14 +82,13 @@ class Simulator:
                 possible_controls, method=importance_method
             )
             
-            # Calculate total samples if not provided
-            if total_samples is None:
-                num_cells = np.prod(self.grid.resolution)
-                total_samples = num_cells * avg_samples_per_cell
+            samples_per_cell = self.importance_to_samples(importance_measure=importance, 
+                                                          total_samples=total_samples, 
+                                                          min_samples_per_cell=min_samples_per_cell)
             
             # Get initial conditions using importance-based sampling
             X, trajectory_ids = self.get_importance_based_samples(
-                importance, total_samples, min_samples_per_cell
+                samples_per_cell
             )
         else:
             # Use regular grid-based sampling
@@ -586,6 +587,52 @@ class Simulator:
         
         return samples_per_cell
 
+    def get_importance_based_samples(self, samples_per_cell):
+        """
+        Generate samples from grid cells based on importance sampling.
+        
+        Args:
+            samples_per_cell: Array with shape matching grid resolution containing
+                            the number of samples to generate for each cell
+        
+        Returns:
+            tuple: (X, trajectory_ids) where:
+                - X is an array of points in original space (shape: (total_samples, dimension))
+                - trajectory_ids is an array of IDs with format "i-j_k" where i-j is the cell
+                index and k is the sample number within that cell
+        """
+        # Calculate total number of samples
+        total_samples = np.sum(samples_per_cell)
+        
+        # Pre-allocate arrays
+        all_points = np.zeros((total_samples, self.grid.dimension))
+        all_ids = np.empty(total_samples, dtype=object)
+        
+        # Index to keep track of where we are in the output arrays
+        current_idx = 0
+        
+        # Iterate through all grid cells
+        for idx in self.grid.indices:
+            # Get number of samples for this cell
+            n_samples = samples_per_cell[idx]
+            
+            if n_samples > 0:
+                # Generate points for this cell
+                cell_points = self.grid.choose_multiple_random_points_from_cell(idx, n_samples)
+                
+                # Store points
+                all_points[current_idx:current_idx + n_samples] = cell_points
+                
+                # Generate and store trajectory IDs
+                cell_id = "-".join(map(str, idx))
+                for j in range(n_samples):
+                    all_ids[current_idx + j] = f"{cell_id}_{j}"
+                
+                # Update the index
+                current_idx += n_samples
+        
+        return all_points, all_ids
+
     def store_results_to_sqlite(self, filename='simulation_results.db'):
         """Store simulation results in SQLite database using SQLAlchemy"""
         
@@ -653,6 +700,7 @@ def run_and_store_simulations(output_dir,
                               num_samples_per_cell, 
                               num_steps, 
                               delta_t):
+    # TODO: This is not anymore in use. Use run_simulation.py instead.
     """Simulate and store simulation results in a SQLite database.
     
     Args:

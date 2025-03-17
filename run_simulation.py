@@ -23,7 +23,7 @@ def main():
                         help='Time step size')
     parser.add_argument('--num-steps', type=int, default=5,
                         help='Number of simulation steps')
-    parser.add_argument('--resolution', type=int, nargs=2, default=[20, 20],
+    parser.add_argument('--resolution', type=int, nargs=2, default=[30, 30],
                         help='Grid resolution as two integers, e.g., 10 10')
     parser.add_argument('--avg-samples-per-cell', type=int, default=10,
                         help='Average number of samples per cell')
