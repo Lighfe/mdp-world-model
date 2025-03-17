@@ -31,6 +31,10 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available()); pr
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
+# Add delay based on array task ID (in seconds)
+# First job (ID=1) starts immediately, second job (ID=2) waits 5 seconds
+sleep $((($SLURM_ARRAY_TASK_ID - 1) * 5))
+
 # Run training script
 echo "Starting training job $SLURM_ARRAY_TASK_ID..."
 python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
