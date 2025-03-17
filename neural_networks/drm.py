@@ -106,8 +106,7 @@ class ControlGatePredictor(BasePredictor):
         self.predictor_output = nn.Linear(hidden_dim, num_states)
     
     def forward(self, s_x, c):
-        features = F.relu(self.predictor_input(s_x))
-        gated_features = self.control_gate(features, c)
+        gated_features = self.control_gate(s_x, c)
         hidden = F.relu(self.predictor_hidden(gated_features))
         logits = self.predictor_output(hidden)
         s_y_pred = F.softmax(logits, dim=1)
