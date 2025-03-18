@@ -514,16 +514,21 @@ def train_drm_model(db_path,
         json.dump(test_metrics, f, indent=4)
     print(f"Saved test results to {test_results_path}")
     
-    # Optional: Plot test predictions vs targets
-    plt.figure(figsize=(10, 6))
-    plt.scatter(test_value_targets, test_value_predictions, alpha=0.5)
-    plt.plot([min(test_value_targets), max(test_value_targets)], 
-             [min(test_value_targets), max(test_value_targets)], 'r--')
-    plt.xlabel('True Values')
-    plt.ylabel('Predicted Values')
-    plt.title(f'Test Set Predictions vs Targets (R² = {r2_score:.4f})')
-    plt.savefig(os.path.join(output_dir, f"test_predictions_{run_id}.png"))
-    plt.close()
+    # Print test errors
+    print(f"\nTest Set Evaluation Results:")
+    print(f"  Test Loss: {test_loss:.4f}")
+    print(f"  Test State Loss: {test_state_loss:.4f}")
+    print(f"  Test Value Loss: {test_value_loss:.4f}")
+    if test_div_loss > 0:
+        print(f"  Test Diversity Loss: {test_div_loss:.4f}")
+
+    # For multi-dimensional outputs, report per-dimension errors if applicable
+    if test_value_predictions.ndim > 1 and test_value_predictions.shape[1] > 1:
+        print(f"\nPer-dimension value metrics:")
+        for dim in range(test_value_predictions.shape[1]):
+            dim_mse = np.mean((test_value_targets[:, dim] - test_value_predictions[:, dim])**2)
+            dim_mae = np.mean(np.abs(test_value_targets[:, dim] - test_value_predictions[:, dim]))
+            print(f"  Dimension {dim}: MSE={dim_mse:.4f}, MAE={dim_mae:.4f}")
     
     # Save final model
     final_model_path = os.path.join(output_dir, f"drm_final_{run_id}.pt")
