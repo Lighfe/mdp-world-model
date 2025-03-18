@@ -39,6 +39,7 @@ sleep $((($SLURM_ARRAY_TASK_ID - 1) * 5))
 echo "Starting training job $SLURM_ARRAY_TASK_ID..."
 python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
 --output_dir=neural_networks/output \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=128 \
@@ -50,7 +51,47 @@ python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
 --state_loss_weight=1.0 \
 --value_loss_weight=2.0 \
 --predictor_type=bilinear \
---value_method=market_share
+--value_method="market_share"
+
+# Print completion information
+echo "Job finished at $(date)"
+
+echo "Starting training job $SLURM_ARRAY_TASK_ID..."
+python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
+--output_dir=neural_networks/output \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
+--val_size=2000 \
+--test_size=2000 \
+--batch_size=128 \
+--epochs=100 \
+--lr=0.0001 \
+--patience=10 \
+--num_states=3 \
+--hidden_dim=128 \
+--state_loss_weight=1.0 \
+--value_loss_weight=2.0 \
+--predictor_type=bilinear \
+--value_method="90% market share"
+
+# Print completion information
+echo "Job finished at $(date)"
+
+echo "Starting training job $SLURM_ARRAY_TASK_ID..."
+python -m neural_networks.train_drm datasets/results/tech_angular_xtr.db \
+--output_dir=neural_networks/output \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
+--val_size=2000 \
+--test_size=2000 \
+--batch_size=128 \
+--epochs=100 \
+--lr=0.0001 \
+--patience=10 \
+--num_states=3 \
+--hidden_dim=128 \
+--state_loss_weight=1.0 \
+--value_loss_weight=2.0 \
+--predictor_type=bilinear \
+--value_method="identity"
 
 # Print completion information
 echo "Job finished at $(date)"

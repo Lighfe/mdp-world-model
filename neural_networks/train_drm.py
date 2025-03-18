@@ -608,7 +608,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train Discrete Representations Model')
     parser.add_argument('db_path', type=str, help='Path to the SQLite database (can be relative to project root)')
     parser.add_argument('--output_dir', type=str, default='neural_networks/output', help='Directory to save outputs')
-    
+    parser.add_argument('--run_id', type=str, default=None, 
+                    help='Custom run ID for this training run (default: timestamp)')
     parser.add_argument('--val_size', type=int, default=2000, help='Number of validation samples')
     parser.add_argument('--test_size', type=int, default=2000, help='Number of test samples')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
@@ -637,10 +638,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    #run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_output_dir = Path(args.output_dir)
     if not base_output_dir.is_absolute():
         base_output_dir = Path.cwd() / base_output_dir
+
+    run_id = args.run_id if args.run_id else datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Create the final output directory with run_id
     output_dir = base_output_dir / f"run_{run_id}"
