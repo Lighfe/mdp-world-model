@@ -134,8 +134,7 @@ class TechSubstitutionDataset(Dataset):
             v_true = y2 / (y1+y2 +1e-10)
             return torch.tensor([v_true], dtype=torch.float32)
         elif value_method =='identity':
-            v_true = y
-            return torch.tensor([v_true], dtype=torch.float32)
+            return torch.tensor(y, dtype=torch.float32)
         elif value_method == '90% market share':
             v_true = (y2 / (y1+y2 +1e-10)) >= 0.9
             return torch.tensor([v_true], dtype=torch.bool)
