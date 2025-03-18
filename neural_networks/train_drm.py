@@ -170,6 +170,7 @@ def train_drm_model(db_path,
     train_loader, val_loader, test_loader = create_data_loaders(
         db_path=db_path,
         tech_sub_solver=tech_sub_solver,
+        value_method=value_method,
         batch_size=batch_size,
         val_size=val_size, test_size=test_size
     )
