@@ -98,7 +98,6 @@ class TechSubstitutionDataset(Dataset):
         
         # Calculate v_true using the solver's f_v function
         v_true = self.f_v(np.array([y0, y1]), value_method=self.value_method)
-        v_true = torch.tensor([v_true], dtype=torch.float32)
         
         # Check for NaN values
         if (torch.isnan(x).any() or torch.isnan(c).any() or 
