@@ -104,7 +104,8 @@ def train_drm_model(db_path,
                     initial_div_weight=0.5,
                     min_div_weight=0.05,
                     use_diversity_loss=False,
-                    predictor_type='control_gate'):
+                    predictor_type='control_gate',
+                    value_method=None):
     """
     Full training function for the Discrete Representations Model with stability improvements
     
@@ -172,11 +173,19 @@ def train_drm_model(db_path,
         batch_size=batch_size,
         val_size=val_size, test_size=test_size
     )
+
+        # Get a batch from the train loader to determine dimensions
+    for x, c, y, v_true in train_loader:
+        obs_dim = x.shape[1]  # Dimension of observation
+        control_dim = c.shape[1]  # Dimension of control
+        value_dim = v_true.shape[1]  # Dimension of value
+        break  # We just need one batch to determine dimensions
     
     # Initialize model
     model = DiscreteRepresentationsModel(
-        obs_dim=2,
-        control_dim=1,
+        obs_dim=obs_dim,
+        control_dim=control_dim,
+        value_dim=value_dim,
         num_states=num_states,
         hidden_dim=hidden_dim,
         predictor_type=predictor_type
@@ -623,6 +632,7 @@ if __name__ == "__main__":
     parser.add_argument('--predictor_type', type=str, default='control_gate', 
                         choices=['standard', 'control_gate', 'bilinear'],
                         help='Type of predictor to use (standard, control_gate or bilinear)')
+    parser.add_argument('--value_method', type=str, default='None', help='Which value function should be used')
     
     args = parser.parse_args()
 
@@ -655,10 +665,14 @@ if __name__ == "__main__":
         early_stopping_patience=args.patience,
         num_states=args.num_states,
         hidden_dim=args.hidden_dim,
-        state_loss_weight=args.state_loss_weight, 
+        checkpoint_every=10,
+        state_loss_weight=args.state_loss_weight,
         value_loss_weight=args.value_loss_weight,
         initial_div_weight=args.initial_div_weight,
-        min_div_weight=args.min_div_weight
+        min_div_weight=args.min_div_weight,
+        use_diversity_loss=args.use_diversity_loss,
+        predictor_type=args.predictor_type,
+        value_method=args.value_method
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

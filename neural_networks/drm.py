@@ -113,7 +113,7 @@ class ControlGatePredictor(BasePredictor):
         return s_y_pred
 
 class DiscreteRepresentationsModel(nn.Module):
-    def __init__(self, obs_dim=2, control_dim=1, num_states=4, hidden_dim=64, predictor_type='control_gate'):
+    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, predictor_type='bilinear'):
         """
         Initialize the Discrete Representations architecture with three components:
         1. Encoder: Maps observations to state probabilities via softmax
@@ -153,7 +153,7 @@ class DiscreteRepresentationsModel(nn.Module):
         self.value_net = nn.Sequential(
             nn.Linear(num_states, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1)  # Predict a single value (e.g., market share)
+            nn.Linear(hidden_dim, value_dim)  # Predict a single value (e.g., market share)
         )
         
         self.num_states = num_states

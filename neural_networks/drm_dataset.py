@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     print(f"Added {PROJECT_ROOT} to Python path")
 
 class TechSubstitutionDataset(Dataset):
-    def __init__(self, db_path, tech_sub_solver):
+    def __init__(self, db_path, tech_sub_solver, value_method):
         """
         Dataset for loading tech substitution data from SQLite database using SQLAlchemy
         
@@ -26,6 +26,7 @@ class TechSubstitutionDataset(Dataset):
         """
         self.db_path = db_path
         self.tech_sub_solver = tech_sub_solver
+        self.value_method = value_method
         
         # Create SQLAlchemy engine
         self.engine = create_engine(f"sqlite:///{db_path}")
@@ -96,7 +97,7 @@ class TechSubstitutionDataset(Dataset):
         y = torch.tensor([y0, y1], dtype=torch.float32)
         
         # Calculate v_true using the solver's f_v function
-        v_true = self.tech_sub_solver.f_v(np.array([y0, y1]))
+        v_true = self.f_v(np.array([y0, y1]), value_method=self.value_method)
         v_true = torch.tensor([v_true], dtype=torch.float32)
         
         # Check for NaN values
@@ -110,8 +111,39 @@ class TechSubstitutionDataset(Dataset):
             v_true = torch.nan_to_num(v_true, nan=0.0)
         
         return x, c, y, v_true
+    
+    def f_v(self, y, value_method):
+                # returns market share of technology 2
+        # NOTE: "real" market share would be how much is produced at one time step (derivative). But x or y does not have this information, lacks c and delta_t.
+            # If y is a tuple or list, convert to an array for consistent handling
+        if isinstance(y, (tuple, list)):
+            y = np.array(y)
 
-def create_data_loaders(db_path, tech_sub_solver, batch_size=64, val_size=1000, test_size=1000, seed=42):
+        # Now y is a NumPy array.
+        if y.ndim == 1:
+            # Expecting a single pair: (y1, y2)
+            y1, y2 = y
+        elif y.ndim == 2 and y.shape[1] == 2:
+            # Expecting an array of shape (n, 2)
+            y1 = y[:, 0]
+            y2 = y[:, 1]
+        else:
+            raise ValueError("Input must be a tuple of two values or an array of shape (n, 2)")
+        
+        if value_method is None or value_method == 'market_share': # this is default
+            v_true = y2 / (y1+y2 +1e-10)
+            return torch.tensor([v_true], dtype=torch.float32)
+        elif value_method =='identity':
+            v_true = y
+            return torch.tensor([v_true], dtype=torch.float32)
+        elif value_method == '90% market share':
+            v_true = (y2 / (y1+y2 +1e-10)) >= 0.9
+            return torch.tensor([v_true], dtype=torch.bool)
+        else:
+            raise NotImplementedError(f"Method '{value_method}' is not implemented.")
+
+
+def create_data_loaders(db_path, tech_sub_solver, value_method= None, batch_size=64, val_size=1000, test_size=1000, seed=42):
     """
     Create training, validation, and test data loaders from the database
     
@@ -128,7 +160,7 @@ def create_data_loaders(db_path, tech_sub_solver, batch_size=64, val_size=1000, 
     """
     
     # Create the dataset
-    dataset = TechSubstitutionDataset(db_path, tech_sub_solver)
+    dataset = TechSubstitutionDataset(db_path, tech_sub_solver, value_method)
     
     # Prepare indices for training, validation, and testing
     indices = list(range(len(dataset)))
