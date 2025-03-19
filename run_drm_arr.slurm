@@ -63,7 +63,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
 --val_size=2000 \
 --test_size=2000 \
---batch_size=64 \
+--batch_size=128 \
 --epochs=100 \
 --lr=0.0001 \
 --patience=10 \
@@ -84,12 +84,12 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
 --val_size=2000 \
 --test_size=2000 \
---batch_size=32 \
+--batch_size=64 \
 --epochs=100 \
 --lr=0.0001 \
 --patience=10 \
 --num_states=4 \
---hidden_dim=64 \
+--hidden_dim=128 \
 --state_loss_weight=1.0 \
 --value_loss_weight=1.0 \
 --predictor_type=bilinear \
@@ -110,7 +110,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --lr=0.0001 \
 --patience=10 \
 --num_states=4 \
---hidden_dim=32 \
+--hidden_dim=64 \
 --state_loss_weight=1.0 \
 --value_loss_weight=1.0 \
 --predictor_type=bilinear \
@@ -118,24 +118,3 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 
 # Print completion information
 echo "Job3 finished at $(date)"
-
-# Run training script
-echo "Starting training job $SLURM_ARRAY_TASK_ID..."
-python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
---output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
---val_size=2000 \
---test_size=2000 \
---batch_size=32 \
---epochs=100 \
---lr=0.0001 \
---patience=10 \
---num_states=4 \
---hidden_dim=32 \
---state_loss_weight=1.0 \
---value_loss_weight=1.0 \
---predictor_type=bilinear \
---value_method="market_share"
-
-# Print completion information
-echo "Job4 finished at $(date)"

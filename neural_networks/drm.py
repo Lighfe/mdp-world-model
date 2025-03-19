@@ -75,23 +75,32 @@ class BilinearPredictor(BasePredictor):
         super().__init__(num_states, control_dim, hidden_dim)
         # Only encode control - use state representation directly
         self.control_encoder = nn.Linear(control_dim, hidden_dim)
+        self.control_norm = nn.LayerNorm(hidden_dim)
         
         # Interaction layer - captures how control affects each state dimension
         self.interaction = nn.Bilinear(num_states, hidden_dim, hidden_dim)
+        self.interaction_norm = nn.LayerNorm(hidden_dim)
         
         # Output processing
         self.hidden = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_norm = nn.LayerNorm(hidden_dim)
         self.output = nn.Linear(hidden_dim, num_states)
     
     def forward(self, s_x, c):
         # Process control
-        control_features = F.relu(self.control_encoder(c))
+        control_features = self.control_norm(self.control_encoder(c))
+        control_features = F.relu(control_features)
         
         # Directly use s_x with control features to model interaction
         interaction = self.interaction(s_x, control_features)
+        interaction = self.interaction_norm(interaction)
+        interaction = F.relu(interaction)
         
         # Further processing
-        hidden = F.relu(self.hidden(interaction))
+        hidden = self.hidden(interaction)
+        hidden = self.hidden_norm(hidden)
+        hidden = F.relu(hidden)
+
         logits = self.output(hidden)
         s_y_pred = F.softmax(logits, dim=1)
         return s_y_pred
@@ -103,11 +112,14 @@ class ControlGatePredictor(BasePredictor):
         # apply control gate directly on the state embedding
         self.control_gate = ControlGate(num_states, control_dim)
         self.predictor_hidden = nn.Linear(num_states, hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim)
         self.predictor_output = nn.Linear(hidden_dim, num_states)
     
     def forward(self, s_x, c):
         gated_features = self.control_gate(s_x, c)
-        hidden = F.relu(self.predictor_hidden(gated_features))
+        hidden = self.predictor_hidden(gated_features)
+        hidden = self.norm(hidden)
+        hidden = F.relu(hidden)
         logits = self.predictor_output(hidden)
         s_y_pred = F.softmax(logits, dim=1)
         return s_y_pred
@@ -132,8 +144,10 @@ class DiscreteRepresentationsModel(nn.Module):
         # Encoder network (shared for x and y)
         self.encoder = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, num_states)  # Logits for state probabilities
         )
@@ -149,11 +163,11 @@ class DiscreteRepresentationsModel(nn.Module):
             raise ValueError(f"Unknown predictor type: {predictor_type}")
         
         # Value network: extracts information from the predicted state probabilities
-        # For tech substitution, we might want to predict market share of technology 2
         self.value_net = nn.Sequential(
             nn.Linear(num_states, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, value_dim)  # Predict a single value (e.g., market share)
+            nn.Linear(hidden_dim, value_dim)
         )
         
         self.num_states = num_states
