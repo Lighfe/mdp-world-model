@@ -105,7 +105,12 @@ def train_drm_model(db_path,
                     min_div_weight=0.05,
                     use_diversity_loss=False,
                     predictor_type='control_gate',
-                    value_method=None):
+                    value_method=None,
+                    use_lr_scheduler=False,
+                    scheduler_type='cosine',
+                    use_warmup=False,
+                    warmup_epochs=5,
+                    min_lr=1e-6):
     """
     Full training function for the Discrete Representations Model with stability improvements
     
@@ -215,6 +220,35 @@ def train_drm_model(db_path,
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
+        # Setup learning rate scheduling if enabled
+    if use_warmup:
+        # If warmup is enabled, start with a lower learning rate
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = learning_rate * 0.1  # Start at 10% of base learning rate
+        print(f"Using warmup for first {warmup_epochs} epochs (starting LR: {learning_rate * 0.1:.2e})")
+    
+    # Create scheduler if enabled
+    lr_scheduler = None
+    if use_lr_scheduler:
+        if scheduler_type == 'plateau':
+            lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, 
+                mode='min', 
+                factor=0.5,
+                patience=5,
+                verbose=True,
+                min_lr=min_lr
+            )
+            print(f"Using ReduceLROnPlateau scheduler (min_lr: {min_lr:.2e})")
+        else:  # cosine
+            T_max = epochs - warmup_epochs if use_warmup else epochs
+            lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=max(1, T_max),  # Ensure T_max is at least 1
+                eta_min=min_lr
+            )
+            print(f"Using CosineAnnealingLR scheduler (T_max: {T_max}, min_lr: {min_lr:.2e})")
+
     # Add gradient clipping
     max_grad_norm = 1.0
     
@@ -237,6 +271,15 @@ def train_drm_model(db_path,
     print(f"Starting training for {epochs} epochs...")
     
     for epoch in range(epochs):
+        # Handle warmup if enabled
+        if use_warmup and epoch < warmup_epochs:
+            # Linearly increase learning rate during warmup period
+            progress = (epoch + 1) / warmup_epochs
+            new_lr = learning_rate * (0.1 + 0.9 * progress)  # 10% to 100% of base LR
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = new_lr
+            print(f"Warmup epoch {epoch+1}/{warmup_epochs}, LR set to {new_lr:.2e}")
+
         # Training phase
         model.train()
         train_loss = 0.0
@@ -403,6 +446,17 @@ def train_drm_model(db_path,
             print(f"Saved best model to {best_model_path}")
         else:
             patience_counter += 1
+
+        # Apply learning rate scheduler after validation
+        if use_lr_scheduler and (not use_warmup or epoch >= warmup_epochs):
+            if scheduler_type == 'plateau':
+                lr_scheduler.step(val_loss)
+            else:  # cosine
+                lr_scheduler.step()
+        
+        # Print current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Current learning rate: {current_lr:.2e}")
             
         # Save checkpoint every N epochs
         if (epoch + 1) % checkpoint_every == 0:
@@ -640,6 +694,17 @@ if __name__ == "__main__":
                         choices=['standard', 'control_gate', 'bilinear'],
                         help='Type of predictor to use (standard, control_gate or bilinear)')
     parser.add_argument('--value_method', type=str, default='None', help='Which value function should be used')
+
+    parser.add_argument('--use_lr_scheduler', action='store_true', 
+                        help='Use learning rate scheduler')
+    parser.add_argument('--scheduler_type', type=str, choices=['plateau', 'cosine'], 
+                        default='cosine', help='Type of learning rate scheduler to use')
+    parser.add_argument('--use_warmup', action='store_true', 
+                        help='Use learning rate warmup')
+    parser.add_argument('--warmup_epochs', type=int, default=5, 
+                        help='Number of epochs for warmup')
+    parser.add_argument('--min_lr', type=float, default=1e-6, 
+                        help='Minimum learning rate')
     
     args = parser.parse_args()
 
@@ -661,7 +726,7 @@ if __name__ == "__main__":
     with open(output_dir / f"config_{run_id}.json", 'w') as f:
         json.dump(args_dict, f, indent=4)
     
-    # Train the model
+    # Run parsed training
     model, history = train_drm_model(
         db_path=args.db_path,
         output_dir=str(output_dir),
@@ -681,7 +746,12 @@ if __name__ == "__main__":
         min_div_weight=args.min_div_weight,
         use_diversity_loss=args.use_diversity_loss,
         predictor_type=args.predictor_type,
-        value_method=args.value_method
+        value_method=args.value_method,
+        use_lr_scheduler=args.use_lr_scheduler,
+        scheduler_type=args.scheduler_type,
+        use_warmup=args.use_warmup,
+        warmup_epochs=args.warmup_epochs,
+        min_lr=args.min_lr
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4
