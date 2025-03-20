@@ -13,7 +13,7 @@ import torch
 #from torchinfo import summary
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 import os
 import subprocess
 from pathlib import Path
