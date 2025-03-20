@@ -110,7 +110,11 @@ def train_drm_model(db_path,
                     scheduler_type='cosine',
                     use_warmup=False,
                     warmup_epochs=5,
-                    min_lr=1e-6):
+                    min_lr=1e-6,
+                    use_gumbel=False,
+                    initial_temp=1.0,
+                    min_temp=0.1,
+                    ):
     """
     Full training function for the Discrete Representations Model with stability improvements
     
@@ -194,7 +198,10 @@ def train_drm_model(db_path,
         value_dim=value_dim,
         num_states=num_states,
         hidden_dim=hidden_dim,
-        predictor_type=predictor_type
+        predictor_type=predictor_type,
+        use_gumbel=use_gumbel,
+        initial_temp=initial_temp,
+        min_temp=min_temp
     )
     
     # Initialize model weights properly
@@ -236,7 +243,6 @@ def train_drm_model(db_path,
                 mode='min', 
                 factor=0.5,
                 patience=5,
-                verbose=True,
                 min_lr=min_lr
             )
             print(f"Using ReduceLROnPlateau scheduler (min_lr: {min_lr:.2e})")
@@ -271,6 +277,11 @@ def train_drm_model(db_path,
     print(f"Starting training for {epochs} epochs...")
     
     for epoch in range(epochs):
+        # Update Gumbel temperature
+        if use_gumbel:
+            current_temp = model.update_temperature(epoch, epochs)
+            print(f"Epoch {epoch+1}/{epochs} - Gumbel temperature: {current_temp:.4f}")
+
         # Handle warmup if enabled
         if use_warmup and epoch < warmup_epochs:
             # Linearly increase learning rate during warmup period
@@ -306,7 +317,7 @@ def train_drm_model(db_path,
             
             try:
                 # Forward pass
-                s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true)
+                s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true, training=True)
                 
                 # Check for NaN values in model outputs
                 if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred).any():
@@ -374,7 +385,7 @@ def train_drm_model(db_path,
                 
                 try:
                     # Forward pass
-                    s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true)
+                    s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true, training=False)
                     
                     # Check for NaN values in model outputs
                     if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred).any():
@@ -450,9 +461,13 @@ def train_drm_model(db_path,
         # Apply learning rate scheduler after validation
         if use_lr_scheduler and (not use_warmup or epoch >= warmup_epochs):
             if scheduler_type == 'plateau':
+                old_lr = optimizer.param_groups[0]['lr']
                 lr_scheduler.step(val_loss)
+                new_lr = optimizer.param_groups[0]['lr']
+                if old_lr != new_lr:
+                    print(f"Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
             else:  # cosine
-                lr_scheduler.step()
+                        lr_scheduler.step()
         
         # Print current learning rate
         current_lr = optimizer.param_groups[0]['lr']
@@ -706,6 +721,13 @@ if __name__ == "__main__":
     parser.add_argument('--min_lr', type=float, default=1e-6, 
                         help='Minimum learning rate')
     
+    parser.add_argument('--use_gumbel', action='store_true', 
+                        help='Use Gumbel softmax for state encoding')
+    parser.add_argument('--initial_temp', type=float, default=1.0,
+                        help='Initial temperature for Gumbel softmax')
+    parser.add_argument('--min_temp', type=float, default=0.1,
+                        help='Minimum temperature for Gumbel softmax')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -751,7 +773,10 @@ if __name__ == "__main__":
         scheduler_type=args.scheduler_type,
         use_warmup=args.use_warmup,
         warmup_epochs=args.warmup_epochs,
-        min_lr=args.min_lr
+        min_lr=args.min_lr,
+        use_gumbel=args.use_gumbel,
+        initial_temp=args.initial_temp,
+        min_temp=args.min_temp
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

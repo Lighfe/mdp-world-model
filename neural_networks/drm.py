@@ -113,23 +113,30 @@ class ControlGatePredictor(BasePredictor):
         return s_y_pred
 
 class DiscreteRepresentationsModel(nn.Module):
-    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, predictor_type='bilinear'):
+    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, 
+                 predictor_type='bilinear', use_gumbel=False, initial_temp=1.0, min_temp=0.1):
         """
-        Initialize the Discrete Representations architecture with three components:
-        1. Encoder: Maps observations to state probabilities via softmax
-        2. Predictor: Predicts next state probabilities based on current state and control
-        3. Value Network: Maps predicted next state probabilities to a value
+        Initialize the Discrete Representations architecture
         
         Args:
             obs_dim: Dimension of the observations x and y
             control_dim: Dimension of the control input c
             num_states: Number of discrete states to model (number of logits)
             hidden_dim: Hidden layer size
-            predictor_type: Type of predictor ('standard' or 'control_gate')
+            predictor_type: Type of predictor ('standard', 'control_gate', or 'bilinear')
+            use_gumbel: Whether to use Gumbel softmax for state encoding
+            initial_temp: Initial temperature for Gumbel softmax
+            min_temp: Minimum temperature for Gumbel softmax
         """
         super(DiscreteRepresentationsModel, self).__init__()
         
-        # Encoder network (shared for x and y)
+        # Store Gumbel softmax parameters
+        self.use_gumbel = use_gumbel
+        self.current_temp = initial_temp
+        self.initial_temp = initial_temp
+        self.min_temp = min_temp
+        
+        # Rest of the initialization code remains the same
         self.encoder = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
             nn.ReLU(),
@@ -148,43 +155,97 @@ class DiscreteRepresentationsModel(nn.Module):
         else:
             raise ValueError(f"Unknown predictor type: {predictor_type}")
         
-        # Value network: extracts information from the predicted state probabilities
-        # For tech substitution, we might want to predict market share of technology 2
+        # Value network
         self.value_net = nn.Sequential(
             nn.Linear(num_states, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, value_dim)  # Predict a single value (e.g., market share)
+            nn.Linear(hidden_dim, value_dim)
         )
         
         self.num_states = num_states
     
-    def get_state_probs(self, x):
+    def get_state_probs(self, x, training=True, hard=False):
         """
         Get the state probabilities of an observation.
         
         Args:
             x: Observation tensor
+            training: Whether the model is in training mode
+            hard: Whether to use hard (one-hot) assignments
         
         Returns:
-            prob_x: State probabilities (softmax of logits)
+            prob_x: State probabilities
         """
         logits = self.encoder(x)
-        prob_x = F.softmax(logits, dim=1)
+        
+        if self.use_gumbel and training:
+            # During training with Gumbel
+            gumbel_dist = torch.distributions.RelaxedOneHotCategorical(
+                self.current_temp, logits=logits)
+            prob_x = gumbel_dist.rsample()
+        elif self.use_gumbel and hard:
+            # During inference with hard assignments
+            index = torch.argmax(logits, dim=1).unsqueeze(1)
+            prob_x = torch.zeros_like(logits).scatter_(1, index, 1.0)
+        else:
+            # Regular softmax (for non-Gumbel mode or Gumbel inference without hard assignment)
+            prob_x = F.softmax(logits, dim=1)
+        
         return prob_x
     
-    def predict_next_state(self, s_x, c):
+    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.8):
         """
-        Predict the next state probabilities based on current state and control.
+        Update the Gumbel softmax temperature based on training progress
         
         Args:
-            s_x: Current state probabilities
+            epoch: Current epoch
+            total_epochs: Total number of epochs
+            annealing_proportion: Proportion of epochs to use for annealing
+        """
+        if not self.use_gumbel:
+            return
+            
+        # Calculate annealing factor (from 0 to 1)
+        annealing_end = int(total_epochs * annealing_proportion)
+        if epoch >= annealing_end:
+            self.current_temp = self.min_temp
+        else:
+            # Linear annealing from initial_temp to min_temp
+            annealing_factor = epoch / annealing_end
+            self.current_temp = self.initial_temp - annealing_factor * (self.initial_temp - self.min_temp)
+            
+        return self.current_temp
+    
+    def forward(self, x, c, y, v_true, training=True):
+        """
+        Forward pass through the complete architecture.
+        
+        Args:
+            x: Current observation
             c: Control input
+            y: Next observation
+            v_true: True value computed from the environment
+            training: Whether the model is in training mode
         
         Returns:
+            s_x: Current state probabilities
+            s_y: Next state probabilities
             s_y_pred: Predicted next state probabilities
+            v_pred: Predicted value from predicted next state
         """
-
-        return self.predictor(s_x, c)
+        # Encode current observation
+        s_x = self.get_state_probs(x, training=training)
+        
+        # Encode next observation
+        s_y = self.get_state_probs(y, training=training)
+        
+        # Predict next state probabilities - always use soft predictions
+        s_y_pred = self.predict_next_state(s_x, c)
+        
+        # Compute value from predicted state
+        v_pred = self.compute_value(s_y_pred)
+        
+        return s_x, s_y, s_y_pred, v_pred
 
     
     def compute_value(self, s_y):
@@ -199,32 +260,3 @@ class DiscreteRepresentationsModel(nn.Module):
         """
         return self.value_net(s_y)
     
-    def forward(self, x, c, y, v_true):
-        """
-        Forward pass through the complete architecture.
-        
-        Args:
-            x: Current observation
-            c: Control input
-            y: Next observation
-            v_true: True value computed from the environment
-        
-        Returns:
-            s_x: Current state probabilities
-            s_y: Next state probabilities
-            s_y_pred: Predicted next state probabilities
-            v_pred: Predicted value from predicted next state
-        """
-        # Encode current observation
-        s_x = self.get_state_probs(x)
-        
-        # Encode next observation
-        s_y = self.get_state_probs(y)
-        
-        # Predict next state probabilities
-        s_y_pred = self.predict_next_state(s_x, c)
-        
-        # Compute value from predicted state
-        v_pred = self.compute_value(s_y_pred)
-        
-        return s_x, s_y, s_y_pred, v_pred
