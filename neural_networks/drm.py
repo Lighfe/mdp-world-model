@@ -193,26 +193,24 @@ class DiscreteRepresentationsModel(nn.Module):
         
         return prob_x
     
-    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.8):
-        """
-        Update the Gumbel softmax temperature based on training progress
-        
-        Args:
-            epoch: Current epoch
-            total_epochs: Total number of epochs
-            annealing_proportion: Proportion of epochs to use for annealing
-        """
+    
+    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.95):
+        """Much slower temperature annealing"""
         if not self.use_gumbel:
             return
+            
+        # Higher starting temperature
+        if epoch == 0:
+            self.current_temp = self.initial_temp
             
         # Calculate annealing factor (from 0 to 1)
         annealing_end = int(total_epochs * annealing_proportion)
         if epoch >= annealing_end:
             self.current_temp = self.min_temp
         else:
-            # Linear annealing from initial_temp to min_temp
-            annealing_factor = epoch / annealing_end
-            self.current_temp = self.initial_temp - annealing_factor * (self.initial_temp - self.min_temp)
+            # Use exponential decay instead of linear
+            progress = epoch / annealing_end
+            self.current_temp = self.initial_temp * (self.min_temp / self.initial_temp) ** progress
             
         return self.current_temp
     

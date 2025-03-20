@@ -51,7 +51,7 @@ class StableDRMLoss(nn.Module):
         s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
         
         # Manual calculation of KL divergence for better stability
-        state_loss = torch.sum(s_y * torch.log(s_y / s_y_pred), dim=1).mean()
+        state_loss = torch.sum(s_y * (torch.log(s_y) - torch.log(s_y_pred)), dim=1).mean()
         
         # Check for NaN in KL divergence and replace with zero if any
         if torch.isnan(state_loss):

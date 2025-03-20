@@ -4,10 +4,19 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
-import torch
 import math
 import pandas as pd
 import seaborn as sns
+
+import torch
+#from torchviz import make_dot
+#from torchinfo import summary
+
+import torch
+from torch.utils.tensorboard import SummaryWriter
+import os
+import subprocess
+from pathlib import Path
 
 # Define project root at the module level
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +32,10 @@ from neural_networks.drm import DiscreteRepresentationsModel
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.simulations.grid import tangent_transformation
 
-
+""" 
+NOTE: Important, don't get confused with the layout of the grid. It is in a coordinate system. 
+[0, 0] is bottom left, not like with typical numpy array top left! Same applies in higher dimensions.
+"""
 def visualize_state_space(model, output_path, transformations=None, device='cpu',
                          num_points=1000, num_states=None):
     """
@@ -68,7 +80,7 @@ def visualize_state_space(model, output_path, transformations=None, device='cpu'
     model.to(device)
     model.eval()
     with torch.no_grad():
-        state_probs = model.get_state_probs(x_test)
+        state_probs = model.get_state_probs(x_test, training=False)
     
     # Infer number of states if not provided
     if num_states is None:
@@ -202,7 +214,7 @@ def analyze_state_transitions(model,
     
     # Get current state probabilities 
     with torch.no_grad():
-        current_state_probs = model.get_state_probs(x_batch)
+        current_state_probs = model.get_state_probs(x_batch, training=False)
         
         # Check for NaN and stabilize if needed
         if torch.isnan(current_state_probs).any():
@@ -309,6 +321,7 @@ def analyze_state_transitions(model,
     return results
 
 def visualize_transition_matrices(transition_matrices, control_values, output_path=None):
+
     """
     Visualize transition matrices as heatmaps.
     
@@ -361,3 +374,326 @@ def visualize_transition_matrices(transition_matrices, control_values, output_pa
         print(df.round(3))
     
     return fig
+
+def visualize_model_architecture(model, output_path, input_shape=None, detailed=True):
+    """
+    Visualize the architecture of a PyTorch model and save it to a file.
+    
+    Args:
+        model: The PyTorch model to visualize
+        output_path: Path to save the visualization image
+        input_shape: Tuple with shape of input for torchinfo (e.g. (batch_size, obs_dim))
+                     Default is None, in which case a dummy input is created based on model parameters
+        detailed: Whether to include detailed parameter counts (True) or just structure (False)
+    
+    Returns:
+        Path to the saved visualization
+    """
+    import os
+    
+    # Try to use torchviz first for graph visualization
+    try:
+ 
+        # Create dummy inputs for the model if not provided
+        if input_shape is None:
+            # Extract dimensions from model
+            obs_dim = model.encoder[0].in_features
+            control_dim = 1  # Default, can be refined based on model inspection
+            
+            # Create dummy inputs
+            x = torch.randn(1, obs_dim)
+            c = torch.randn(1, control_dim)
+            y = torch.randn(1, obs_dim)
+            v_true = torch.randn(1, 1)  # Assume scalar value for simplicity
+        else:
+            # Use provided shape
+            batch_size, obs_dim = input_shape
+            control_dim = 1  # Default
+            x = torch.randn(batch_size, obs_dim)
+            c = torch.randn(batch_size, control_dim)
+            y = torch.randn(batch_size, obs_dim)
+            v_true = torch.randn(batch_size, 1)
+        
+        # Move inputs to same device as model
+        device = next(model.parameters()).device
+        x, c, y, v_true = x.to(device), c.to(device), y.to(device), v_true.to(device)
+        
+        # Forward pass to build computation graph
+        s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true)
+        
+        # Create the dot graph
+        dot = make_dot(v_pred, params=dict(model.named_parameters()))
+        
+        # Set graph attributes for better readability
+        dot.attr('graph', rankdir='TB', ratio='fill', size='7.5,10')
+        dot.attr('node', shape='box', style='filled', fillcolor='lightyellow')
+        
+        # Save the graph
+        graph_path = output_path.replace('.png', '_graph.png')
+        dot.render(graph_path.replace('.png', ''), format='png', cleanup=True)
+        print(f"Saved model graph to {graph_path}")
+        
+    except ImportError:
+        print("torchviz not found. Install with 'pip install torchviz'")
+    except Exception as e:
+        print(f"Error generating graph visualization: {e}")
+    
+    # Also use torchinfo for a detailed text summary
+    try:
+        # Create figure to hold the summary text
+        fig, ax = plt.subplots(figsize=(10, 14))
+        
+        # Hide axes
+        ax.axis('off')
+        
+        # Generate model summary
+        if input_shape is None:
+            # Use reasonable defaults
+            batch_size = 1
+            obs_dim = model.encoder[0].in_features
+            control_dim = 1
+            s = summary(model, 
+                      input_size=[(batch_size, obs_dim), (batch_size, control_dim), 
+                                 (batch_size, obs_dim), (batch_size, 1)],
+                      depth=5 if detailed else 3,
+                      col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"] if detailed else ["input_size", "output_size"],
+                      verbose=0)
+        else:
+            # Use provided shape
+            batch_size, obs_dim = input_shape
+            control_dim = 1
+            s = summary(model, 
+                      input_size=[(batch_size, obs_dim), (batch_size, control_dim), 
+                                 (batch_size, obs_dim), (batch_size, 1)],
+                      depth=5 if detailed else 3,
+                      col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"] if detailed else ["input_size", "output_size"],
+                      verbose=0)
+        
+        # Convert summary to string and add as text to figure
+        summary_str = str(s)
+        ax.text(0.05, 0.95, summary_str, fontsize=9, verticalalignment='top', 
+               family='monospace', wrap=True)
+        
+        # Add title with basic model info
+        title = f"Discrete Representations Model\n"
+        title += f"States: {model.num_states}, Hidden Dim: {model.encoder[2].out_features}\n"
+        title += f"Predictor Type: {model.predictor.__class__.__name__}"
+        ax.text(0.5, 0.98, title, fontsize=14, horizontalalignment='center', verticalalignment='top')
+        
+        # Save the figure
+        summary_path = output_path.replace('.png', '_summary.png')
+        plt.savefig(summary_path, bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        print(f"Saved model summary to {summary_path}")
+        
+        # If graph visualization failed, use the summary as the main output
+        if not os.path.exists(graph_path):
+            import shutil
+            shutil.copy(summary_path, output_path)
+        
+    except ImportError:
+        print("torchinfo not found. Install with 'pip install torchinfo'")
+    except Exception as e:
+        print(f"Error generating summary visualization: {e}")
+        
+    return output_path
+
+
+
+def visualize_model_with_tensorboard(model, output_dir, run_id=None):
+    """
+    Visualize the model architecture using TensorBoard and export as an image.
+    
+    Args:
+        model: The PyTorch model to visualize
+        output_dir: Directory to save the visualization
+        run_id: Unique identifier for this run (default: None)
+        
+    Returns:
+        Path to the saved visualization image
+    """
+    
+    # Create a unique subdirectory for this visualization
+    if run_id is None:
+        from datetime import datetime
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    log_dir = os.path.join(output_dir, f"tb_logs_{run_id}")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    writer = SummaryWriter(log_dir=log_dir)
+    
+    # Extract dimensions from model to create dummy inputs
+    obs_dim = model.encoder[0].in_features
+    control_dim = 1  # Default, can be adjusted based on inspection
+    
+    # Create dummy inputs
+    device = next(model.parameters()).device
+    x = torch.randn(1, obs_dim, device=device)
+    c = torch.randn(1, control_dim, device=device)
+    y = torch.randn(1, obs_dim, device=device)
+    v_true = torch.randn(1, 1, device=device)
+    
+    # Add the model graph to TensorBoard
+    try:
+        # Try to capture the complete model with multiple outputs
+        class ModelWrapper(torch.nn.Module):
+            def __init__(self, model):
+                super().__init__()
+                self.model = model
+                
+            def forward(self, x, c, y, v_true):
+                s_x, s_y, s_y_pred, v_pred = self.model(x, c, y, v_true)
+                # Return all important outputs as a dictionary
+                return {
+                    's_x': s_x,
+                    's_y': s_y,
+                    's_y_pred': s_y_pred,
+                    'v_pred': v_pred
+                }
+        
+        wrapped_model = ModelWrapper(model)
+        writer.add_graph(wrapped_model, (x, c, y, v_true))
+    except Exception as e:
+        print(f"Error adding full model graph: {e}")
+        # Fall back to simpler approach with just the main prediction path
+        try:
+            def forward_simple(x, c):
+                s_x = model.get_state_probs(x)
+                s_y_pred = model.predict_next_state(s_x, c)
+                v_pred = model.compute_value(s_y_pred)
+                return v_pred
+            
+            writer.add_graph(model, (x, c, y, v_true))
+        except Exception as e2:
+            print(f"Error adding simplified model graph: {e2}")
+    
+    # Add model summary as text
+    model_info = f"""
+    # Discrete Representations Model Architecture
+    
+    ## Overview
+    - Number of states: {model.num_states}
+    - Hidden dimension: {model.encoder[2].out_features}
+    - Predictor type: {model.predictor.__class__.__name__}
+    - Observation dim: {obs_dim}
+    - Control dim: {control_dim}
+    
+    ## Component Structure
+    
+    ### Encoder
+    ```
+    {model.encoder}
+    ```
+    
+    ### Predictor
+    ```
+    {model.predictor}
+    ```
+    
+    ### Value Network
+    ```
+    {model.value_net}
+    ```
+    
+    ## Parameter Count
+    Total params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}
+    """
+    
+    writer.add_text("Model Architecture", model_info)
+    
+    # Add model hyperparameters
+    hparams = {
+        "num_states": model.num_states,
+        "hidden_dim": model.encoder[2].out_features,
+        "predictor_type": model.predictor.__class__.__name__,
+        "obs_dim": obs_dim,
+        "control_dim": control_dim
+    }
+    
+    # Add hyperparameters to TensorBoard
+    writer.add_hparams(hparams, {"hparam/placeholder": 0})
+    
+    # Close the writer to flush all events to disk
+    writer.close()
+    
+    # Path to image output
+    image_path = os.path.join(output_dir, f"model_architecture_{run_id}.png")
+    
+    # Add a note about viewing in TensorBoard
+    print(f"Model graph added to TensorBoard: {log_dir}")
+    print(f"To view, run: tensorboard --logdir={log_dir}")
+    
+    # Save a text file with the command to view the graph
+    with open(os.path.join(output_dir, f"tensorboard_command_{run_id}.txt"), 'w') as f:
+        f.write(f"tensorboard --logdir={log_dir}")
+    
+    # Attempt to export the graph to an image using TensorBoard's export feature
+    # Note: This won't work perfectly in all environments but provides a starting point
+    try:
+        # Create basic HTML pointing to TensorBoard
+        html_path = os.path.join(output_dir, f"model_architecture_{run_id}.html")
+        with open(html_path, 'w') as f:
+            f.write(f"""
+            <html>
+            <head>
+                <meta http-equiv="refresh" content="0;URL=http://localhost:6006/#graphs">
+            </head>
+            <body>
+                <p>Please run: <code>tensorboard --logdir={log_dir}</code> and open <a href="http://localhost:6006/#graphs">http://localhost:6006/#graphs</a></p>
+            </body>
+            </html>
+            """)
+        
+        print(f"Created HTML redirect at {html_path}")
+        
+        # Use tensorboard's built-in export features if TensorBoard is running
+        # Note: This is a placeholder - integrating with a running TensorBoard
+        # instance programmatically requires more complex implementation
+        
+    except Exception as e:
+        print(f"Unable to export graph image: {e}")
+    
+    return log_dir
+
+def get_model_summary(model):
+    """
+    Generate a text summary of the model architecture.
+    
+    Args:
+        model: The PyTorch model to summarize
+        
+    Returns:
+        str: Summary text of the model
+    """
+    try:
+        from torchinfo import summary
+        
+        # Extract dimensions
+        obs_dim = model.encoder[0].in_features
+        control_dim = 1  # Default
+        
+        # Generate summary using torchinfo
+        s = summary(model, 
+                  input_size=[(1, obs_dim), (1, control_dim), 
+                             (1, obs_dim), (1, 1)],
+                  depth=5,
+                  verbose=0,
+                  col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"])
+        
+        return str(s)
+    except ImportError:
+        # Fall back to basic string representation if torchinfo isn't available
+        return f"""
+        Model: {model.__class__.__name__}
+        
+        Encoder: {model.encoder}
+        
+        Predictor: {model.predictor}
+        
+        Value Network: {model.value_net}
+        
+        Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}
+        """
+    except Exception as e:
+        return f"Error generating model summary: {e}"       
