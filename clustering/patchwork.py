@@ -1,5 +1,6 @@
 import os
 import sys
+import bisect
 from scipy.stats import entropy
 parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 sys.path.append(parent_dir)
@@ -22,8 +23,11 @@ class Patchwork:
         self.cell_to_patchindex = {cell: idx for idx, cell in enumerate(self.grid.indices)}     #Dict
         self.patchindex_to_cell = {idx: cell for cell, idx in self.cell_to_patchindex.items()}  #Dict
         self.current_patches = list(range(len(self.grid.indices)))                              #List
-        self.patch_neighbors = self._init_patch_nb()                                            #Dict                                           
-        self.parents = dict()                                                                   #Dict                               
+        self.patch_neighbors = self._init_patch_nb()                                            #Dict
+        #Clustering history                                           
+        self.children = dict()                                                                  #Dict
+        self.parents = {patch: patch for patch in self.current_patches}                         #Dict    
+        self.cell_to_history_of_patches = {cell: [self.cell_to_patchindex[cell]] for cell in self.grid.indices} #Dict                           
         
         self.action_to_control_dict, action_df = self._switch_from_control_to_action(df)        #Dict, DataFrame
         self.trans_probs = self._init_tp(action_df)                                             #Dict
@@ -237,7 +241,8 @@ class Patchwork:
         self._update_patch_neighbors(patch1, patch2, newpatch)
         self._update_adjacent_cells_losses(patch1, patch2, newpatch)
 
-        self._update_parents(patch1, patch2, newpatch)
+        self._update_children_and_parents(patch1, patch2, newpatch)
+        self._update_cell_to_patch_history(patch1, patch2, newpatch)
 
         return 
            
@@ -248,10 +253,10 @@ class Patchwork:
         """
         
         patch1, patch2 = self.adjacent_cells_losses.extract_min()[0]
-        print('Merging patches:', patch1, patch2)
+        
         if patch1 is None or patch2 is None:
             print('No more patches to merge')
-            return 
+            return False
         
         newpatch = self.current_patches[-1] + 1
         self.current_patches.append(newpatch)
@@ -261,8 +266,21 @@ class Patchwork:
         self.current_patches.remove(patch1)
         self.current_patches.remove(patch2)
         
-        return 
+        return True
 
+    def run(self, n_steps=None):
+        """
+        Runs the clustering algorithm for a given number of steps.
+        If n_steps is None, the algorithm runs until no more patches can be merged.
+        """
+        step = 0
+        while n_steps is None or step < n_steps:
+            if not self.step():
+                print(f"Done, after {step} steps")
+                break
+            step += 1
+        
+        return
 
     #****************************************************************************************************************
     #Helper Functions for the Clustering Algorithm  *******************************************************************
@@ -298,8 +316,8 @@ class Patchwork:
         The entropies of patch1 and patch2 are removed from the dictionary.
         """
         self.entropy_dict[newpatch] = merged_entropy_dict
-        del self.entropy_dict[patch1]
-        del self.entropy_dict[patch2]
+        self.entropy_dict[patch1]
+        self.entropy_dict[patch2]
 
         return
     
@@ -341,15 +359,31 @@ class Patchwork:
 
         return
     
-    def _update_parents(self, patch1, patch2, newpatch):
+    def _update_children_and_parents(self, patch1, patch2, newpatch):
         """
-        Updates the parents dictionary for merging patch1 and patch2 into newpatch.
-        The parents of newpatch are  patch1 and patch2."""
-        #TODO maybe change to a nested dictionary/list/set of parents of parents
+        Updates the children and the parents dictionaries for merging patch1 and patch2 into newpatch.
+        The children of newpatch are  patch1 and patch2. 
+        The parent of patch1 and patch2 is newpatch. Up to now, the parent of newpatch is also newpatch.
+        """
+        #TODO maybe change to a nested dictionary/list/set of children of children
 
-        self.parents[newpatch] = (patch1, patch2)
+        self.children[newpatch] = (patch1, patch2)
+        self.parents[newpatch] = newpatch
+        self.parents[patch1] = newpatch
+        self.parents[patch2] = newpatch
         return
     
+    def _update_cell_to_patch_history(self, patch1, patch2, newpatch):
+        """
+        Updates the cell_to_history_of_patches dictionary for merging patch1 and patch2 into newpatch.
+        The history of each cell is updated by adding newpatch to every list where patch1 or patch2 are contained.
+        """
+        #TODO this is rather inefficient, maybe change later or outsorce for visualization
+        
+        for cell in self.grid.indices:
+            if self.cell_to_history_of_patches[cell][-1] in {patch1, patch2}:
+                self.cell_to_history_of_patches[cell].append(newpatch)
+           
     def _update_patch_neighbors(self, patch1, patch2, newpatch):
         """
         Updates the patch neighbors dictionary for merging patch1 and patch2 into newpatch.
@@ -373,6 +407,7 @@ class Patchwork:
         return
     
     def _update_adjacent_cells_losses(self, patch1, patch2, newpatch):
+
         """
         Updates the adjacent cells losses dictionary for merging patch1 and patch2 into newpatch.
         That is, the entries for the adjacent patches of newpatch are added to the dictionary.
@@ -388,3 +423,26 @@ class Patchwork:
                 key = tuple(sorted((patch, neighbor)))
                 self.adjacent_cells_losses.remove_by_key(key)
         return
+    
+
+    #****************************************************************************************************************
+    #Output Functions  ****************************************************************************************
+    #****************************************************************************************************************
+
+    def get_cells_to_current_patches(self, step):
+        """
+        Returns a dictionary mapping each cell to the current patch it belongs to.
+        """
+        num_grid_cells = len(self.grid.indices)
+        cells_to_current_patches = dict()
+
+        for cell, patch_history in self.cell_to_history_of_patches.items():
+            latest_patch_with_step = num_grid_cells + step -1
+            index = bisect.bisect_left(patch_history, latest_patch_with_step) #binary search for list index in sorted list
+            if patch_history[index] == latest_patch_with_step:
+                cells_to_current_patches[cell] = patch_history[index]
+            else: 
+                cells_to_current_patches[cell] = patch_history[index -1]
+
+
+        return cells_to_current_patches

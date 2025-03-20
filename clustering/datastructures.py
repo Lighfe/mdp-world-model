@@ -29,4 +29,4 @@ class SortedValueDict:
             key, value = self.sorted_list.pop(0)  # O(1)
             del self.value_dict[key]
             return key, value
-        return None
+        return (None, None), None
