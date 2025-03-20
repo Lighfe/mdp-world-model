@@ -246,6 +246,20 @@ class DiscreteRepresentationsModel(nn.Module):
         v_pred = self.compute_value(s_y_pred)
         
         return s_x, s_y, s_y_pred, v_pred
+    
+    def predict_next_state(self, s_x, c):
+        """
+        Predict the next state probabilities based on current state and control.
+        
+        Args:
+            s_x: Current state probabilities
+            c: Control input
+        
+        Returns:
+            s_y_pred: Predicted next state probabilities
+        """
+
+        return self.predictor(s_x, c)
 
     
     def compute_value(self, s_y):
