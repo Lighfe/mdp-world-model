@@ -34,32 +34,12 @@ export OMP_PROC_BIND=true
 # First job (ID=1) starts immediately, second job (ID=2) waits 5 seconds
 sleep $((($SLURM_ARRAY_TASK_ID - 1) * 5))
 
-# Run training script
-echo "Starting training job $SLURM_ARRAY_TASK_ID..."
-python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
---output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}" \
---val_size=2000 \
---test_size=2000 \
---batch_size=64 \
---epochs=100 \
---lr=0.0001 \
---patience=10 \
---num_states=4 \
---hidden_dim=64 \
---state_loss_weight=1.0 \
---value_loss_weight=1.0 \
---predictor_type=bilinear \
---value_method="market_share"
-
-# Print completion information
-echo "Job0 finished at $(date)"
 
 # Run with warmup only (configuration 1)
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_warmup..."
+echo "Starting training job ${SLURM_ARRAY_TASK_ID}_gumbel..."
 python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_warmup" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_gumbel" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
@@ -73,14 +53,16 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --predictor_type=bilinear \
 --value_method="market_share" \
 --use_warmup \
---warmup_epochs=10
+--warmup_epochs=5 \
+--use_gumbel \
+--initial_temp 1.0 \
+--min_temp 0.1
 echo "Job1 finished at $(date)"
 
-# Run with cosine scheduler only (configuration 2)
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_scheduler..."
+echo "Starting training job ${SLURM_ARRAY_TASK_ID}_gumbel..."
 python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_scheduler" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_gumbel" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
@@ -93,16 +75,17 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --value_loss_weight=1.0 \
 --predictor_type=bilinear \
 --value_method="market_share" \
---use_lr_scheduler \
---scheduler_type=cosine \
---min_lr=1e-6
+--use_warmup \
+--warmup_epochs=5 \
+--use_gumbel \
+--initial_temp 1.0 \
+--min_temp 0.01
 echo "Job2 finished at $(date)"
 
-# Run with plateau scheduler only (configuration 2)
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_scheduler..."
+echo "Starting training job ${SLURM_ARRAY_TASK_ID}_gumbel..."
 python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_scheduler" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_gumbel" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
@@ -115,57 +98,9 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --value_loss_weight=1.0 \
 --predictor_type=bilinear \
 --value_method="market_share" \
---use_lr_scheduler \
---scheduler_type=plateau \
---min_lr=1e-6
+--use_warmup \
+--warmup_epochs=5 \
+--use_gumbel \
+--initial_temp 0.5 \
+--min_temp 0.05
 echo "Job3 finished at $(date)"
-
-# Run with both warmup and cosine scheduler (configuration 3)
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_combined..."
-python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
---output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_combined" \
---val_size=2000 \
---test_size=2000 \
---batch_size=64 \
---epochs=100 \
---lr=0.0001 \
---patience=10 \
---num_states=4 \
---hidden_dim=64 \
---state_loss_weight=1.0 \
---value_loss_weight=1.0 \
---predictor_type=bilinear \
---value_method="market_share" \
---use_warmup \
---warmup_epochs=5 \
---use_lr_scheduler \
---scheduler_type=cosine \
---min_lr=1e-6
-echo "Job4 finished at $(date)"
-
-# Run with both warmup and plateau scheduler (configuration 3)
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_combined..."
-python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
---output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_combined" \
---val_size=2000 \
---test_size=2000 \
---batch_size=64 \
---epochs=100 \
---lr=0.0001 \
---patience=10 \
---num_states=4 \
---hidden_dim=64 \
---state_loss_weight=1.0 \
---value_loss_weight=1.0 \
---predictor_type=bilinear \
---value_method="market_share" \
---use_warmup \
---warmup_epochs=5 \
---use_lr_scheduler \
---scheduler_type=plateau \
---min_lr=1e-6
-echo "Job5 finished at $(date)"
-
-echo "All jobs completed at $(date)"
