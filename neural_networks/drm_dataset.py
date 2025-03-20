@@ -112,9 +112,6 @@ class TechSubstitutionDataset(Dataset):
         return x, c, y, v_true
     
     def f_v(self, y, value_method):
-                # returns market share of technology 2
-        # NOTE: "real" market share would be how much is produced at one time step (derivative). But x or y does not have this information, lacks c and delta_t.
-            # If y is a tuple or list, convert to an array for consistent handling
         if isinstance(y, (tuple, list)):
             y = np.array(y)
 
