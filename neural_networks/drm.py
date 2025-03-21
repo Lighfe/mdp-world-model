@@ -200,13 +200,13 @@ class DiscreteRepresentationsModel(nn.Module):
         return prob_x
     
 
-    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.95):
+    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.95, delay_epochs=10):
         """Much slower temperature annealing"""
         if not self.use_gumbel:
             return
             
         # Higher starting temperature
-        if epoch == 0:
+        if epoch <= delay_epochs:
             self.current_temp = self.initial_temp
             
         # Calculate annealing factor (from 0 to 1)
@@ -215,7 +215,7 @@ class DiscreteRepresentationsModel(nn.Module):
             self.current_temp = self.min_temp
         else:
             # Use exponential decay instead of linear
-            progress = epoch / annealing_end
+            progress = (epoch - delay_epochs) / (annealing_end - delay_epochs)
             self.current_temp = self.initial_temp * (self.min_temp / self.initial_temp) ** progress
             
         return self.current_temp
