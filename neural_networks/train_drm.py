@@ -27,67 +27,8 @@ from data_generation.models.tech_substitution import TechnologySubstitution, Tec
 from data_generation.simulations.grid import tangent_transformation
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, 
-    visualize_transition_matrices, visualize_model_architecture
+    visualize_transition_matrices, visualize_model_architecture, plot_training_curves
 )
-
-
-def plot_training_curves(history, save_path=None):
-    """
-    Plot training and validation loss curves
-    
-    Args:
-        history: Dictionary containing training history
-        save_path: Path to save the plot
-    """
-    plt.figure(figsize=(15, 10))
-    
-    # Plot total loss
-    plt.subplot(2, 2, 1)
-    plt.plot(history['train_loss'], label='Train Loss')
-    plt.plot(history['val_loss'], label='Validation Loss')
-    plt.title('Total Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-    
-    # Plot state loss
-    plt.subplot(2, 2, 2)
-    plt.plot(history['train_state_loss'], label='Train State Loss')
-    plt.plot(history['val_state_loss'], label='Validation State Loss')
-    plt.title('State Loss (KL Divergence)')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-    
-    # Plot value loss
-    plt.subplot(2, 2, 3)
-    plt.plot(history['train_value_loss'], label='Train Value Loss')
-    plt.plot(history['val_value_loss'], label='Validation Value Loss')
-    plt.title('Value Loss (MSE)')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-    
-    # Add plot for diversity loss
-    plt.subplot(2, 2, 4)
-    plt.plot(history['train_div_loss'], label='Train Diversity Loss')
-    plt.plot(history['val_div_loss'], label='Validation Diversity Loss')
-    plt.title('Diversity Loss (KL Divergence)')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path)
-        print(f"Saved loss curves to {save_path}")
-    
-    plt.show()
 
 
 def train_drm_model(db_path, 
@@ -97,7 +38,7 @@ def train_drm_model(db_path,
                     test_size=2000, 
                     batch_size=64, 
                     epochs=100,
-                    learning_rate=0.0001, 
+                    learning_rate=1e-4, 
                     early_stopping_patience=10,
                     num_states=4,
                     hidden_dim=128,
@@ -113,10 +54,13 @@ def train_drm_model(db_path,
                     scheduler_type='cosine',
                     use_warmup=False,
                     warmup_epochs=5,
-                    min_lr=1e-6,
+                    min_lr=1e-5,
                     use_gumbel=False,
                     initial_temp=1.0,
                     min_temp=0.1,
+                    use_entropy_reg=False,
+                    min_entropy=0.7,
+                    entropy_weight=1.0,
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -226,7 +170,10 @@ def train_drm_model(db_path,
         value_loss_weight=value_loss_weight,
         initial_diversity_weight=initial_div_weight,
         min_diversity_weight=min_div_weight,
-        use_diversity_loss=use_diversity_loss 
+        use_diversity_loss=use_diversity_loss,
+        use_entropy_reg=use_entropy_reg,
+        min_entropy=min_entropy,
+        entropy_weight=entropy_weight
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -267,10 +214,12 @@ def train_drm_model(db_path,
         "train_state_loss": [],
         "train_value_loss": [],
         "train_div_loss": [],
+        "train_entropy_loss": [],
         "val_loss": [],
         "val_state_loss": [],
         "val_value_loss": [],
-        "val_div_loss": []
+        "val_div_loss": [],
+        "val_entropy_loss": []
     }
     
     best_val_loss = float("inf")
@@ -328,7 +277,7 @@ def train_drm_model(db_path,
                     continue
                 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
+                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
                 
                 # Check if loss is NaN
                 if torch.isnan(total_loss):
@@ -353,6 +302,7 @@ def train_drm_model(db_path,
                 train_state_loss += state_loss.item()
                 train_value_loss += value_loss.item()
                 train_div_loss += div_loss.item()
+                train_entropy_loss += entropy_loss.item()
                 
             except Exception as e:
                 print(f"Error in batch {batch_idx}: {e}")
@@ -367,6 +317,7 @@ def train_drm_model(db_path,
             train_state_loss /= num_batches
             train_value_loss /= num_batches
             train_div_loss /= num_batches
+            train_entropy_loss /= num_batches
         
         # Validation phase
         model.eval()
@@ -374,6 +325,7 @@ def train_drm_model(db_path,
         val_state_loss = 0.0
         val_value_loss = 0.0
         val_div_loss = 0.0
+        val_entropy_loss = 0.0
         valid_batches = 0
         
         with torch.no_grad():
@@ -395,7 +347,7 @@ def train_drm_model(db_path,
                         continue
                     
                     # Calculate loss
-                    total_loss, state_loss, value_loss, div_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
+                    total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
                     
                     # Check if loss is NaN
                     if torch.isnan(total_loss):
@@ -406,6 +358,7 @@ def train_drm_model(db_path,
                     val_state_loss += state_loss.item()
                     val_value_loss += value_loss.item()
                     val_div_loss += div_loss.item()
+                    val_entropy_loss += entropy_loss.item()
                     valid_batches += 1
                     
                 except Exception as e:
@@ -417,18 +370,28 @@ def train_drm_model(db_path,
             val_loss /= valid_batches
             val_state_loss /= valid_batches
             val_value_loss /= valid_batches
+            val_entropy_loss /= valid_batches
         
         # Update history
         history["train_loss"].append(train_loss)
         history["train_state_loss"].append(train_state_loss)
         history["train_value_loss"].append(train_value_loss)
         history["train_div_loss"].append(train_div_loss)
+        history["train_entropy_loss"].append(train_entropy_loss)
         history["val_loss"].append(val_loss)
         history["val_state_loss"].append(val_state_loss)
         history["val_value_loss"].append(val_value_loss)
         history["val_div_loss"].append(val_div_loss)
+        history["val_entropy_loss"].append(val_entropy_loss)
         
         # Print progress
+        if loss_fn.use_entropy_reg:
+            print(f"Epoch {epoch+1}/{epochs} - "
+                f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, "
+                f"Entropy: {train_entropy_loss:.4f}) - "
+                f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, "
+                f"Entropy: {val_entropy_loss:.4f})")
+        # lazy
         if loss_fn.use_diversity_loss:
             print(f"Epoch {epoch+1}/{epochs} - "
                 f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, Div: {train_div_loss:.4f}) - "
@@ -506,6 +469,7 @@ def train_drm_model(db_path,
     test_state_loss = 0.0
     test_value_loss = 0.0
     test_div_loss = 0.0
+    test_entropy_loss = 0.0
     test_samples = 0
     test_value_predictions = []
     test_value_targets = []
@@ -529,7 +493,7 @@ def train_drm_model(db_path,
                     continue
                 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss = loss_fn(s_y, s_y_pred, v_true, v_pred)
+                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
                 
                 # Skip if loss is NaN
                 if torch.isnan(total_loss):
@@ -544,6 +508,7 @@ def train_drm_model(db_path,
                 test_state_loss += state_loss.item() * len(x)
                 test_value_loss += value_loss.item() * len(x)
                 test_div_loss += div_loss.item() * len(x)
+                test_entropy_loss += entropy_loss.item() * len(x)
                 test_samples += len(x)
                 
             except Exception as e:
@@ -556,6 +521,7 @@ def train_drm_model(db_path,
         test_state_loss /= test_samples
         test_value_loss /= test_samples
         test_div_loss /= test_samples
+        test_entropy_loss /= test_samples
     
     # Calculate additional metrics if needed
     test_value_predictions = np.concatenate(test_value_predictions) if test_value_predictions else np.array([])
@@ -573,12 +539,13 @@ def train_drm_model(db_path,
         "test_state_loss": float(test_state_loss),
         "test_div_loss": float(test_div_loss),
         "test_value_loss": float(test_value_loss),
+        "test_entropy_loss": float(test_entropy_loss),
         "test_r2_score": float(r2_score),
         "test_samples": test_samples
     }
     
     # Print test results
-    print(f"Test Results - Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Div: {test_div_loss:.4f}, Value: {test_value_loss:.4f}), R²: {r2_score:.4f}")
+    print(f"Test Results - Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Div: {test_div_loss:.4f}, Value: {test_value_loss:.4f}), Entropy: {test_entropy_loss:.4f}, R²: {r2_score:.4f}")
     
     # Save test results
     test_results_path = os.path.join(output_dir, f"drm_test_results_{run_id}.json")
@@ -696,7 +663,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_size', type=int, default=2000, help='Number of test samples')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
     parser.add_argument('--num_states', type=int, default=4, help='Number of discrete states')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension size')
@@ -725,7 +692,7 @@ if __name__ == "__main__":
                         help='Use learning rate warmup')
     parser.add_argument('--warmup_epochs', type=int, default=5, 
                         help='Number of epochs for warmup')
-    parser.add_argument('--min_lr', type=float, default=1e-6, 
+    parser.add_argument('--min_lr', type=float, default=1e-5, 
                         help='Minimum learning rate')
     
     parser.add_argument('--use_gumbel', action='store_true', 
@@ -734,6 +701,13 @@ if __name__ == "__main__":
                         help='Initial temperature for Gumbel softmax')
     parser.add_argument('--min_temp', type=float, default=0.1,
                         help='Minimum temperature for Gumbel softmax')
+    
+    parser.add_argument('--use_entropy_reg', action='store_true', 
+                    help='Use entropy regularization to prevent state collapse')
+    parser.add_argument('--min_entropy', type=float, default=0.7,
+                        help='Minimum normalized entropy (0-1 range) for state distributions')
+    parser.add_argument('--entropy_weight', type=float, default=1.0,
+                        help='Weight for entropy regularization loss')
     
     args = parser.parse_args()
 
@@ -783,7 +757,10 @@ if __name__ == "__main__":
         min_lr=args.min_lr,
         use_gumbel=args.use_gumbel,
         initial_temp=args.initial_temp,
-        min_temp=args.min_temp
+        min_temp=args.min_temp,
+        use_entropy_reg=args.use_entropy_reg,
+        min_entropy=args.min_entropy,
+        entropy_weight=args.entropy_weight
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

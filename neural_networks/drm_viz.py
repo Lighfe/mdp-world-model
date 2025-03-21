@@ -34,6 +34,75 @@ from data_generation.simulations.grid import tangent_transformation
 NOTE: Important, don't get confused with the layout of the grid. It is in a coordinate system. 
 [0, 0] is bottom left, not like with typical numpy array top left! Same applies in higher dimensions.
 """
+def plot_training_curves(history, save_path=None):
+    """Plot training and validation loss curves"""
+    plt.figure(figsize=(15, 10))
+    
+    # Plot total loss
+    plt.subplot(2, 2, 1)
+    plt.plot(history['train_loss'], label='Train Loss')
+    plt.plot(history['val_loss'], label='Validation Loss')
+    plt.title('Total Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot state loss
+    plt.subplot(2, 2, 2)
+    plt.plot(history['train_state_loss'], label='Train State Loss')
+    plt.plot(history['val_state_loss'], label='Validation State Loss')
+    plt.title('State Loss (KL Divergence)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot value loss
+    plt.subplot(2, 2, 3)
+    plt.plot(history['train_value_loss'], label='Train Value Loss')
+    plt.plot(history['val_value_loss'], label='Validation Value Loss')
+    plt.title('Value Loss (MSE)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    # Plot combined regularization losses in fourth panel
+    plt.subplot(2, 2, 4)
+    
+    # Plot diversity loss if it exists
+    if 'train_div_loss' in history and any(v != 0 for v in history['train_div_loss']):
+        plt.plot(history['train_div_loss'], label='Train Diversity Loss', linestyle='-')
+        plt.plot(history['val_div_loss'], label='Val Diversity Loss', linestyle='-')
+    
+    # Plot entropy loss if it exists
+    if 'train_entropy_loss' in history and any(v != 0 for v in history['train_entropy_loss']):
+        plt.plot(history['train_entropy_loss'], label='Train Entropy Loss', linestyle='--')
+        plt.plot(history['val_entropy_loss'], label='Val Entropy Loss', linestyle='--')
+    
+    # Set title based on what's being displayed
+    if ('train_div_loss' in history and any(v != 0 for v in history['train_div_loss']) and
+        'train_entropy_loss' in history and any(v != 0 for v in history['train_entropy_loss'])):
+        plt.title('Regularization Losses')
+    elif 'train_div_loss' in history and any(v != 0 for v in history['train_div_loss']):
+        plt.title('Diversity Loss')
+    elif 'train_entropy_loss' in history and any(v != 0 for v in history['train_entropy_loss']):
+        plt.title('Entropy Loss')
+    else:
+        plt.title('Regularization Losses (None Active)')
+    
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Saved loss curves to {save_path}")
+
 def visualize_state_space(model, output_path, transformations=None, device='cpu',
                          num_points=1000, num_states=None):
     """
