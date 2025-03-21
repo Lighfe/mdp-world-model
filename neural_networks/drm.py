@@ -55,8 +55,12 @@ class StandardPredictor(BasePredictor):
     """Standard predictor using concatenation of state and control"""
     def __init__(self, num_states, control_dim, hidden_dim):
         super().__init__(num_states, control_dim, hidden_dim)
+
+        # NOTE: Using a very simple encoding of controls with same amount of nodes as num_states
+        self.control_encoder = nn.Linear(control_dim, num_states)
+
         self.predictor = nn.Sequential(
-            nn.Linear(num_states + control_dim, hidden_dim),
+            nn.Linear(2*num_states, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -64,7 +68,9 @@ class StandardPredictor(BasePredictor):
         )
 
         def forward(self, s_x, c):
-            predictor_input = torch.cat([s_x, c], dim=1)
+            c_enc = self.control_encoder(c)
+            # s_x is already encoded, no further encoding needed
+            predictor_input = torch.cat([s_x, c_enc], dim=1)
             logits = self.predictor(predictor_input)
             s_y_pred = F.softmax(logits, dim=1)
             return s_y_pred
@@ -193,7 +199,7 @@ class DiscreteRepresentationsModel(nn.Module):
         
         return prob_x
     
-    
+
     def update_temperature(self, epoch, total_epochs, annealing_proportion=0.95):
         """Much slower temperature annealing"""
         if not self.use_gumbel:
