@@ -67,13 +67,13 @@ class StandardPredictor(BasePredictor):
             nn.Linear(hidden_dim, num_states)
         )
 
-        def forward(self, s_x, c):
-            c_enc = self.control_encoder(c)
-            # s_x is already encoded, no further encoding needed
-            predictor_input = torch.cat([s_x, c_enc], dim=1)
-            logits = self.predictor(predictor_input)
-            s_y_pred = F.softmax(logits, dim=1)
-            return s_y_pred
+    def forward(self, s_x, c):
+        c_enc = self.control_encoder(c)
+        # s_x is already encoded, no further encoding needed
+        predictor_input = torch.cat([s_x, c_enc], dim=1)
+        logits = self.predictor(predictor_input)
+        s_y_pred = F.softmax(logits, dim=1)
+        return s_y_pred
         
 class BilinearPredictor(BasePredictor):
     """Predictor that directly uses encoded state with control interaction"""
