@@ -10,7 +10,7 @@ class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
                  initial_diversity_weight=1.0, min_diversity_weight=0.1,
                  use_diversity_loss=True, 
-                 use_entropy_reg=False, min_entropy=0.7, entropy_weight=1.0):
+                 use_entropy_reg=False, entropy_weight=2.0):
         """
         Modified loss function for the Discrete Representations Model with optional diversity regularization.
         
@@ -21,7 +21,6 @@ class StableDRMLoss(nn.Module):
             min_diversity_weight: Minimum weight for diversity regularization after decay
             use_diversity_loss: Whether to apply diversity regularization (default: True)
             use_entropy_reg: Whether to use entropy regularization to prevent state collapse
-            min_entropy: Minimum acceptable entropy (0-1 range, where 1 is maximum entropy)
             entropy_weight: Weight for the entropy regularization term
         """
         super(StableDRMLoss, self).__init__()
@@ -34,19 +33,12 @@ class StableDRMLoss(nn.Module):
         
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
-        self.min_entropy = min_entropy
         self.entropy_weight = entropy_weight
     
     def entropy_loss(self, state_probs):
         """
-        Calculate entropy-based regularization loss to prevent state collapse.
-        Penalizes when distribution entropy falls below the minimum threshold.
-        
-        Args:
-            state_probs: State probability distributions (batch_size, num_states)
-            
-        Returns:
-            entropy_loss: Loss term that's minimized when entropy is high
+        Enhanced entropy regularization that actively pushes toward higher entropy
+        rather than just preventing collapse below a threshold.
         """
         # Calculate average state usage across batch
         avg_state_usage = torch.mean(state_probs, dim=0)
@@ -61,8 +53,9 @@ class StableDRMLoss(nn.Module):
         entropy = -torch.sum(avg_state_usage * torch.log(avg_state_usage))
         normalized_entropy = entropy / max_entropy
         
-        # Only penalize if entropy is below threshold using ReLU
-        entropy_loss = F.relu(self.min_entropy - normalized_entropy)
+        # Instead of just penalizing below threshold, actively push toward maximum entropy
+        # The closer to 1.0, the smaller the penalty
+        entropy_loss = 1.0 - normalized_entropy
         
         return entropy_loss
     

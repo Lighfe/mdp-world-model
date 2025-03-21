@@ -59,8 +59,7 @@ def train_drm_model(db_path,
                     initial_temp=1.0,
                     min_temp=0.1,
                     use_entropy_reg=False,
-                    min_entropy=0.7,
-                    entropy_weight=1.0,
+                    entropy_weight=2.0,
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -172,7 +171,6 @@ def train_drm_model(db_path,
         min_diversity_weight=min_div_weight,
         use_diversity_loss=use_diversity_loss,
         use_entropy_reg=use_entropy_reg,
-        min_entropy=min_entropy,
         entropy_weight=entropy_weight
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -250,7 +248,7 @@ def train_drm_model(db_path,
         train_value_loss = 0.0
         train_div_loss = 0.0
         train_entropy_loss = 0.0
-        
+
         if loss_fn.use_diversity_loss:
             # Update diversity weight
             current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
@@ -706,9 +704,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--use_entropy_reg', action='store_true', 
                     help='Use entropy regularization to prevent state collapse')
-    parser.add_argument('--min_entropy', type=float, default=0.7,
-                        help='Minimum normalized entropy (0-1 range) for state distributions')
-    parser.add_argument('--entropy_weight', type=float, default=1.0,
+    parser.add_argument('--entropy_weight', type=float, default=2.0,
                         help='Weight for entropy regularization loss')
     
     args = parser.parse_args()
@@ -761,7 +757,6 @@ if __name__ == "__main__":
         initial_temp=args.initial_temp,
         min_temp=args.min_temp,
         use_entropy_reg=args.use_entropy_reg,
-        min_entropy=args.min_entropy,
         entropy_weight=args.entropy_weight
     )
 
