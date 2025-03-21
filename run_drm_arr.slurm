@@ -34,40 +34,40 @@ export OMP_PROC_BIND=true
 # First job (ID=1) starts immediately, second job (ID=2) waits 5 seconds
 sleep $((($SLURM_ARRAY_TASK_ID - 1) * 5))
 
-
-# Run with warmup only (configuration 1)
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_gumbel..."
+echo "Starting training job ${SLURM_ARRAY_TASK_ID}_standard..."
 python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_gumbel" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_standard" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
 --epochs=100 \
---lr=0.0001 \
+--lr=1e-4 \
 --patience=10 \
 --num_states=4 \
 --hidden_dim=64 \
 --state_loss_weight=1.0 \
 --value_loss_weight=1.0 \
---predictor_type=bilinear \
+--predictor_type=standard \
 --value_method="market_share" \
 --use_warmup \
 --warmup_epochs=5 \
 --use_gumbel \
 --initial_temp 5.0 \
---min_temp 0.5
+--min_temp 0.5 \
+--scheduler_type="cosine" \
+--min_lr=1e-5
 echo "Job1 finished at $(date)"
 
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}_gumbel..."
+echo "Starting training job ${SLURM_ARRAY_TASK_ID}_bilinear..."
 python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_gumbel" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_bilinear" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
 --epochs=100 \
---lr=0.0001 \
+--lr=1e-4 \
 --patience=10 \
 --num_states=4 \
 --hidden_dim=64 \
@@ -79,5 +79,32 @@ python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
 --warmup_epochs=5 \
 --use_gumbel \
 --initial_temp 5.0 \
---min_temp 0.1
+--min_temp 0.5 \
+--scheduler_type="cosine" \
+--min_lr=1e-5
 echo "Job2 finished at $(date)"
+
+echo "Starting training job ${SLURM_ARRAY_TASK_ID}_control_gate..."
+python -m neural_networks.train_drm datasets/results/tech_angular_med.db \
+--output_dir=neural_networks/output \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_control_gate" \
+--val_size=2000 \
+--test_size=2000 \
+--batch_size=64 \
+--epochs=100 \
+--lr=1e-4 \
+--patience=10 \
+--num_states=4 \
+--hidden_dim=64 \
+--state_loss_weight=1.0 \
+--value_loss_weight=1.0 \
+--predictor_type=control_gate \
+--value_method="market_share" \
+--use_warmup \
+--warmup_epochs=5 \
+--use_gumbel \
+--initial_temp 5.0 \
+--min_temp 0.5 \
+--scheduler_type="cosine" \
+--min_lr=1e-5
+echo "Job3 finished at $(date)"
