@@ -9,13 +9,11 @@ import pandas as pd
 import seaborn as sns
 
 import torch
-#from torchviz import make_dot
-#from torchinfo import summary
+import graphviz
+import torch.nn as nn
+import re
+from collections import defaultdict
 
-import torch
-#from torch.utils.tensorboard import SummaryWriter
-import os
-import subprocess
 from pathlib import Path
 
 # Define project root at the module level
@@ -28,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # Import application-specific modules
 from neural_networks.drm_dataset import create_data_loaders
 from neural_networks.drm_loss import StableDRMLoss
-from neural_networks.drm import DiscreteRepresentationsModel
+from neural_networks.drm import DiscreteRepresentationsModel, BilinearPredictor, StandardPredictor
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.simulations.grid import tangent_transformation
 
@@ -375,325 +373,325 @@ def visualize_transition_matrices(transition_matrices, control_values, output_pa
     
     return fig
 
-def visualize_model_architecture(model, output_path, input_shape=None, detailed=True):
+def visualize_model_architecture(model, output_path):
     """
-    Visualize the architecture of a PyTorch model and save it to a file.
+    Create a visual representation of the model architecture by analyzing the actual PyTorch model structure.
+    Enhanced to better represent non-sequential flows in both BilinearPredictor and StandardPredictor.
     
     Args:
         model: The PyTorch model to visualize
         output_path: Path to save the visualization image
-        input_shape: Tuple with shape of input for torchinfo (e.g. (batch_size, obs_dim))
-                     Default is None, in which case a dummy input is created based on model parameters
-        detailed: Whether to include detailed parameter counts (True) or just structure (False)
-    
-    Returns:
-        Path to the saved visualization
-    """
-    import os
-    
-    # Try to use torchviz first for graph visualization
-    try:
- 
-        # Create dummy inputs for the model if not provided
-        if input_shape is None:
-            # Extract dimensions from model
-            obs_dim = model.encoder[0].in_features
-            control_dim = 1  # Default, can be refined based on model inspection
-            
-            # Create dummy inputs
-            x = torch.randn(1, obs_dim)
-            c = torch.randn(1, control_dim)
-            y = torch.randn(1, obs_dim)
-            v_true = torch.randn(1, 1)  # Assume scalar value for simplicity
-        else:
-            # Use provided shape
-            batch_size, obs_dim = input_shape
-            control_dim = 1  # Default
-            x = torch.randn(batch_size, obs_dim)
-            c = torch.randn(batch_size, control_dim)
-            y = torch.randn(batch_size, obs_dim)
-            v_true = torch.randn(batch_size, 1)
-        
-        # Move inputs to same device as model
-        device = next(model.parameters()).device
-        x, c, y, v_true = x.to(device), c.to(device), y.to(device), v_true.to(device)
-        
-        # Forward pass to build computation graph
-        s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true)
-        
-        # Create the dot graph
-        dot = make_dot(v_pred, params=dict(model.named_parameters()))
-        
-        # Set graph attributes for better readability
-        dot.attr('graph', rankdir='TB', ratio='fill', size='7.5,10')
-        dot.attr('node', shape='box', style='filled', fillcolor='lightyellow')
-        
-        # Save the graph
-        graph_path = output_path.replace('.png', '_graph.png')
-        dot.render(graph_path.replace('.png', ''), format='png', cleanup=True)
-        print(f"Saved model graph to {graph_path}")
-        
-    except ImportError:
-        print("torchviz not found. Install with 'pip install torchviz'")
-    except Exception as e:
-        print(f"Error generating graph visualization: {e}")
-    
-    # Also use torchinfo for a detailed text summary
-    try:
-        # Create figure to hold the summary text
-        fig, ax = plt.subplots(figsize=(10, 14))
-        
-        # Hide axes
-        ax.axis('off')
-        
-        # Generate model summary
-        if input_shape is None:
-            # Use reasonable defaults
-            batch_size = 1
-            obs_dim = model.encoder[0].in_features
-            control_dim = 1
-            s = summary(model, 
-                      input_size=[(batch_size, obs_dim), (batch_size, control_dim), 
-                                 (batch_size, obs_dim), (batch_size, 1)],
-                      depth=5 if detailed else 3,
-                      col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"] if detailed else ["input_size", "output_size"],
-                      verbose=0)
-        else:
-            # Use provided shape
-            batch_size, obs_dim = input_shape
-            control_dim = 1
-            s = summary(model, 
-                      input_size=[(batch_size, obs_dim), (batch_size, control_dim), 
-                                 (batch_size, obs_dim), (batch_size, 1)],
-                      depth=5 if detailed else 3,
-                      col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"] if detailed else ["input_size", "output_size"],
-                      verbose=0)
-        
-        # Convert summary to string and add as text to figure
-        summary_str = str(s)
-        ax.text(0.05, 0.95, summary_str, fontsize=9, verticalalignment='top', 
-               family='monospace', wrap=True)
-        
-        # Add title with basic model info
-        title = f"Discrete Representations Model\n"
-        title += f"States: {model.num_states}, Hidden Dim: {model.encoder[2].out_features}\n"
-        title += f"Predictor Type: {model.predictor.__class__.__name__}"
-        ax.text(0.5, 0.98, title, fontsize=14, horizontalalignment='center', verticalalignment='top')
-        
-        # Save the figure
-        summary_path = output_path.replace('.png', '_summary.png')
-        plt.savefig(summary_path, bbox_inches='tight', dpi=150)
-        plt.close(fig)
-        print(f"Saved model summary to {summary_path}")
-        
-        # If graph visualization failed, use the summary as the main output
-        if not os.path.exists(graph_path):
-            import shutil
-            shutil.copy(summary_path, output_path)
-        
-    except ImportError:
-        print("torchinfo not found. Install with 'pip install torchinfo'")
-    except Exception as e:
-        print(f"Error generating summary visualization: {e}")
-        
-    return output_path
-
-
-
-def visualize_model_with_tensorboard(model, output_dir, run_id=None):
-    """
-    Visualize the model architecture using TensorBoard and export as an image.
-    
-    Args:
-        model: The PyTorch model to visualize
-        output_dir: Directory to save the visualization
-        run_id: Unique identifier for this run (default: None)
-        
-    Returns:
-        Path to the saved visualization image
     """
     
-    # Create a unique subdirectory for this visualization
-    if run_id is None:
-        from datetime import datetime
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Create a new directed graph
+    dot = graphviz.Digraph(comment='Model Architecture', 
+                           format='png',
+                           engine='dot')
     
-    log_dir = os.path.join(output_dir, f"tb_logs_{run_id}")
-    os.makedirs(log_dir, exist_ok=True)
+    # Set graph attributes for better appearance
+    dot.attr('graph', rankdir='TB', splines='ortho', nodesep='0.5', ranksep='0.7')
+    dot.attr('node', shape='box', style='filled', fontname='Arial', fontsize='12')
+    dot.attr('edge', fontname='Arial', fontsize='10')
     
-    writer = SummaryWriter(log_dir=log_dir)
+    # Helper functions to extract info from model
+    def get_module_name(module_path):
+        """Convert module path to a readable name"""
+        return module_path.replace('.', '_')
     
-    # Extract dimensions from model to create dummy inputs
-    obs_dim = model.encoder[0].in_features
-    control_dim = 1  # Default, can be adjusted based on inspection
+    def get_module_type(module):
+        """Get module type in a readable format"""
+        class_name = module.__class__.__name__
+        return class_name
     
-    # Create dummy inputs
-    device = next(model.parameters()).device
-    x = torch.randn(1, obs_dim, device=device)
-    c = torch.randn(1, control_dim, device=device)
-    y = torch.randn(1, obs_dim, device=device)
-    v_true = torch.randn(1, 1, device=device)
+    def get_layer_shape(module):
+        """Try to extract input/output dimensions from module"""
+        shape_info = ""
+        if isinstance(module, nn.Linear):
+            shape_info = f"{module.in_features}→{module.out_features}"
+        return shape_info
     
-    # Add the model graph to TensorBoard
-    try:
-        # Try to capture the complete model with multiple outputs
-        class ModelWrapper(torch.nn.Module):
-            def __init__(self, model):
-                super().__init__()
-                self.model = model
-                
-            def forward(self, x, c, y, v_true):
-                s_x, s_y, s_y_pred, v_pred = self.model(x, c, y, v_true)
-                # Return all important outputs as a dictionary
-                return {
-                    's_x': s_x,
-                    's_y': s_y,
-                    's_y_pred': s_y_pred,
-                    'v_pred': v_pred
-                }
-        
-        wrapped_model = ModelWrapper(model)
-        writer.add_graph(wrapped_model, (x, c, y, v_true))
-    except Exception as e:
-        print(f"Error adding full model graph: {e}")
-        # Fall back to simpler approach with just the main prediction path
-        try:
-            def forward_simple(x, c):
-                s_x = model.get_state_probs(x)
-                s_y_pred = model.predict_next_state(s_x, c)
-                v_pred = model.compute_value(s_y_pred)
-                return v_pred
-            
-            writer.add_graph(model, (x, c, y, v_true))
-        except Exception as e2:
-            print(f"Error adding simplified model graph: {e2}")
+    def get_color(module_type):
+        """Assign colors based on module type"""
+        colors = {
+            'Linear': 'skyblue',
+            'ReLU': 'lightgrey',
+            'Softmax': 'lightgrey',
+            'Sequential': 'lightblue',
+            'ModuleList': 'lightblue',
+            'ControlGate': 'palegreen',
+            'StandardPredictor': 'palegreen',
+            'BilinearPredictor': 'palegreen',
+            'ControlGatePredictor': 'palegreen',
+            'Bilinear': 'lightyellow',  # Special color for bilinear
+            'DiscreteRepresentationsModel': 'lightgrey',
+        }
+        # Check if any substring matches
+        for key in colors:
+            if key in module_type:
+                return colors[key]
+        return 'white'  # Default color
     
-    # Add model summary as text
-    model_info = f"""
-    # Discrete Representations Model Architecture
-    
-    ## Overview
-    - Number of states: {model.num_states}
-    - Hidden dimension: {model.encoder[2].out_features}
-    - Predictor type: {model.predictor.__class__.__name__}
-    - Observation dim: {obs_dim}
-    - Control dim: {control_dim}
-    
-    ## Component Structure
-    
-    ### Encoder
-    ```
-    {model.encoder}
-    ```
-    
-    ### Predictor
-    ```
-    {model.predictor}
-    ```
-    
-    ### Value Network
-    ```
-    {model.value_net}
-    ```
-    
-    ## Parameter Count
-    Total params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}
-    """
-    
-    writer.add_text("Model Architecture", model_info)
-    
-    # Add model hyperparameters
-    hparams = {
-        "num_states": model.num_states,
-        "hidden_dim": model.encoder[2].out_features,
-        "predictor_type": model.predictor.__class__.__name__,
-        "obs_dim": obs_dim,
-        "control_dim": control_dim
+    # Track modules to create clusters
+    clusters = {
+        'encoder': [],
+        'predictor': [],
+        'value_net': []
     }
     
-    # Add hyperparameters to TensorBoard
-    writer.add_hparams(hparams, {"hparam/placeholder": 0})
+    all_modules = {}
+    connections = defaultdict(list)
+    custom_connections = []  # For special non-sequential connections
     
-    # Close the writer to flush all events to disk
-    writer.close()
+    # Add main model node
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    main_node_id = 'model'
+    dot.node(main_node_id, 
+             f'Discrete Representations Model\n{model.num_states} states\n{total_params:,} parameters', 
+             fillcolor='lightgrey')
     
-    # Path to image output
-    image_path = os.path.join(output_dir, f"model_architecture_{run_id}.png")
+    # Extract model structure
+    def extract_model_structure(model, prefix=''):
+        for name, child in model.named_children():
+            module_path = f"{prefix}.{name}" if prefix else name
+            module_id = get_module_name(module_path)
+            
+            # Determine cluster
+            cluster_key = None
+            for key in clusters:
+                if key == name or module_path.startswith(key):
+                    cluster_key = key
+                    break
+            
+            if cluster_key:
+                clusters[cluster_key].append(module_id)
+            
+            # Get module details
+            module_type = get_module_type(child)
+            shape_info = get_layer_shape(child)
+            
+            # Store module info
+            label = f"{name}\n{module_type}"
+            if shape_info:
+                label += f"\n{shape_info}"
+            
+            all_modules[module_id] = {
+                'name': name,
+                'path': module_path,
+                'type': module_type,
+                'label': label,
+                'color': get_color(module_type),
+                'module': child  # Store reference to actual module
+            }
+            
+            # Check if module is a container
+            if list(child.named_children()):
+                # Module has children, add connections to them
+                child_ids = []
+                extract_model_structure(child, module_path)
+                
+                # Connect container to its first child
+                for child_name, _ in child.named_children():
+                    child_path = f"{module_path}.{child_name}"
+                    child_id = get_module_name(child_path)
+                    child_ids.append(child_id)
+                
+                # Link first and last element only if this is a Sequential container
+                if isinstance(child, nn.Sequential) and child_ids:
+                    # If sequential, connect first and last elements
+                    first_id = child_ids[0]
+                    for i in range(len(child_ids) - 1):
+                        connections[child_ids[i]].append(child_ids[i+1])
+            else:
+                # Leaf module, add it to graph
+                if isinstance(child, nn.Linear):
+                    # Calculate params for this layer
+                    params = child.in_features * child.out_features
+                    if child.bias is not None:
+                        params += child.out_features
+                    label += f"\n{params:,} params"
     
-    # Add a note about viewing in TensorBoard
-    print(f"Model graph added to TensorBoard: {log_dir}")
-    print(f"To view, run: tensorboard --logdir={log_dir}")
+    # Extract the structure
+    extract_model_structure(model)
     
-    # Save a text file with the command to view the graph
-    with open(os.path.join(output_dir, f"tensorboard_command_{run_id}.txt"), 'w') as f:
-        f.write(f"tensorboard --logdir={log_dir}")
+    # Add special input/output nodes for forward path
+    special_nodes = {
+        'x_input': {'label': 'x (observation)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        'c_input': {'label': 'c (control)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        'y_input': {'label': 'y (next obs)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        'v_true_input': {'label': 'v_true', 'shape': 'ellipse', 'color': 'lightgrey'},
+        's_x_output': {'label': 's_x (state probs)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        's_y_output': {'label': 's_y (true next state)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        's_y_pred_output': {'label': 's_y_pred (predicted)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        'v_pred_output': {'label': 'v_pred (value)', 'shape': 'ellipse', 'color': 'lightgrey'},
+        'concat_node': {'label': 'concatenated features', 'shape': 'ellipse', 'color': 'lightyellow'}
+    }
     
-    # Attempt to export the graph to an image using TensorBoard's export feature
-    # Note: This won't work perfectly in all environments but provides a starting point
+    # Add special nodes
+    for node_id, node_info in special_nodes.items():
+        if node_id == 'concat_node' and not isinstance(model.predictor, StandardPredictor):
+            # Only add concat node for StandardPredictor
+            continue
+        dot.node(node_id, node_info['label'], shape=node_info['shape'], fillcolor=node_info['color'])
+    
+    # Analyze special data flows for different predictor types
+    if hasattr(model, 'predictor'):
+        if isinstance(model.predictor, BilinearPredictor):
+            # Add custom data flow connections for BilinearPredictor
+            predictor = model.predictor
+            control_encoder_id = get_module_name('predictor.control_encoder')
+            interaction_id = get_module_name('predictor.interaction')
+            hidden_id = get_module_name('predictor.hidden')
+            output_id = get_module_name('predictor.output')
+            
+            # Create special path descriptions
+            custom_connections.extend([
+                ('c_input', control_encoder_id, {'label': 'control input', 'color': 'blue'}),
+                (control_encoder_id, interaction_id, {'label': 'control features', 'color': 'blue'}),
+                ('s_x_output', interaction_id, {'label': 'state input', 'color': 'green'}),
+                (interaction_id, hidden_id, {'label': 'interaction', 'color': 'red'}),
+                (hidden_id, output_id, {'label': 'hidden features', 'color': 'purple'}),
+                (output_id, 's_y_pred_output', {'label': 'logits->softmax', 'color': 'orange'})
+            ])
+            
+        elif isinstance(model.predictor, StandardPredictor):
+            # Add custom data flow connections for StandardPredictor
+            control_encoder_id = get_module_name('predictor.control_encoder')
+            predictor_id = get_module_name('predictor.predictor')
+            
+            # Get the first layer of the sequential predictor
+            first_layer_id = None
+            for module_id in all_modules:
+                if module_id.startswith('predictor_predictor_0'):
+                    first_layer_id = module_id
+                    break
+            
+            # Create special path descriptions for StandardPredictor
+            custom_connections.extend([
+                ('c_input', control_encoder_id, {'label': 'control input', 'color': 'blue'}),
+                (control_encoder_id, 'concat_node', {'label': 'encoded control', 'color': 'blue'}),
+                ('s_x_output', 'concat_node', {'label': 'state probs', 'color': 'green'}),
+                ('concat_node', first_layer_id if first_layer_id else predictor_id, {'label': 'concatenated', 'color': 'red'}),
+                (get_module_name('predictor.predictor'), 's_y_pred_output', {'label': 'output', 'color': 'orange'})
+            ])
+    
+    # Create encoder cluster
+    with dot.subgraph(name='cluster_encoder') as c:
+        c.attr(label='Encoder', style='filled', color='lightblue', fillcolor='azure')
+        
+        # Add encoder modules
+        for module_id in clusters['encoder']:
+            if module_id in all_modules:
+                module = all_modules[module_id]
+                c.node(module_id, module['label'], fillcolor=module['color'])
+        
+        # Add connections between encoder modules
+        for src, dests in connections.items():
+            if src in clusters['encoder']:
+                for dest in dests:
+                    if dest in clusters['encoder']:
+                        c.edge(src, dest)
+        
+        # Connect inputs/outputs
+        c.edge('x_input', clusters['encoder'][0] if clusters['encoder'] else 'encoder')
+        c.edge(clusters['encoder'][-1] if clusters['encoder'] else 'encoder', 's_x_output')
+        
+        # Add y path for training (dashed)
+        c.edge('y_input', clusters['encoder'][0] if clusters['encoder'] else 'encoder', 
+              style='dashed', label='shared weights')
+        c.edge(clusters['encoder'][-1] if clusters['encoder'] else 'encoder', 's_y_output', 
+              style='dashed')
+    
+    # Create predictor cluster with special handling for different predictor types
+    with dot.subgraph(name='cluster_predictor') as c:
+        predictor_type = model.predictor.__class__.__name__
+        c.attr(label=f'{predictor_type}', style='filled', color='lightgreen', fillcolor='mintcream')
+        
+        # Add predictor modules
+        for module_id in clusters['predictor']:
+            if module_id in all_modules:
+                module = all_modules[module_id]
+                c.node(module_id, module['label'], fillcolor=module['color'])
+        
+        # For BilinearPredictor, create a custom layout
+        if isinstance(model.predictor, BilinearPredictor):
+            # Highlight the interaction module
+            interaction_id = get_module_name('predictor.interaction')
+            if interaction_id in all_modules:
+                c.node(interaction_id, all_modules[interaction_id]['label'], 
+                      shape='Mrecord', fillcolor='gold')
+                      
+        # For StandardPredictor, add the concatenation node
+        elif isinstance(model.predictor, StandardPredictor):
+            # Concatenation happens outside any specific module
+            c.node('concat_node', 'Concatenate\ns_x + encoded c', 
+                  shape='Mrecord', fillcolor='gold')
+        
+        # Only add standard connections for the remaining modules
+        # (not for BilinearPredictor or StandardPredictor where we use custom connections)
+        if not isinstance(model.predictor, (BilinearPredictor, StandardPredictor)):
+            # Add connections between predictor modules
+            for src, dests in connections.items():
+                if src in clusters['predictor']:
+                    for dest in dests:
+                        if dest in clusters['predictor']:
+                            c.edge(src, dest)
+            
+            # Connect inputs/outputs
+            c.edge('s_x_output', clusters['predictor'][0] if clusters['predictor'] else 'predictor')
+            c.edge('c_input', clusters['predictor'][0] if clusters['predictor'] else 'predictor')
+            c.edge(clusters['predictor'][-1] if clusters['predictor'] else 'predictor', 's_y_pred_output')
+    
+    # Create value network cluster
+    with dot.subgraph(name='cluster_value') as c:
+        c.attr(label='Value Network', style='filled', color='salmon', fillcolor='seashell')
+        
+        # Add value network modules
+        for module_id in clusters['value_net']:
+            if module_id in all_modules:
+                module = all_modules[module_id]
+                c.node(module_id, module['label'], fillcolor=module['color'])
+        
+        # Add connections between value network modules
+        for src, dests in connections.items():
+            if src in clusters['value_net']:
+                for dest in dests:
+                    if dest in clusters['value_net']:
+                        c.edge(src, dest)
+        
+        # Connect inputs/outputs
+        c.edge('s_y_pred_output', clusters['value_net'][0] if clusters['value_net'] else 'value_net')
+        c.edge(clusters['value_net'][-1] if clusters['value_net'] else 'value_net', 'v_pred_output')
+    
+    # Add custom connections for non-sequential flows
+    for src, dest, attrs in custom_connections:
+        dot.edge(src, dest, 
+                color=attrs.get('color', 'blue'), 
+                label=attrs.get('label', ''), 
+                style=attrs.get('style', 'dashed'))
+    
+    # Add loss nodes
+    dot.node('state_loss', 'State Loss\nKL Divergence', shape='diamond', fillcolor='lightpink')
+    dot.node('value_loss', 'Value Loss\nMSE', shape='diamond', fillcolor='lightpink')
+    
+    # Connect for training path
+    dot.edge('s_y_output', 'state_loss')
+    dot.edge('s_y_pred_output', 'state_loss')
+    dot.edge('v_pred_output', 'value_loss')
+    dot.edge('v_true_input', 'value_loss')
+    
+    # Render the graph
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
     try:
-        # Create basic HTML pointing to TensorBoard
-        html_path = os.path.join(output_dir, f"model_architecture_{run_id}.html")
-        with open(html_path, 'w') as f:
-            f.write(f"""
-            <html>
-            <head>
-                <meta http-equiv="refresh" content="0;URL=http://localhost:6006/#graphs">
-            </head>
-            <body>
-                <p>Please run: <code>tensorboard --logdir={log_dir}</code> and open <a href="http://localhost:6006/#graphs">http://localhost:6006/#graphs</a></p>
-            </body>
-            </html>
-            """)
-        
-        print(f"Created HTML redirect at {html_path}")
-        
-        # Use tensorboard's built-in export features if TensorBoard is running
-        # Note: This is a placeholder - integrating with a running TensorBoard
-        # instance programmatically requires more complex implementation
-        
+        dot.render(output_path.replace('.png', ''), format='png', cleanup=True)
+        print(f"Model architecture visualization saved to {output_path}.png")
+        return output_path + '.png'
     except Exception as e:
-        print(f"Unable to export graph image: {e}")
-    
-    return log_dir
-
-def get_model_summary(model):
-    """
-    Generate a text summary of the model architecture.
-    
-    Args:
-        model: The PyTorch model to summarize
-        
-    Returns:
-        str: Summary text of the model
-    """
-    try:
-        from torchinfo import summary
-        
-        # Extract dimensions
-        obs_dim = model.encoder[0].in_features
-        control_dim = 1  # Default
-        
-        # Generate summary using torchinfo
-        s = summary(model, 
-                  input_size=[(1, obs_dim), (1, control_dim), 
-                             (1, obs_dim), (1, 1)],
-                  depth=5,
-                  verbose=0,
-                  col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"])
-        
-        return str(s)
-    except ImportError:
-        # Fall back to basic string representation if torchinfo isn't available
-        return f"""
-        Model: {model.__class__.__name__}
-        
-        Encoder: {model.encoder}
-        
-        Predictor: {model.predictor}
-        
-        Value Network: {model.value_net}
-        
-        Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}
-        """
-    except Exception as e:
-        return f"Error generating model summary: {e}"       
+        print(f"Error rendering graph: {e}")
+        # Try to save in current directory as fallback
+        fallback_path = f"model_arch_{model.num_states}_states"
+        dot.render(fallback_path, format='png', cleanup=True)
+        print(f"Fallback visualization saved to {fallback_path}.png")
+        return fallback_path + '.png'

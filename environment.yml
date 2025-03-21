@@ -17,3 +17,5 @@ dependencies:
   - pytorch=2.5.1
   - pytorch-cuda=12.1
   - psutil
+  - graphviz=8.1.0  
+  - python-graphviz=0.20.1 

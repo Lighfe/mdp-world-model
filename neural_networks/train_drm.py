@@ -25,7 +25,10 @@ from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.simulations.grid import tangent_transformation
-from neural_networks.drm_viz import visualize_state_space, analyze_state_transitions, visualize_transition_matrices
+from neural_networks.drm_viz import (
+    visualize_state_space, analyze_state_transitions, 
+    visualize_transition_matrices, visualize_model_architecture
+)
 
 
 def plot_training_curves(history, save_path=None):
@@ -633,7 +636,11 @@ def train_drm_model(db_path,
     # Visualizations
     transformation = tangent_transformation(3.0, 0.5)
 
-    # 1. Visualize the state space
+    # Visualize Modl Architecture
+    arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
+    visualize_model_architecture(model, arch_vis_path)
+
+    # Visualize the state space
     state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
     visualize_state_space(
         model=model,
