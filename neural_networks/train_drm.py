@@ -249,6 +249,8 @@ def train_drm_model(db_path,
         train_state_loss = 0.0
         train_value_loss = 0.0
         train_div_loss = 0.0
+        train_entropy_loss = 0.0
+        
         if loss_fn.use_diversity_loss:
             # Update diversity weight
             current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
