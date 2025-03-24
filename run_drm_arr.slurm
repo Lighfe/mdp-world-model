@@ -49,7 +49,8 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --state_loss_weight=1.0 \
 --value_loss_weight=1.0 \
 --predictor_type=bilinear \
---value_method="market_share" \
+--value_method="market_share" 
+
 echo "Job1 finished at $(date)"
 
 echo "Starting training job ${SLURM_ARRAY_TASK_ID}_standard..."
@@ -75,6 +76,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --min_temp 0.5 \
 --use_entropy_reg \
 --entropy_weight=10.0
+
 echo "Job1 finished at $(date)"
 
 echo "Starting training job ${SLURM_ARRAY_TASK_ID}_standard..."
@@ -117,7 +119,8 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --state_loss_weight=1.0 \
 --value_loss_weight=1.0 \
 --predictor_type=bilinear \
---value_method="90% market share" \
+--value_method="90% market share" 
+
 echo "Job3 finished at $(date)"
 
 echo "Starting training job ${SLURM_ARRAY_TASK_ID}_standard..."
@@ -143,4 +146,5 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --min_temp 0.5 \
 --use_entropy_reg \
 --entropy_weight=10.0
+
 echo "Job4 finished at $(date)"
