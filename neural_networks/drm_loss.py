@@ -59,7 +59,7 @@ class StableDRMLoss(nn.Module):
         
         return entropy_loss
     
-    def forward(self, s_y, s_y_pred, v_true, v_pred, s_x=None):
+    def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None):
         """
         Compute the combined loss with optional diversity and entropy regularization.
         
@@ -67,15 +67,8 @@ class StableDRMLoss(nn.Module):
             s_y: True next state probabilities
             s_y_pred: Predicted next state probabilities
             v_true: True value (computed from environment)
-            v_pred: Predicted value
+            v_pred_for_all_states: Predicted values for all one-hot encoded states (num_states, value_dim)
             s_x: Current state probabilities (for diversity/entropy regularization)
-        
-        Returns:
-            total_loss: Weighted sum of all losses
-            state_loss: KL divergence between state probabilities
-            value_loss: MSE between true and predicted values
-            div_loss: Diversity regularization loss (0 if s_x not provided or disabled)
-            entropy_loss: Entropy regularization loss (0 if disabled or high entropy)
         """
         # Add small epsilon to avoid log(0)
         epsilon = 1e-8
@@ -92,8 +85,8 @@ class StableDRMLoss(nn.Module):
             print("WARNING: NaN detected in KL divergence, setting to 0")
             state_loss = torch.tensor(0.0, device=s_y.device)
         
-        # MSE for value loss
-        value_loss = nn.functional.mse_loss(v_pred, v_true)
+        # Value loss calculation (new implementation)
+        value_loss = self._calculate_expected_value_loss(s_y_pred, v_pred_for_all_states, v_true)
         
         # Add diversity loss if s_x is provided and diversity loss is enabled
         div_loss = torch.tensor(0.0, device=s_y.device)
@@ -114,6 +107,38 @@ class StableDRMLoss(nn.Module):
         )
         
         return total_loss, state_loss, value_loss, div_loss, entropy_loss
+    
+    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true):
+        """
+        Calculate expected value loss under the predicted state distribution.
+        
+        Args:
+            s_y_pred: Predicted next state probabilities (batch_size, num_states)
+            v_pred_for_all_states: Values for all one-hot states (num_states, value_dim)
+            v_true: True value (batch_size, value_dim)
+            
+        Returns:
+            Expected value loss
+        """
+        # Reshape for broadcasting using unsqueeze
+        v_pred_expanded = v_pred_for_all_states.unsqueeze(0)  # [1, n_states, n_values]
+        v_true_expanded = v_true.unsqueeze(1)                 # [n_batch, 1, n_values]
+        
+        # Squared differences in each value dimension --> shape: (n_batch, n_states, n_values)
+        value_losses_by_successor_and_value_direction = (v_pred_expanded - v_true_expanded)**2
+        
+        # Sum over all value directions, giving squared value loss for each possible successor state
+        # --> shape: (n_batch, n_states)
+        value_losses_by_successor = value_losses_by_successor_and_value_direction.sum(dim=2)
+        
+        # Expected value over all possible successor states according to predicted distribution
+        # --> shape: (n_batch)
+        expected_value_losses = (s_y_pred * value_losses_by_successor).sum(dim=1)
+        
+        # Finally, take the mean over all samples in the batch
+        value_loss = expected_value_losses.mean()
+        
+        return value_loss
     
     def update_diversity_weight(self, epoch, max_epochs):
         """Gradually decrease diversity weight as training progresses"""

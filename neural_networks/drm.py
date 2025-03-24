@@ -245,10 +245,10 @@ class DiscreteRepresentationsModel(nn.Module):
         # Predict next state probabilities - always use soft predictions
         s_y_pred = self.predict_next_state(s_x, c)
         
-        # Compute value from predicted state
-        v_pred = self.compute_value(s_y_pred)
+        # Compute values for all possible states
+        v_pred_for_all_states = self.compute_values_for_all_states()
         
-        return s_x, s_y, s_y_pred, v_pred
+        return s_x, s_y, s_y_pred, v_pred_for_all_states
     
     def predict_next_state(self, s_x, c):
         """
@@ -276,4 +276,14 @@ class DiscreteRepresentationsModel(nn.Module):
             val: Predicted value (e.g., market share)
         """
         return self.value_net(s_y)
+    
+    def compute_values_for_all_states(self):
+        """
+        Compute values for all possible one-hot encoded states.
+        
+        Returns:
+            v_pred_for_all_states: Tensor of shape (num_states, value_dim)
+        """
+        one_hot_states = torch.eye(self.num_states, device=next(self.parameters()).device)
+        return self.compute_value(one_hot_states)
     

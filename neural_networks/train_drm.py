@@ -269,15 +269,16 @@ def train_drm_model(db_path,
             
             try:
                 # Forward pass
-                s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true, training=True)
+                s_x, s_y, s_y_pred, v_pred_for_all_states = model(x, c, y, v_true, training=True)
                 
                 # Check for NaN values in model outputs
-                if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred).any():
+                if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
                     print(f"WARNING: NaN values in model outputs for batch {batch_idx}, skipping")
                     continue
                 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
+                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(
+                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
                 
                 # Check if loss is NaN
                 if torch.isnan(total_loss):
@@ -340,14 +341,15 @@ def train_drm_model(db_path,
                 
                 try:
                     # Forward pass
-                    s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true, training=False)
+                    s_x, s_y, s_y_pred, v_pred_for_all_states = model(x, c, y, v_true, training=False)
                     
                     # Check for NaN values in model outputs
-                    if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred).any():
+                    if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
                         continue
                     
                     # Calculate loss
-                    total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
+                    total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(
+                            s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
                     
                     # Check if loss is NaN
                     if torch.isnan(total_loss):
@@ -486,21 +488,25 @@ def train_drm_model(db_path,
                 
             try:
                 # Forward pass
-                s_x, s_y, s_y_pred, v_pred = model(x, c, y, v_true)
+                s_x, s_y, s_y_pred, v_pred_for_all_states = model(x, c, y, v_true, training=False)
                 
                 # Skip if model outputs have NaN values
-                if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred).any():
+                if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
                     continue
                 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(s_y, s_y_pred, v_true, v_pred, s_x)
+                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(
+                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
                 
                 # Skip if loss is NaN
                 if torch.isnan(total_loss):
                     continue
                 
+                # Calculate expected value prediction based on predicted state distribution
+                expected_v_pred = (s_y_pred @ v_pred_for_all_states).detach()  # Matrix multiply: [batch, states] @ [states, value_dim]
+
                 # Store predictions and targets for analysis
-                test_value_predictions.append(v_pred.cpu().numpy())
+                test_value_predictions.append(expected_v_pred.cpu().numpy())
                 test_value_targets.append(v_true.cpu().numpy())
                 
                 # Accumulate losses
