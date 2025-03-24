@@ -205,13 +205,12 @@ class DiscreteRepresentationsModel(nn.Module):
         if not self.use_gumbel:
             return
             
+        # Calculate annealing factor (from 0 to 1)
+        annealing_end = int(total_epochs * annealing_proportion)
         # Higher starting temperature
         if epoch <= delay_epochs:
             self.current_temp = self.initial_temp
-            
-        # Calculate annealing factor (from 0 to 1)
-        annealing_end = int(total_epochs * annealing_proportion)
-        if epoch >= annealing_end:
+        elif epoch >= annealing_end:
             self.current_temp = self.min_temp
         else:
             # Use exponential decay instead of linear
