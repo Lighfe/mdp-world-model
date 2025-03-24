@@ -84,12 +84,12 @@ class Patchwork:
         The dictionary is nested: predecessors[s'][a] = [s_1,s_2, ...] with s_i being the patches that reach s' with action a.
         """
         
-        predecessors = dict()
+        predecessors = {patch: {action: set() for action in self.action_to_control_dict.keys()} for patch in self.current_patches}
         for s in self.trans_probs.keys():
             for a in self.trans_probs[s].keys():
                 for s_prime in self.trans_probs[s][a].keys():
                     if self.trans_probs[s][a][s_prime] > 0: #should be unnecessary, but for numerical safety (we only want to add predecessors for non-zero probabilities)
-                        predecessors.setdefault(s_prime, {}).setdefault(int(a), set()).add(s)
+                        predecessors[s_prime][a].add(s)
                     else:
                         raise ValueError('There exists a Zero Probability in the Transition Probabilities Dict')
         return predecessors

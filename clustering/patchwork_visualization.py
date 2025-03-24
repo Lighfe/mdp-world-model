@@ -121,7 +121,7 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 
 
-def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
+def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 15):
 
     grid_resolution = patchwork.grid.resolution
     grid_size = grid_resolution[0]
@@ -132,6 +132,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
     X1lin = np.linspace(bounds[0][0], bounds[0][1], vf_resolution)
     X2lin = np.linspace(bounds[1][0], bounds[1][1], vf_resolution)
     
+    axis_tick_labels = [(tick, str(np.round(patchwork.grid.inverse_transformations[0](tick),2))) for tick in np.linspace(0,1,11)]
     
     # Prepare meshgrid for the streamplot calculations
     if patchwork.grid.transformed_bool:
@@ -153,8 +154,9 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
         X1, X2 = np.meshgrid(X1lin, X2lin)
         
     #Function to generate streamplots for the different controls
-    def generate_streamplot(control):
+    def generate_streamplot(control, count):
         """Generate a streamplot for a given control."""
+        control = list(control)
         if patchwork.grid.transformed_bool:
        
             U_org, V_org = create_2D_vectorfield(X1_org, X2_org, control=control, solver=solver)
@@ -166,7 +168,9 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
             U, V = create_2D_vectorfield(X1, X2, control=control, solver=solver)
         
         fig, ax = plt.subplots(figsize = (20,20))
-        ax.streamplot(X1, X2, U, V, color='b', linewidth=3.7, density = 1, arrowsize=2, broken_streamlines=True)
+        #TODO improve this color choice
+        color = [ '#1D58F3', '#DC267F', '#FFB000'][count]
+        ax.streamplot(X1, X2, U, V, color=color, linewidth=2.7, density = 1, arrowsize=2, broken_streamlines=False)
 
         # Convert the Matplotlib plot to a NumPy array
         ax.axis('off')  # Turn off the axis
@@ -183,11 +187,11 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
         return im
 
     # Precompute streamplots based on controls
-    streamplots = {control: generate_streamplot(control) for control in controls}
+    streamplots = {control: generate_streamplot(control, count) for count, control in enumerate(controls)}
   
     #Create a grayscale + color map for patch color mapping
     grayscale_cmap = generate_random_grayscale_cmap(num_cells)
-    color_cmap = cc.glasbey_light[:number_of_steps]
+    color_cmap = (cc.glasbey_light * (number_of_steps // len(cc.glasbey_light) + 1))[:number_of_steps]
     combined_cmap = grayscale_cmap + color_cmap
     patch_color_mapping = {patch: combined_cmap[i] for i, patch in enumerate(range(patchwork.current_patches[-1]+1))}
 
@@ -212,11 +216,13 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
             entropy_values = {patch: patchwork.entropy_dict[patch]['avg'] for patch in unique_patches}
             cmap_dict = {str(patch): mplcol.to_hex(entropy_cmap(entropy_norm(entropy))) for patch, entropy in entropy_values.items()}
         
-        heatmap =  hv.HeatMap(cell_infos, kdims=['x', 'y'], vdims=['patch', 'entropy']).opts(alpha = 0.75,
+        heatmap =  hv.HeatMap(cell_infos, kdims=['x', 'y'], vdims=['patch', 'entropy']).opts(alpha = 0.5,
             cmap=cmap_dict, 
             xlim=(0, 1), ylim=(0, 1),
-            width=600, height=600, tools=['hover'] )
-        
+            width=600, height=600, tools=['hover'],
+            xticks=axis_tick_labels,  # Custom x-axis tick labels
+            yticks=axis_tick_labels   # Custom y-axis tick labels
+            )
         # Identify patch borders
         patch_borders = []
         for (x, y), patch in cells_to_current_patches.items(): #find neighboring patch borders
@@ -237,7 +243,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
                 patch_borders.append((cx - dx, cy + dx, cx + dx, cy + dx))  # Top border
 
         # Create border segments
-        borders = hv.Segments(patch_borders).opts(color='black', line_width=3)
+        borders = hv.Segments(patch_borders).opts(color='black', line_width=3 / (1 + 0.02 * grid_resolution[0]**1.1)) #smaller lines for higher resolutions
 
         #Overlay 
         layers = [heatmap *borders] + [streamplots[control] for control in selected_controls if control in streamplots]
@@ -251,8 +257,10 @@ def plot_interactive_patchwork(patchwork, controls, solver, vf_resolution = 15):
     # Bind the function to the slider
     interactive_plot = pn.bind(get_current_patchwork, step=slider, selected_controls = vector_selector_streamplots, selected_color = color_selector)
 
+    # Title for the widgetbox
+    title = pn.pane.Markdown(f"<h1> Patchwork Visualization </h1> <br />  {title}")
     # Layout
-    dashboard = pn.Row(pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, color_selector), interactive_plot)
+    dashboard = pn.Row(pn.Column(title, pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, color_selector)), interactive_plot)
     dashboard.servable() 
     dashboard.show()
 
