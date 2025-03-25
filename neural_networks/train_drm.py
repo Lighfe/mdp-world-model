@@ -59,7 +59,7 @@ def train_drm_model(db_path,
                     initial_temp=1.0,
                     min_temp=0.1,
                     use_entropy_reg=False,
-                    entropy_weight=2.0,
+                    entropy_weight=5.0,
                     use_target_encoder=False,
                     ema_decay=0.996,
                     ):
@@ -257,13 +257,13 @@ def train_drm_model(db_path,
             # Update diversity weight
             current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
             print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {current_div_weight:.4f}")
+
+        if loss_fn.use_entropy_reg:
+            # Update entropy weight
+            entropy_weight = loss_fn.update_entropy_weight(epoch, epochs)
+            print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {entropy_weight:.4f}")
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
-
-            # Debug check
-            if epoch == 0 and batch_idx == 0:
-                has_grad = any(p.requires_grad for p in model.target_encoder.parameters())
-                print(f"Target encoder has gradients enabled: {has_grad}")
 
             # Move data to device
             x, c, y, v_true = x.to(device), c.to(device), y.to(device), v_true.to(device)
@@ -723,7 +723,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--use_entropy_reg', action='store_true', 
                     help='Use entropy regularization to prevent state collapse')
-    parser.add_argument('--entropy_weight', type=float, default=2.0,
+    parser.add_argument('--entropy_weight', type=float, default=5.0,
                         help='Weight for entropy regularization loss')
     
     parser.add_argument('--use_target_encoder', action='store_true',

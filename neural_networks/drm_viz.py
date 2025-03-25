@@ -103,18 +103,18 @@ def plot_training_curves(history, save_path=None):
         plt.savefig(save_path)
         print(f"Saved loss curves to {save_path}")
 
-def visualize_state_space(model, output_path, transformations=None, device='cpu',
-                         num_points=1000, num_states=None):
+def visualize_state_space(model, output_path=None, transformations=None, device='cpu',
+                          num_points=1000, num_states=None):
     """
     Visualize the state probabilities in z-space (transformed space) with x-space coordinate labels.
     
     Args:
-        model: Trained DRM model
-        output_path: Path to save the visualization
-        transformations: List of transformation functions
-        device: Device to run the model on
-        num_points: Number of points in each dimension of the mesh
-        num_states: Number of states in the model (if None, will be inferred)
+        model: Trained DRM model.
+        output_path: Optional path to save the visualization. If None, the plot will be displayed.
+        transformations: List of transformation functions.
+        device: Device to run the model on.
+        num_points: Number of points in each dimension of the mesh.
+        num_states: Number of states in the model (if None, will be inferred).
     """
     if transformations is None:
         # Default to tangent transformation if none provided
@@ -226,12 +226,16 @@ def visualize_state_space(model, output_path, transformations=None, device='cpu'
     # Adjust layout
     plt.subplots_adjust(wspace=0.6, hspace=0.5)
     
-    # Save the figure
-    plt.savefig(output_path, dpi=200, bbox_inches='tight')
-    print(f"Saved state visualization to {output_path}")
+    # Save the figure if an output path is provided; otherwise, display it
+    if output_path:
+        plt.savefig(output_path, dpi=100, bbox_inches='tight')
+        print(f"Saved state visualization to {output_path}")
+    else:
+        plt.show()
     
     plt.close(fig)
     return fig, axes
+
 
 def analyze_state_transitions(model, 
                               transformations,
@@ -424,7 +428,7 @@ def visualize_transition_matrices(transition_matrices, control_values, output_pa
     
     # Save if output path is provided
     if output_path:
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=100, bbox_inches='tight')
         print(f"Saved transition matrix visualization to {output_path}")
         plt.close(fig)
     else:

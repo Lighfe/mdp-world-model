@@ -10,7 +10,7 @@ class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
                  initial_diversity_weight=1.0, min_diversity_weight=0.1,
                  use_diversity_loss=True, 
-                 use_entropy_reg=False, entropy_weight=2.0):
+                 use_entropy_reg=False, entropy_weight=5.0):
         """
         Modified loss function for the Discrete Representations Model with optional diversity regularization.
         
@@ -33,7 +33,9 @@ class StableDRMLoss(nn.Module):
         
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
-        self.entropy_weight = entropy_weight
+        self.initial_entropy_weight = entropy_weight
+        self.current_entropy_weight = entropy_weight
+        self.min_entropy_weight = 0.1 # hardcoded for now
     
     def entropy_loss(self, state_probs):
         """
@@ -78,7 +80,7 @@ class StableDRMLoss(nn.Module):
         s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
         
         # Manual calculation of KL divergence for better stability
-        state_loss = torch.sum(s_y * (torch.log(s_y) - torch.log(s_y_pred)), dim=1).mean()
+        state_loss = F.kl_div(torch.log(s_y_pred), s_y, reduction='batchmean')
         
         # Check for NaN in KL divergence and replace with zero if any
         if torch.isnan(state_loss):
@@ -96,14 +98,14 @@ class StableDRMLoss(nn.Module):
         # Add entropy regularization if enabled
         entropy_loss = torch.tensor(0.0, device=s_y.device)
         if s_x is not None and self.use_entropy_reg:
-            entropy_loss = self.entropy_loss(s_x) * self.entropy_weight
+            entropy_loss = self.entropy_loss(s_x)
         
         # Combined loss
         total_loss = (
             self.state_loss_weight * state_loss + 
             self.value_loss_weight * value_loss +
             div_loss + 
-            entropy_loss
+            self.current_entropy_weight * entropy_loss
         )
         
         return total_loss, state_loss, value_loss, div_loss, entropy_loss
@@ -150,3 +152,14 @@ class StableDRMLoss(nn.Module):
         self.current_diversity_weight = self.initial_diversity_weight - progress * (
             self.initial_diversity_weight - self.min_diversity_weight)
         return self.current_diversity_weight
+    
+    def update_entropy_weight(self, epoch, max_epochs):
+        """Gradually decrease entropy weight as training progresses"""
+        if not self.use_entropy_reg:
+            return 0.0  # Return zero if diversity loss is disabled
+            
+        # Decay to minimum weight by 60% of training
+        progress = min(1.0, epoch / (0.6 * max_epochs))
+        self.current_entropy_weight = self.initial_entropy_weight - progress * (
+            self.initial_entropy_weight - self.min_entropy_weight)
+        return self.current_entropy_weight

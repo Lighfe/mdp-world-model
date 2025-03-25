@@ -10,7 +10,7 @@
 #SBATCH --mem=16G
 #SBATCH --output=log/drm_target_%A_%a.out
 #SBATCH --error=log/drm_target_%A_%a.err
-#SBATCH --array=1-64
+#SBATCH --array=1-16
 
 # Print job info
 echo "Job started at $(date)"
@@ -40,37 +40,29 @@ task_id=$SLURM_ARRAY_TASK_ID
 # Fixed parameters
 predictor="bilinear"
 hidden_dim="64"
+batch_size="64"
 value_method="market_share"
 db_path="datasets/results/tech_angular_lt.db"
+warmup="--use_warmup --warmup_epochs=10"
 
 # Define exploration parameters (2 options each)
 ema_decay_options=(
     "0.5"
-    "0.999"
-)
-
-batch_size_options=(
-    "32"
-    "64"
+    "0.996"
 )
 
 loss_weights_options=(
-    "--state_loss_weight=1.0 --value_loss_weight=1.0"
     "--state_loss_weight=0.5 --value_loss_weight=1.0"
+    "--state_loss_weight=0.5 --value_loss_weight=2.0"
 )
 
 entropy_options=(
-    ""
+    "--use_entropy_reg --entropy_weight=5.0"
     "--use_entropy_reg --entropy_weight=10.0"
 )
 
-warmup_options=(
-    ""
-    "--use_warmup --warmup_epochs=10"
-)
-
 lr_options=(
-    "0.0001"
+    "0.00005"
     "0.00001"
 )
 
@@ -83,27 +75,21 @@ adjusted_id=$((task_id - 1))
 
 # Extract bits for each parameter (each bit represents a binary choice)
 ema_decay_idx=$((adjusted_id & 1))         # 1st bit
-batch_size_idx=$(((adjusted_id >> 1) & 1)) # 2nd bit
-loss_weights_idx=$(((adjusted_id >> 2) & 1)) # 3rd bit
-entropy_idx=$(((adjusted_id >> 3) & 1))    # 4th bit
-warmup_idx=$(((adjusted_id >> 4) & 1))     # 5th bit
-lr_idx=$(((adjusted_id >> 5) & 1))         # 6th bit
+loss_weights_idx=$(((adjusted_id >> 1) & 1)) # 2nd bit
+entropy_idx=$(((adjusted_id >> 2) & 1))    # 3rd bit
+lr_idx=$(((adjusted_id >> 3) & 1))         # 4th bit
 
 # Select parameters
 ema_decay="${ema_decay_options[$ema_decay_idx]}"
-batch_size="${batch_size_options[$batch_size_idx]}"
 loss_weights="${loss_weights_options[$loss_weights_idx]}"
 entropy="${entropy_options[$entropy_idx]}"
-warmup="${warmup_options[$warmup_idx]}"
 lr="${lr_options[$lr_idx]}"
 
 # Debug information
 echo "Parameter selection:"
 echo "EMA decay: $ema_decay_idx (${ema_decay})"
-echo "Batch size: $batch_size_idx (${batch_size})"
 echo "Loss weights: $loss_weights_idx (${loss_weights})"
 echo "Entropy: $entropy_idx (${entropy})"
-echo "Warmup: $warmup_idx (${warmup})"
 echo "Learning rate: $lr_idx (${lr})"
 
 # Function to run a single experiment
@@ -112,7 +98,7 @@ run_experiment() {
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     
     # Create a descriptive run ID
-    local run_id="target_ema${ema_decay_idx}_b${batch_size_idx}_l${loss_weights_idx}_e${entropy_idx}_w${warmup_idx}_lr${lr_idx}_r${repeat_id}_${timestamp}"
+    local run_id="target_ema${ema_decay_idx}_l${loss_weights_idx}_e${entropy_idx}_lr${lr_idx}_r${repeat_id}_${timestamp}"
     
     echo "Running configuration (repeat ${repeat_id}): $run_id"
     echo "Database: $db_path"
