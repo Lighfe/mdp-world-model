@@ -245,6 +245,11 @@ def train_drm_model(db_path,
                 param_group['lr'] = new_lr
             print(f"Warmup epoch {epoch+1}/{warmup_epochs}, LR set to {new_lr:.2e}")
 
+        # Debug check
+        if epoch == 0 and batch_idx == 0:
+            has_grad = any(p.requires_grad for p in model.target_encoder.parameters())
+            print(f"Target encoder has gradients enabled: {has_grad}")
+
         # Training phase
         model.train()
         train_loss = 0.0

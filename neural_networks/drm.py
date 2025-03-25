@@ -159,7 +159,7 @@ class DiscreteRepresentationsModel(nn.Module):
             nn.Linear(hidden_dim, num_states)  # Logits for state probabilities
         )
 
-                # Create target encoder - initially a copy of the encoder
+        # Create target encoder - initially a copy of the encoder
         if use_target_encoder:
             self.target_encoder = nn.Sequential(
                 nn.Linear(obs_dim, hidden_dim),
