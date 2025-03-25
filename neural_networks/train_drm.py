@@ -245,11 +245,6 @@ def train_drm_model(db_path,
                 param_group['lr'] = new_lr
             print(f"Warmup epoch {epoch+1}/{warmup_epochs}, LR set to {new_lr:.2e}")
 
-        # Debug check
-        if epoch == 0 and batch_idx == 0:
-            has_grad = any(p.requires_grad for p in model.target_encoder.parameters())
-            print(f"Target encoder has gradients enabled: {has_grad}")
-
         # Training phase
         model.train()
         train_loss = 0.0
@@ -264,6 +259,12 @@ def train_drm_model(db_path,
             print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {current_div_weight:.4f}")
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
+
+            # Debug check
+            if epoch == 0 and batch_idx == 0:
+                has_grad = any(p.requires_grad for p in model.target_encoder.parameters())
+                print(f"Target encoder has gradients enabled: {has_grad}")
+
             # Move data to device
             x, c, y, v_true = x.to(device), c.to(device), y.to(device), v_true.to(device)
             
