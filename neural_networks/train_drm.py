@@ -60,6 +60,8 @@ def train_drm_model(db_path,
                     min_temp=0.1,
                     use_entropy_reg=False,
                     entropy_weight=2.0,
+                    use_target_encoder=False,
+                    ema_decay=0.996,
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -147,7 +149,9 @@ def train_drm_model(db_path,
         predictor_type=predictor_type,
         use_gumbel=use_gumbel,
         initial_temp=initial_temp,
-        min_temp=min_temp
+        min_temp=min_temp,
+        use_target_encoder=use_target_encoder,
+        ema_decay=ema_decay
     )
     
     # Initialize model weights properly
@@ -293,6 +297,9 @@ def train_drm_model(db_path,
                 
                 # Update weights
                 optimizer.step()
+
+                if model.use_target_encoder:
+                    model.update_target_encoder()
                 
                 # Print batch info occasionally
                 if batch_idx % 50 == 0:
@@ -713,6 +720,11 @@ if __name__ == "__main__":
     parser.add_argument('--entropy_weight', type=float, default=2.0,
                         help='Weight for entropy regularization loss')
     
+    parser.add_argument('--use_target_encoder', action='store_true',
+                    help='Use target encoder with EMA updates')
+    parser.add_argument('--ema_decay', type=float, default=0.996,
+                    help='EMA decay rate for target encoder (higher = slower updates)')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -763,7 +775,9 @@ if __name__ == "__main__":
         initial_temp=args.initial_temp,
         min_temp=args.min_temp,
         use_entropy_reg=args.use_entropy_reg,
-        entropy_weight=args.entropy_weight
+        entropy_weight=args.entropy_weight,
+        use_target_encoder=args.use_target_encoder,
+        ema_decay=args.ema_decay
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

@@ -120,7 +120,8 @@ class ControlGatePredictor(BasePredictor):
 
 class DiscreteRepresentationsModel(nn.Module):
     def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, 
-                 predictor_type='bilinear', use_gumbel=False, initial_temp=1.0, min_temp=0.1):
+                 predictor_type='bilinear', use_gumbel=False, initial_temp=1.0, min_temp=0.1,
+                 use_target_encoder=False, ema_decay=0.996):
         """
         Initialize the Discrete Representations architecture
         
@@ -133,6 +134,8 @@ class DiscreteRepresentationsModel(nn.Module):
             use_gumbel: Whether to use Gumbel softmax for state encoding
             initial_temp: Initial temperature for Gumbel softmax
             min_temp: Minimum temperature for Gumbel softmax
+            use_target_encoder: Whether to use a target encoder with EMA updates
+            ema_decay: EMA decay rate for target encoder (higher = slower updates)
         """
         super(DiscreteRepresentationsModel, self).__init__()
         
@@ -141,8 +144,13 @@ class DiscreteRepresentationsModel(nn.Module):
         self.current_temp = initial_temp
         self.initial_temp = initial_temp
         self.min_temp = min_temp
+        # Store EMA parameters
+        self.use_target_encoder = use_target_encoder
+        self.ema_decay = ema_decay
+
+
         
-        # Rest of the initialization code remains the same
+        # initialize
         self.encoder = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
             nn.ReLU(),
@@ -150,6 +158,21 @@ class DiscreteRepresentationsModel(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, num_states)  # Logits for state probabilities
         )
+
+                # Create target encoder - initially a copy of the encoder
+        if use_target_encoder:
+            self.target_encoder = nn.Sequential(
+                nn.Linear(obs_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, num_states)
+            )
+            # Copy weights from encoder to target encoder
+            self._copy_weights(self.encoder, self.target_encoder)
+            # Disable gradient computation for target encoder
+            for param in self.target_encoder.parameters():
+                param.requires_grad = False
         
         # Create appropriate predictor based on type
         if predictor_type == 'standard':
@@ -169,8 +192,22 @@ class DiscreteRepresentationsModel(nn.Module):
         )
         
         self.num_states = num_states
+
+    def _copy_weights(self, src_model, tgt_model):
+        """Helper method to copy weights from source to target model"""
+        for src_param, tgt_param in zip(src_model.parameters(), tgt_model.parameters()):
+            tgt_param.data.copy_(src_param.data)
     
-    def get_state_probs(self, x, training=True, hard=False):
+    def update_target_encoder(self):
+        """Update target encoder using exponential moving average"""
+        if not self.use_target_encoder:
+            return
+            
+        with torch.no_grad():
+            for src_param, tgt_param in zip(self.encoder.parameters(), self.target_encoder.parameters()):
+                tgt_param.data.mul_(self.ema_decay).add_(src_param.data, alpha=1 - self.ema_decay)
+    
+    def get_state_probs(self, x, training=True, hard=False, use_target=False):
         """
         Get the state probabilities of an observation.
         
@@ -178,12 +215,18 @@ class DiscreteRepresentationsModel(nn.Module):
             x: Observation tensor
             training: Whether the model is in training mode
             hard: Whether to use hard (one-hot) assignments
+            use_target: Whether to use the target encoder (if available)
         
         Returns:
             prob_x: State probabilities
         """
-        logits = self.encoder(x)
+        # Choose encoder
+        encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
         
+        # Get logits
+        logits = encoder_to_use(x)
+        
+        # Rest of the method remains the same
         if self.use_gumbel and training:
             # During training with Gumbel
             gumbel_dist = torch.distributions.RelaxedOneHotCategorical(
@@ -194,7 +237,7 @@ class DiscreteRepresentationsModel(nn.Module):
             index = torch.argmax(logits, dim=1).unsqueeze(1)
             prob_x = torch.zeros_like(logits).scatter_(1, index, 1.0)
         else:
-            # Regular softmax (for non-Gumbel mode or Gumbel inference without hard assignment)
+            # Regular softmax
             prob_x = F.softmax(logits, dim=1)
         
         return prob_x
@@ -236,11 +279,11 @@ class DiscreteRepresentationsModel(nn.Module):
             s_y_pred: Predicted next state probabilities
             v_pred: Predicted value from predicted next state
         """
-        # Encode current observation
-        s_x = self.get_state_probs(x, training=training)
+        # Encode current observation with online encoder
+        s_x = self.get_state_probs(x, training=training, use_target=False)
         
-        # Encode next observation
-        s_y = self.get_state_probs(y, training=training)
+        # Encode next observation with target encoder (if available) or online encoder
+        s_y = self.get_state_probs(y, training=training, use_target=True)
         
         # Predict next state probabilities - always use soft predictions
         s_y_pred = self.predict_next_state(s_x, c)
