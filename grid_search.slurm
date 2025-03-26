@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=drm_target
+#SBATCH --job-name=drm_gumbel
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=01:00:00
@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
-#SBATCH --output=log/drm_target_%A_%a.out
-#SBATCH --error=log/drm_target_%A_%a.err
+#SBATCH --output=log/drm_gumbel_%A_%a.out
+#SBATCH --error=log/drm_gumbel_%A_%a.err
 #SBATCH --array=1-16
 
 # Print job info
@@ -38,59 +38,61 @@ export OMP_PROC_BIND=true
 task_id=$SLURM_ARRAY_TASK_ID
 
 # Fixed parameters
-predictor="bilinear"
-hidden_dim="64"
-batch_size="64"
-value_method="market_share"
 db_path="datasets/results/tech_angular_lt.db"
-warmup="--use_warmup --warmup_epochs=10"
+ema_decay="0.9"
+loss_weights="--state_loss_weight=0.5 --value_loss_weight=2.0"
+hidden_dim="64"
+lr="0.00005"
+warmup="--use_warmup --warmup_epochs=5"
+value_method="market_share"
+epochs="100"
 
 # Define exploration parameters (2 options each)
-ema_decay_options=(
-    "0.5"
-    "0.996"
+predictor_options=(
+    "standard"
+    "bilinear"
 )
 
-loss_weights_options=(
-    "--state_loss_weight=0.5 --value_loss_weight=1.0"
-    "--state_loss_weight=0.5 --value_loss_weight=2.0"
+temp_options=(
+    "--initial_temp=5.0 --min_temp=0.5"
+    "--initial_temp=10.0 --min_temp=1.0"
 )
 
 entropy_options=(
+    ""
     "--use_entropy_reg --entropy_weight=5.0"
-    "--use_entropy_reg --entropy_weight=10.0"
 )
 
-lr_options=(
-    "0.00005"
-    "0.00001"
+batch_size_options=(
+    "64"
+    "128"
 )
 
 # Calculate indices based on task_id using binary representation
 # This ensures we get exactly one of each possible combination
-# With 6 binary parameters, we have 2^6 = 64 combinations
+# With 4 binary parameters, we have 2^4 = 16 combinations
 
 # task_id is 1-based, convert to 0-based for calculations
 adjusted_id=$((task_id - 1))
 
 # Extract bits for each parameter (each bit represents a binary choice)
-ema_decay_idx=$((adjusted_id & 1))         # 1st bit
-loss_weights_idx=$(((adjusted_id >> 1) & 1)) # 2nd bit
+predictor_idx=$((adjusted_id & 1))         # 1st bit
+temp_idx=$(((adjusted_id >> 1) & 1))       # 2nd bit
 entropy_idx=$(((adjusted_id >> 2) & 1))    # 3rd bit
-lr_idx=$(((adjusted_id >> 3) & 1))         # 4th bit
+batch_size_idx=$(((adjusted_id >> 3) & 1)) # 4th bit
 
 # Select parameters
-ema_decay="${ema_decay_options[$ema_decay_idx]}"
-loss_weights="${loss_weights_options[$loss_weights_idx]}"
+predictor="${predictor_options[$predictor_idx]}"
+temp="${temp_options[$temp_idx]}"
 entropy="${entropy_options[$entropy_idx]}"
-lr="${lr_options[$lr_idx]}"
+batch_size="${batch_size_options[$batch_size_idx]}"
 
 # Debug information
 echo "Parameter selection:"
-echo "EMA decay: $ema_decay_idx (${ema_decay})"
-echo "Loss weights: $loss_weights_idx (${loss_weights})"
+echo "Predictor: $predictor_idx (${predictor})"
+echo "Temperature: $temp_idx (${temp})"
 echo "Entropy: $entropy_idx (${entropy})"
-echo "Learning rate: $lr_idx (${lr})"
+echo "Batch size: $batch_size_idx (${batch_size})"
 
 # Function to run a single experiment
 run_experiment() {
@@ -98,18 +100,21 @@ run_experiment() {
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     
     # Create a descriptive run ID
-    local run_id="target_ema${ema_decay_idx}_l${loss_weights_idx}_e${entropy_idx}_lr${lr_idx}_r${repeat_id}_${timestamp}"
+    local run_id="gumbel_p${predictor_idx}_t${temp_idx}_e${entropy_idx}_b${batch_size_idx}_r${repeat_id}_${timestamp}"
     
     echo "Running configuration (repeat ${repeat_id}): $run_id"
     echo "Database: $db_path"
-    echo "Predictor (fixed): $predictor"
-    echo "Hidden dim (fixed): $hidden_dim"
-    echo "EMA decay: $ema_decay"
-    echo "Batch size: $batch_size"
-    echo "Loss weights: $loss_weights"
+    echo "Predictor: $predictor"
+    echo "Temperature: $temp"
     echo "Entropy: $entropy"
-    echo "Warmup: $warmup"
-    echo "Learning rate: $lr"
+    echo "Batch size: $batch_size"
+    echo "Fixed parameters:"
+    echo "  Hidden dim: $hidden_dim"
+    echo "  EMA decay: $ema_decay"
+    echo "  Loss weights: $loss_weights"
+    echo "  Learning rate: $lr"
+    echo "  Warmup: $warmup"
+    echo "  Epochs: $epochs"
     
     # Run the training command
     python -m neural_networks.train_drm $db_path \
@@ -118,7 +123,7 @@ run_experiment() {
       --val_size=2000 \
       --test_size=2000 \
       --batch_size=$batch_size \
-      --epochs=100 \
+      --epochs=$epochs \
       --lr=$lr \
       --patience=15 \
       --num_states=4 \
@@ -127,6 +132,8 @@ run_experiment() {
       --value_method="$value_method" \
       --use_target_encoder \
       --ema_decay=$ema_decay \
+      --use_gumbel \
+      $temp \
       $loss_weights \
       $warmup \
       $entropy

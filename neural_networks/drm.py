@@ -243,7 +243,7 @@ class DiscreteRepresentationsModel(nn.Module):
         return prob_x
     
 
-    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.95, delay_epochs=10):
+    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.95, delay_epochs=5):
         """Much slower temperature annealing"""
         if not self.use_gumbel:
             return
