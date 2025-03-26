@@ -122,6 +122,8 @@ def train_drm_model(db_path,
     # Import the TechnologySubstitution model and NumericalSolver
     tech_sub_model = TechnologySubstitution()
     tech_sub_solver = TechSubNumericalSolver(tech_sub_model)
+
+    transformation = tangent_transformation(3.0, 0.5)
     
     # Create data loaders
     train_loader, val_loader, test_loader = create_data_loaders(
@@ -258,10 +260,10 @@ def train_drm_model(db_path,
             current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
             print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {current_div_weight:.4f}")
 
-        if loss_fn.use_entropy_reg:
+        if loss_fn.use_entropy_decay:
             # Update entropy weight
             entropy_weight = loss_fn.update_entropy_weight(epoch, epochs)
-            print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {entropy_weight:.4f}")
+            print(f"Epoch {epoch+1}/{epochs} - Entropy weight: {entropy_weight:.4f}")
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
 
@@ -415,6 +417,21 @@ def train_drm_model(db_path,
             print(f"Epoch {epoch+1}/{epochs} - "
                 f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}) - "
                 f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f})")
+
+        if epoch == 5:
+
+            # Visualize the state space
+            state_vis_path = os.path.join(output_dir, f"states_after5_{run_id}.png")
+            visualize_state_space(
+                model=model,
+                output_path=state_vis_path,
+                transformations=[
+                    transformation,  # For x1 dimension
+                    transformation   # For x2 dimension
+                ],
+                device=device,
+                num_states=num_states
+            )
 
         # Check for improvement
         if val_loss < best_val_loss:
@@ -618,9 +635,6 @@ def train_drm_model(db_path,
     training_time = time.time() - start_time
     print(f"Training completed in {training_time:.2f} seconds")
 
-
-    # Visualizations
-    transformation = tangent_transformation(3.0, 0.5)
 
     # Visualize Modl Architecture
     arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")

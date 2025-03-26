@@ -9,8 +9,8 @@ import torch.nn.functional as F
 class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
                  initial_diversity_weight=1.0, min_diversity_weight=0.1,
-                 use_diversity_loss=True, 
-                 use_entropy_reg=False, entropy_weight=5.0):
+                 use_diversity_loss=True, use_entropy_reg=False, 
+                 entropy_weight=5.0, use_entropy_decay=True):
         """
         Modified loss function for the Discrete Representations Model with optional diversity regularization.
         
@@ -36,6 +36,7 @@ class StableDRMLoss(nn.Module):
         self.initial_entropy_weight = entropy_weight
         self.current_entropy_weight = entropy_weight
         self.min_entropy_weight = 0.1 # hardcoded for now
+        self.use_entropy_decay = use_entropy_decay
     
     def entropy_loss(self, state_probs):
         """
@@ -155,11 +156,12 @@ class StableDRMLoss(nn.Module):
     
     def update_entropy_weight(self, epoch, max_epochs):
         """Gradually decrease entropy weight as training progresses"""
-        if not self.use_entropy_reg:
-            return 0.0  # Return zero if diversity loss is disabled
-            
-        # Decay to minimum weight by 60% of training
-        progress = min(1.0, epoch / (0.6 * max_epochs))
+        
+        if not self.use_entropy_decay:
+            return self.current_entropy_weight # Don't think this if will be needed
+        
+        # Decay to minimum weight by 20% of training
+        progress = min(1.0, epoch / (0.2 * max_epochs))
         self.current_entropy_weight = self.initial_entropy_weight - progress * (
             self.initial_entropy_weight - self.min_entropy_weight)
-        return self.current_entropy_weight
+        return self.current_entropy_weigh
