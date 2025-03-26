@@ -164,4 +164,4 @@ class StableDRMLoss(nn.Module):
         progress = min(1.0, epoch / (0.2 * max_epochs))
         self.current_entropy_weight = self.initial_entropy_weight - progress * (
             self.initial_entropy_weight - self.min_entropy_weight)
-        return self.current_entropy_weigh
+        return self.current_entropy_weight
