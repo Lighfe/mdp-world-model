@@ -45,9 +45,6 @@ def train_drm_model(db_path,
                     checkpoint_every=10,
                     state_loss_weight=1.0, 
                     value_loss_weight=3.0,
-                    initial_div_weight=0.5,
-                    min_div_weight=0.05,
-                    use_diversity_loss=False,
                     predictor_type='control_gate',
                     value_method=None,
                     use_lr_scheduler=False,
@@ -62,6 +59,8 @@ def train_drm_model(db_path,
                     entropy_weight=5.0,
                     use_target_encoder=False,
                     ema_decay=0.996,
+                    use_state_diversity=False,
+                    diversity_weight=1.0
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -169,13 +168,12 @@ def train_drm_model(db_path,
     print(f"Using device: {device}")
     model.to(device)
     
-    # use loss function
+    # init loss function
     loss_fn = StableDRMLoss(
         state_loss_weight=state_loss_weight, 
         value_loss_weight=value_loss_weight,
-        initial_diversity_weight=initial_div_weight,
-        min_diversity_weight=min_div_weight,
-        use_diversity_loss=use_diversity_loss,
+        use_state_diversity=use_state_diversity,
+        diversity_weight=diversity_weight,
         use_entropy_reg=use_entropy_reg,
         entropy_weight=entropy_weight
     )
@@ -255,10 +253,6 @@ def train_drm_model(db_path,
         train_div_loss = 0.0
         train_entropy_loss = 0.0
 
-        if loss_fn.use_diversity_loss:
-            # Update diversity weight
-            current_div_weight = loss_fn.update_diversity_weight(epoch, epochs)
-            print(f"Epoch {epoch+1}/{epochs} - Diversity weight: {current_div_weight:.4f}")
 
         if loss_fn.use_entropy_decay:
             # Update entropy weight
@@ -700,17 +694,8 @@ if __name__ == "__main__":
     parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
     parser.add_argument('--num_states', type=int, default=4, help='Number of discrete states')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension size')
-
-    parser.add_argument('--use_diversity_loss', action='store_true', 
-                        help='Whether to use diversity regularization')
-    parser.add_argument('--no_diversity_loss', dest='use_diversity_loss', 
-                        action='store_false', help='Disable diversity regularization')
-    parser.set_defaults(use_diversity_loss=False)
     parser.add_argument('--state_loss_weight', type=float, default=1.0, help='Stateloss weight')
     parser.add_argument('--value_loss_weight', type=float, default=3.0, help='Value loss weight')
-
-    parser.add_argument('--initial_div_weight', type=float, default=1.0, help='Initial diversity loss weight')
-    parser.add_argument('--min_div_weight', type=float, default=0.05, help='Minimum diversity loss weight')
 
     parser.add_argument('--predictor_type', type=str, default='control_gate', 
                         choices=['standard', 'control_gate', 'bilinear'],
@@ -744,6 +729,14 @@ if __name__ == "__main__":
                     help='Use target encoder with EMA updates')
     parser.add_argument('--ema_decay', type=float, default=0.996,
                     help='EMA decay rate for target encoder (higher = slower updates)')
+    
+    parser.add_argument('--use_state_diversity', action='store_true',
+                    help='Whether to use correlation-based state diversity regularization')
+    parser.add_argument('--no_state_diversity', dest='use_state_diversity',
+                        action='store_false', help='Disable state diversity regularization')
+    parser.set_defaults(use_state_diversity=False)
+    parser.add_argument('--diversity_weight', type=float, default=1.0,
+                        help='Weight for state diversity regularization')
     
     args = parser.parse_args()
 
@@ -781,9 +774,6 @@ if __name__ == "__main__":
         checkpoint_every=10,
         state_loss_weight=args.state_loss_weight,
         value_loss_weight=args.value_loss_weight,
-        initial_div_weight=args.initial_div_weight,
-        min_div_weight=args.min_div_weight,
-        use_diversity_loss=args.use_diversity_loss,
         predictor_type=args.predictor_type,
         value_method=args.value_method,
         use_lr_scheduler=args.use_lr_scheduler,
@@ -797,7 +787,9 @@ if __name__ == "__main__":
         use_entropy_reg=args.use_entropy_reg,
         entropy_weight=args.entropy_weight,
         use_target_encoder=args.use_target_encoder,
-        ema_decay=args.ema_decay
+        ema_decay=args.ema_decay,
+        use_state_diversity=args.use_state_diversity,
+        diversity_weight=args.diversity_weight
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

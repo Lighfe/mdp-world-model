@@ -6,11 +6,59 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class StateDiversityLoss(nn.Module):
+    """
+    Loss that encourages diverse usage of states across a batch by minimizing correlations 
+    between different state activations.
+    """
+    def __init__(self, weight=1.0, normalize=True):
+        super(StateDiversityLoss, self).__init__()
+        self.weight = weight
+        self.normalize = normalize  # Whether to normalize state activations
+        
+    def forward(self, state_batch, epsilon=1e-8):
+        """
+        Calculate state diversity loss
+        
+        Args:
+            state_batch: Batch of state probability distributions (batch_size, num_states)
+            epsilon: Small constant for numerical stability
+            
+        Returns:
+            Loss value - smaller means more diverse state usage
+        """
+        batch_size = state_batch.size(0)
+        
+        # Skip if batch is too small
+        if batch_size <= 1:
+            return torch.tensor(0.0, device=state_batch.device)
+        
+        # Center and standardize each state dimension across the batch
+        if self.normalize:
+            # Center (subtract mean)
+            centered_states = state_batch - state_batch.mean(dim=0, keepdim=True)
+            
+            # Standardize (divide by standard deviation)
+            std = torch.std(centered_states, dim=0, keepdim=True) + epsilon
+            normalized_states = centered_states / std
+        else:
+            normalized_states = state_batch - state_batch.mean(dim=0, keepdim=True)
+        
+        # Calculate correlation matrix: (num_states, num_states)
+        corr_matrix = torch.matmul(normalized_states.t(), normalized_states) / batch_size
+        
+        # Create mask to select only off-diagonal elements
+        num_states = corr_matrix.size(0)
+        mask = 1.0 - torch.eye(num_states, device=corr_matrix.device)
+        
+        # Sum squared correlations (both positive and negative hurt diversity)
+        off_diag_correlations = (corr_matrix * mask).pow(2).sum()
+        
+        return self.weight * off_diag_correlations
 class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
-                 initial_diversity_weight=1.0, min_diversity_weight=0.1,
-                 use_diversity_loss=True, use_entropy_reg=False, 
-                 entropy_weight=5.0, use_entropy_decay=True):
+                 use_state_diversity=True, diversity_weight=1.0,
+                 use_entropy_reg=False, entropy_weight=5.0, use_entropy_decay=True):
         """
         Modified loss function for the Discrete Representations Model with optional diversity regularization.
         
@@ -26,10 +74,10 @@ class StableDRMLoss(nn.Module):
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
         self.value_loss_weight = value_loss_weight
-        self.initial_diversity_weight = initial_diversity_weight
-        self.min_diversity_weight = min_diversity_weight
-        self.current_diversity_weight = initial_diversity_weight
-        self.use_diversity_loss = use_diversity_loss
+
+        self.diversity_weight = diversity_weight
+        self.use_state_diversity = use_state_diversity
+        self.state_diversity = StateDiversityLoss(weight=1.0)
         
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
@@ -91,11 +139,11 @@ class StableDRMLoss(nn.Module):
         # Value loss calculation (new implementation)
         value_loss = self._calculate_expected_value_loss(s_y_pred, v_pred_for_all_states, v_true)
         
-        # Add diversity loss if s_x is provided and diversity loss is enabled
-        div_loss = torch.tensor(0.0, device=s_y.device)
-        if s_x is not None and self.use_diversity_loss:
-            div_loss = self.diversity_loss(s_x)
-        
+        # Correlation-based diversity
+        diversity_loss = torch.tensor(0.0, device=s_y.device)
+        if s_x is not None and self.use_state_diversity:
+            diversity_loss = self.state_diversity(s_x)
+
         # Add entropy regularization if enabled
         entropy_loss = torch.tensor(0.0, device=s_y.device)
         if s_x is not None and self.use_entropy_reg:
@@ -105,11 +153,11 @@ class StableDRMLoss(nn.Module):
         total_loss = (
             self.state_loss_weight * state_loss + 
             self.value_loss_weight * value_loss +
-            div_loss + 
+            diversity_loss + # has weight already 
             self.current_entropy_weight * entropy_loss
         )
         
-        return total_loss, state_loss, value_loss, div_loss, entropy_loss
+        return total_loss, state_loss, value_loss, diversity_loss, entropy_loss
     
     def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true):
         """
