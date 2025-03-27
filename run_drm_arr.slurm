@@ -45,7 +45,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --lr=1e-5 \
 --use_warmup \
 --warmup_epochs=5 \
---patience=10 \
+--patience=20 \
 --num_states=4 \
 --hidden_dim=64 \
 --state_loss_weight=0.5 \
@@ -53,15 +53,16 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --predictor_type=bilinear \
 --value_method="market_share" \
 --use_entropy_reg \
---entropy_weight=10.0 \
---use_target_encoder \
---ema_decay=0.996
+--entropy_weight=3.0 \
+--use_gumbel \
+--initial_temp=5.0 \
+--min_temp=0.5
 echo "Job1 finished at $(date)"
 
 echo "Starting training job ${SLURM_ARRAY_TASK_ID}"
 python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_e5_v2_ema9" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_e10_v2_ema9" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
@@ -69,7 +70,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --lr=1e-5 \
 --use_warmup \
 --warmup_epochs=5 \
---patience=10 \
+--patience=20 \
 --num_states=4 \
 --hidden_dim=64 \
 --state_loss_weight=0.5 \
@@ -77,55 +78,11 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --predictor_type=bilinear \
 --value_method="market_share" \
 --use_entropy_reg \
---entropy_weight=5.0 \
---use_target_encoder \
---ema_decay=0.996
+--entropy_weight=3.0 \
+--use_gumbel \
+--initial_temp=10.0 \
+--min_temp=1.0
 echo "Job2 finished at $(date)"
 
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}"
-python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
---output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_e10_v2_ema3" \
---val_size=2000 \
---test_size=2000 \
---batch_size=64 \
---epochs=100 \
---lr=1e-5 \
---use_warmup \
---warmup_epochs=5 \
---patience=10 \
---num_states=4 \
---hidden_dim=64 \
---state_loss_weight=0.5 \
---value_loss_weight=2.0 \
---predictor_type=bilinear \
---value_method="market_share" \
---use_entropy_reg \
---entropy_weight=10.0 \
---use_target_encoder \
---ema_decay=0.3
-echo "Job3 finished at $(date)"
 
-echo "Starting training job ${SLURM_ARRAY_TASK_ID}"
-python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
---output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_e5_v2_ema3" \
---val_size=2000 \
---test_size=2000 \
---batch_size=64 \
---epochs=100 \
---lr=1e-5 \
---use_warmup \
---warmup_epochs=5 \
---patience=10 \
---num_states=4 \
---hidden_dim=64 \
---state_loss_weight=0.5 \
---value_loss_weight=2.0 \
---predictor_type=bilinear \
---value_method="market_share" \
---use_entropy_reg \
---entropy_weight=5.0 \
---use_target_encoder \
---ema_decay=0.3
-echo "Job4 finished at $(date)"
+
