@@ -120,7 +120,7 @@ class ControlGatePredictor(BasePredictor):
 
 class DiscreteRepresentationsModel(nn.Module):
     def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, 
-                 predictor_type='bilinear', use_gumbel=False, initial_temp=1.0, min_temp=0.1,
+                 predictor_type='bilinear', use_gumbel=False, initial_temp=5.0, min_temp=0.5,
                  use_target_encoder=False, ema_decay=0.996):
         """
         Initialize the Discrete Representations architecture

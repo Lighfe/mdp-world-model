@@ -37,7 +37,7 @@ sleep $((($SLURM_ARRAY_TASK_ID - 1) * 5))
 echo "Starting training job ${SLURM_ARRAY_TASK_ID}"
 python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_e10_v2_ema9" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_temp5" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
@@ -52,8 +52,6 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --value_loss_weight=2.0 \
 --predictor_type=bilinear \
 --value_method="market_share" \
---use_entropy_reg \
---entropy_weight=3.0 \
 --use_gumbel \
 --initial_temp=5.0 \
 --min_temp=0.5
@@ -62,7 +60,7 @@ echo "Job1 finished at $(date)"
 echo "Starting training job ${SLURM_ARRAY_TASK_ID}"
 python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --output_dir=neural_networks/output \
---run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_e10_v2_ema9" \
+--run_id="$(date +%Y%m%d_%H%M%S)_task${SLURM_ARRAY_TASK_ID}_temp10" \
 --val_size=2000 \
 --test_size=2000 \
 --batch_size=64 \
@@ -77,12 +75,7 @@ python -m neural_networks.train_drm datasets/results/tech_angular_lt.db \
 --value_loss_weight=2.0 \
 --predictor_type=bilinear \
 --value_method="market_share" \
---use_entropy_reg \
---entropy_weight=3.0 \
 --use_gumbel \
 --initial_temp=10.0 \
 --min_temp=1.0
 echo "Job2 finished at $(date)"
-
-
-
