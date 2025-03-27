@@ -403,7 +403,7 @@ def train_drm_model(db_path,
                 f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, "
                 f"Entropy: {val_entropy_loss:.4f})")
         # lazy
-        if loss_fn.use_diversity_loss:
+        if loss_fn.use_state_diversity:
             print(f"Epoch {epoch+1}/{epochs} - "
                 f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, Div: {train_div_loss:.4f}) - "
                 f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, Div: {val_div_loss:.4f})")

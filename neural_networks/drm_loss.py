@@ -60,16 +60,15 @@ class StableDRMLoss(nn.Module):
                  use_state_diversity=True, diversity_weight=1.0,
                  use_entropy_reg=False, entropy_weight=5.0, use_entropy_decay=True):
         """
-        Modified loss function for the Discrete Representations Model with optional diversity regularization.
+        Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
         
         Args:
-            state_loss_weight: Weight for the state prediction loss
-            value_loss_weight: Weight for the value prediction loss
-            initial_diversity_weight: Starting weight for diversity regularization
-            min_diversity_weight: Minimum weight for diversity regularization after decay
-            use_diversity_loss: Whether to apply diversity regularization (default: True)
-            use_entropy_reg: Whether to use entropy regularization to prevent state collapse
-            entropy_weight: Weight for the entropy regularization term
+            state_loss_weight: Weight for state prediction loss
+            value_loss_weight: Weight for value prediction loss
+            diversity_weight: Weight for state diversity regularization
+            use_state_diversity: Whether to use state diversity loss
+            use_entropy_reg: Whether to use entropy regularization
+            entropy_weight: Weight for entropy regularization
         """
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
