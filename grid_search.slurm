@@ -10,7 +10,7 @@
 #SBATCH --mem=16G
 #SBATCH --output=log/drm_state_div_%A_%a.out
 #SBATCH --error=log/drm_state_div_%A_%a.err
-#SBATCH --array=1-32
+#SBATCH --array=1-6
 
 # Print job info
 echo "Job started at $(date)"
@@ -45,52 +45,55 @@ value_method="market_share"
 db_path="datasets/results/tech_angular_lt.db"
 warmup="--use_warmup --warmup_epochs=5"
 lr="0.00005"
+loss_weights="--state_loss_weight=0.5 --value_loss_weight=2.0"
 gumbel="--use_gumbel"
+temp="--initial_temp=5.0 --min_temp=0.5"
 target_encoder="--use_target_encoder"
 patience="20"
+state_div="--use_state_diversity"
 
-# Define exploration parameters (2 options each)
+# Exploring options
 ema_decay_options=(
     "0.9"
-    "0.5"
-)
-
-temp_options=(
-    "--initial_temp=5.0 --min_temp=0.5"
-    "--initial_temp=10.0 --min_temp=0.5"
+    "0.996"
 )
 
 entropy_options=(
     ""
-    "--use_entropy_reg --entropy_weight=3.0"
-)
-
-loss_weights_options=(
-    "--state_loss_weight=0.5 --value_loss_weight=2.0"
-    "--state_loss_weight=1.0 --value_loss_weight=1.0"
-)
-
-state_div_options=(
-    "--use_state_diversity"
-    ""
+    "--use_entropy_reg --entropy_weight=5.0"
 )
 
 div_weight_options=(
-    "--diversity_weight=0.5"
-    "--diversity_weight=1.0"
+    "--diversity_weight=0.001"
+    "--diversity_weight=0.01"
+    "--diversity_weight=0.1"
 )
 
-# Calculate indices based on task_id
-# With 32 jobs and 64 combinations, each job handles 2 combinations
-# First combination: 2*(task_id-1)
-# Second combination: 2*(task_id-1)+1
-base_idx=$((2 * (task_id - 1)))
+# Calculate total number of combinations
+# 2 ema_decay options × 2 entropy options × 3 div_weight options = 12 combinations
+total_combinations=$((2 * 2 * 3))
 
-# Function to get parameter index from combination index
-get_param_index() {
+# Calculate which combinations to run based on task_id
+# Each task will run 2 combinations (each combination twice)
+# Task 1 runs combinations 0,1; Task 2 runs combinations 2,3; etc.
+start_combo_idx=$(( 2 * (task_id - 1) ))
+second_combo_idx=$(( start_combo_idx + 1 ))
+
+# Function to extract parameter choices based on combination index
+get_params() {
     local combo_idx=$1
-    local param_pos=$2
-    echo $(( (combo_idx >> param_pos) & 1 ))
+    
+    # Calculate indices for each parameter set
+    local ema_decay_idx=$(( combo_idx / 6 ))         # 0-1 (2 options)
+    local entropy_idx=$(( (combo_idx % 6) / 3 ))     # 0-1 (2 options)
+    local div_weight_idx=$(( combo_idx % 3 ))        # 0-2 (3 options)
+    
+    # Select parameters
+    local ema_decay="${ema_decay_options[$ema_decay_idx]}"
+    local entropy="${entropy_options[$entropy_idx]}"
+    local div_weight="${div_weight_options[$div_weight_idx]}"
+    
+    echo "$ema_decay" "$entropy" "$div_weight" "$ema_decay_idx" "$entropy_idx" "$div_weight_idx"
 }
 
 # Function to run a single experiment
@@ -99,30 +102,11 @@ run_experiment() {
     local repeat_id=$2
     local timestamp=$(date +"%Y%m%d_%H%M%S")
     
-    # Extract parameter indices for this combination
-    ema_decay_idx=$(get_param_index $combo_idx 0)
-    temp_idx=$(get_param_index $combo_idx 1)
-    entropy_idx=$(get_param_index $combo_idx 2)
-    loss_weights_idx=$(get_param_index $combo_idx 3)
-    state_div_idx=$(get_param_index $combo_idx 4)
-    div_weight_idx=$(get_param_index $combo_idx 5)
-    
-    # Select parameters
-    ema_decay="${ema_decay_options[$ema_decay_idx]}"
-    temp="${temp_options[$temp_idx]}"
-    entropy="${entropy_options[$entropy_idx]}"
-    loss_weights="${loss_weights_options[$loss_weights_idx]}"
-    state_div="${state_div_options[$state_div_idx]}"
-    div_weight="${div_weight_options[$div_weight_idx]}"
-    
-    # Only use div_weight if state_div is enabled
-    div_weight_param=""
-    if [ ! -z "$state_div" ]; then
-        div_weight_param="$div_weight"
-    fi
+    # Get parameters for this combination
+    read ema_decay entropy div_weight ema_decay_idx entropy_idx div_weight_idx <<< $(get_params $combo_idx)
     
     # Create a descriptive run ID
-    local run_id="sd_ema${ema_decay_idx}_t${temp_idx}_e${entropy_idx}_l${loss_weights_idx}_sd${state_div_idx}_dw${div_weight_idx}_r${repeat_id}_${timestamp}"
+    local run_id="sd_ema${ema_decay_idx}_e${entropy_idx}_dw${div_weight_idx}_r${repeat_id}_${timestamp}"
     
     echo "Running configuration (repeat ${repeat_id}): $run_id"
     echo "Database: $db_path"
@@ -131,11 +115,10 @@ run_experiment() {
     echo "Batch size (fixed): $batch_size"
     echo "Learning rate (fixed): $lr"
     echo "EMA decay: $ema_decay"
-    echo "Temperature: $temp"
     echo "Entropy: $entropy"
     echo "Loss weights: $loss_weights"
     echo "State diversity: $state_div"
-    echo "Diversity weight: $div_weight_param"
+    echo "Diversity weight: $div_weight"
     echo "Gumbel: $gumbel"
     echo "Target encoder: $target_encoder"
     echo "Warmup: $warmup"
@@ -155,25 +138,26 @@ run_experiment() {
       --predictor_type=$predictor \
       --value_method="$value_method" \
       --ema_decay=$ema_decay \
-      $temp \
       $loss_weights \
       $warmup \
       $gumbel \
+      $temp \
       $target_encoder \
       $state_div \
-      $div_weight_param \
+      $div_weight \
       $entropy
     
     echo "Experiment ${repeat_id} finished at $(date)"
 }
 
 # Run first combination
-run_experiment $base_idx 0
-run_experiment $base_idx 1
+echo "Running combination $start_combo_idx (of $total_combinations total)"
+run_experiment $start_combo_idx 0
+run_experiment $start_combo_idx 1
 
 # Run second combination
-second_idx=$((base_idx + 1))
-run_experiment $second_idx 0
-run_experiment $second_idx 1
+echo "Running combination $second_combo_idx (of $total_combinations total)"
+run_experiment $second_combo_idx 0
+run_experiment $second_combo_idx 1
 
 echo "Job finished at $(date)"
