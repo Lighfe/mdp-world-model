@@ -412,10 +412,10 @@ def train_drm_model(db_path,
                 f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}) - "
                 f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f})")
 
-        if epoch == 5:
+        if epoch == 5 or epoch == 25:
 
             # Visualize the state space
-            state_vis_path = os.path.join(output_dir, f"states_after5_{run_id}.png")
+            state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
             visualize_state_space(
                 model=model,
                 output_path=state_vis_path,
