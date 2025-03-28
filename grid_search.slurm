@@ -79,9 +79,11 @@ total_combinations=$((2 * 2 * 3))
 start_combo_idx=$(( 2 * (task_id - 1) ))
 second_combo_idx=$(( start_combo_idx + 1 ))
 
-# Function to extract parameter choices based on combination index
-get_params() {
+# Function to run a single experiment
+run_experiment() {
     local combo_idx=$1
+    local repeat_id=$2
+    local timestamp=$(date +"%Y%m%d_%H%M%S")
     
     # Calculate indices for each parameter set
     local ema_decay_idx=$(( combo_idx / 6 ))         # 0-1 (2 options)
@@ -93,18 +95,6 @@ get_params() {
     local entropy="${entropy_options[$entropy_idx]}"
     local div_weight="${div_weight_options[$div_weight_idx]}"
     
-    echo "$ema_decay" "$entropy" "$div_weight" "$ema_decay_idx" "$entropy_idx" "$div_weight_idx"
-}
-
-# Function to run a single experiment
-run_experiment() {
-    local combo_idx=$1
-    local repeat_id=$2
-    local timestamp=$(date +"%Y%m%d_%H%M%S")
-    
-    # Get parameters for this combination
-    read ema_decay entropy div_weight ema_decay_idx entropy_idx div_weight_idx <<< $(get_params $combo_idx)
-    
     # Create a descriptive run ID
     local run_id="sd_ema${ema_decay_idx}_e${entropy_idx}_dw${div_weight_idx}_r${repeat_id}_${timestamp}"
     
@@ -115,7 +105,7 @@ run_experiment() {
     echo "Batch size (fixed): $batch_size"
     echo "Learning rate (fixed): $lr"
     echo "EMA decay: $ema_decay"
-    echo "Entropy: $entropy"
+    echo "Entropy: ${entropy:-'(none)'}"  # Show (none) if entropy is empty
     echo "Loss weights: $loss_weights"
     echo "State diversity: $state_div"
     echo "Diversity weight: $div_weight"
