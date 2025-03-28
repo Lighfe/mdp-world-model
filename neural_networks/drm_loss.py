@@ -82,7 +82,7 @@ class StableDRMLoss(nn.Module):
         self.use_entropy_reg = use_entropy_reg
         self.initial_entropy_weight = entropy_weight
         self.current_entropy_weight = entropy_weight
-        self.min_entropy_weight = 0.1 # hardcoded for now
+        self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
     
     def entropy_loss(self, state_probs):
