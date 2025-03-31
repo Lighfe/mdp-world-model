@@ -6,6 +6,7 @@ parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 sys.path.append(parent_dir)
 
 from datastructures import SortedValueDict
+from datasets.data_reconstruction import get_and_reconstruct_data, reconstruct_solver_and_grid
 
 class Patchwork:
     #TODO: Add docstring for the class
@@ -29,8 +30,8 @@ class Patchwork:
         self.parents = {patch: patch for patch in self.current_patches}                         #Dict    
         self.cell_to_history_of_patches = {cell: [self.cell_to_patchindex[cell]] for cell in self.grid.indices} #Dict                           
         
-        self.action_to_control_dict, action_df = self._switch_from_control_to_action(df)        #Dict, DataFrame
-        self.trans_probs = self._init_tp(action_df)                                             #Dict
+        self.action_to_control_dict, self.action_df = self._switch_from_control_to_action(df)        #Dict, DataFrame
+        self.trans_probs = self._init_tp(self.action_df)                                             #Dict
         self.patch_relevances = self._init_uniform_patch_relevances()                           #Dict
 
         self.predecessors = self._init_predecessors()                                           #Dict
@@ -64,9 +65,9 @@ class Patchwork:
         # Normalize counts to get probabilities
         transition_probs = transition_counts.div(transition_counts.sum(axis=1), axis=0)
         # Convert to nested dictionary: TP[s][a][s’] = probability 
-        trans_probs_dict = {}
+        trans_probs_dict = {patch: {action: dict() for action in self.action_to_control_dict.keys()} for patch in self.current_patches}
         for (s, a), series in transition_probs.stack().groupby(level=[0, 1]):
-            trans_probs_dict.setdefault(int(s), {})[a] = {int(keys[2]): prob for keys, prob in series.items() if prob > 0}
+            trans_probs_dict[int(s)][a] = {int(keys[2]): prob for keys, prob in series.items() if prob > 0}
        
         return trans_probs_dict 
     
@@ -446,3 +447,23 @@ class Patchwork:
 
 
         return cells_to_current_patches
+    
+
+
+
+
+def create_patchwork(db_name, table_name, run_ids):    
+    
+    #Get the data
+    df, configs_dict = get_and_reconstruct_data(db_name, table_name, run_ids)
+
+    # Check if all configurations are the same
+    all_equal = all(configs_dict[run_id] == configs_dict[run_ids[0]] for run_id in run_ids)
+    print("All configurations are the same:", all_equal)
+
+    grid, solver = reconstruct_solver_and_grid(run_ids[0], configs_dict)
+    controls = df['c'].unique() #np.array([np.array(control) for control in df['c'].unique()])
+
+    patchwork = Patchwork(grid, df) 
+
+    return patchwork, controls, solver
