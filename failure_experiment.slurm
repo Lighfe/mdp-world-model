@@ -50,7 +50,7 @@ value_method="market_share"
 # Default parameters that work
 state_loss_weight=0.5
 value_loss_weight=2.0
-lr=1e-5
+lr=0.00005
 use_warmup="--use_warmup --warmup_epochs=5"
 use_gumbel="--use_gumbel --initial_temp=5.0 --min_temp=0.5"
 use_target_encoder="--use_target_encoder --ema_decay=0.9"
@@ -120,7 +120,7 @@ case $SLURM_ARRAY_TASK_ID in
         # Reset all parameters to default working values
         state_loss_weight=0.5
         value_loss_weight=2.0
-        lr=1e-5
+        lr=0.00005
         use_warmup="--use_warmup --warmup_epochs=5"
         use_gumbel="--use_gumbel --initial_temp=5.0 --min_temp=0.5"
         use_target_encoder="--use_target_encoder --ema_decay=0.9"
@@ -132,7 +132,7 @@ case $SLURM_ARRAY_TASK_ID in
         # Reset all parameters to default working values
         state_loss_weight=0.5
         value_loss_weight=2.0
-        lr=1e-5
+        lr=0.00005
         use_warmup="--use_warmup --warmup_epochs=5"
         use_gumbel="--use_gumbel --initial_temp=5.0 --min_temp=0.5"
         use_target_encoder="--use_target_encoder --ema_decay=0.9"
@@ -263,10 +263,10 @@ case $SLURM_ARRAY_TASK_ID in
         
     # LEARNING RATE EXPERIMENTS - NO ENTROPY
     23) # LR GOOD - NO ENTROPY
-        lr=1e-5
+        lr=0.00005
         use_warmup="--use_warmup --warmup_epochs=5"
         use_entropy="$entropy_none"
-        run_experiment "lr_good_no_ent" "learning_rate" "lr=1e-5 with warmup, no entropy"
+        run_experiment "lr_good_no_ent" "learning_rate" "lr=0.00005 with warmup, no entropy"
         ;;
     24) # LR BAD - NO ENTROPY
         lr=1e-4
@@ -277,10 +277,10 @@ case $SLURM_ARRAY_TASK_ID in
         
     # LEARNING RATE EXPERIMENTS - GOOD ENTROPY
     25) # LR GOOD - GOOD ENTROPY
-        lr=1e-5
+        lr=0.00005
         use_warmup="--use_warmup --warmup_epochs=5"
         use_entropy="$entropy_good"
-        run_experiment "lr_good_good_ent" "learning_rate" "lr=1e-5 with warmup, good entropy"
+        run_experiment "lr_good_good_ent" "learning_rate" "lr=0.00005 with warmup, good entropy"
         ;;
     26) # LR BAD - GOOD ENTROPY
         lr=1e-4
