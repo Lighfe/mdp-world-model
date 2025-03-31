@@ -84,8 +84,8 @@ class Grid:
             'bounds': self.bounds,
             'dimension': self.dimension,
             'resolution': self.resolution,
-            'transformations': [tf.__name__ for tf in self.transformations],
-            'transformation_params': self.transformation_params # list of dicts
+            'transformations': None if self.transformations == None else [tf.__name__ for tf in self.transformations] ,
+            'transformation_params': self.transformation_params if self.transformation_params != None else None # list of dicts
         }
         return config
 
