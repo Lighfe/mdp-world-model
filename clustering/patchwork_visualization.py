@@ -9,6 +9,39 @@ from data_generation.visualization.create_plots import create_2D_vectorfield
 
 hv.extension('bokeh')
 
+def plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5):
+    """
+    Overlays entropy values as a heatmap on the existing vector field plot.
+    
+    Parameters:
+        ax (matplotlib axis): Axis on which to overlay the entropy heatmap.
+        entropy_dict (dict): Dictionary mapping (i, j) grid indices to entropy values.
+        X1, X2 (2D arrays): Meshgrid coordinates matching the entropy dictionary.
+        cmap (str): Colormap for the entropy visualization.
+        alpha (float): Transparency level of the overlay.
+    """
+
+    entropy_dict = {patchwork.patchindex_to_cell[k]: v['avg'] for k, v in patchwork.entropy_dict.items()}
+    bounds, resolution = patchwork.grid.tf_bounds, patchwork.grid.resolution[0]
+    cellsize = (bounds[0][1] - bounds[0][0]) / resolution
+    X1 = np.linspace(bounds[0][0] + cellsize/2, bounds[0][1] - cellsize/2, resolution)
+    X2 = np.linspace(bounds[1][0]+ cellsize/2, bounds[1][1] - cellsize/2, resolution)
+    X1, X2 = np.meshgrid(X1, X2)
+
+    # Convert entropy dictionary to a 2D array
+    entropy_array = np.zeros_like(X1)
+    
+    for (i, j), entropy_value in entropy_dict.items():
+        entropy_array[i, j] = entropy_value  # Fill the corresponding grid cell
+
+    # Plot the entropy heatmap using pcolormesh (matching grid dimensions)
+    heatmap = ax.pcolormesh(X1, X2, entropy_array.T, cmap=cmap, shading='auto', alpha=alpha)
+
+    # Add a colorbar for entropy values
+    cbar = plt.colorbar(heatmap, ax=ax, label="Entropy")
+    cbar.ax.tick_params(labelsize=10)
+
+
 def test_hv():
     # Generate flow field (example: simple vortex)
     x, y = np.linspace(-2, 2, 20), np.linspace(-2, 2, 20)
@@ -121,7 +154,7 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 
 
-def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 15):
+def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 15, save_to_path = None):
 
     grid_resolution = patchwork.grid.resolution
     grid_size = grid_resolution[0]
@@ -197,7 +230,20 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
     #Entropy colormap
     entropy_cmap = plt.cm.get_cmap('viridis')
-    entropy_norm = mplcol.Normalize(vmin=0, vmax=1)
+    max_entropy = max(patchwork.entropy_dict[patch]['avg'] for patch in patchwork.entropy_dict)
+    entropy_norm = mplcol.Normalize(vmin=0, vmax=max_entropy)
+
+    def create_colorbar(colormap, norm, label="Entropy"):
+        """Creates a matplotlib colorbar using the given colormap and normalization."""
+        fig, ax = plt.subplots(figsize=(0.3, 3.5))  # Adjust figure size for the colorbar
+        sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
+        sm.set_array([])  # Needed for the colorbar to work
+        cbar = plt.colorbar(sm, cax=ax, orientation="vertical")
+        cbar.ax.tick_params(labelsize=8)  # Change the fontsize of the colorbar numbers
+        cbar.set_label(label, fontsize=8)
+        cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
+        return fig
+
 
     def get_current_patchwork(step, selected_controls, selected_color):
         
@@ -218,6 +264,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         
         heatmap =  hv.HeatMap(cell_infos, kdims=['x', 'y'], vdims=['patch', 'entropy']).opts(alpha = 0.5,
             cmap=cmap_dict, 
+            toolbar = 'above',
             xlim=(0, 1), ylim=(0, 1),
             width=600, height=600, tools=['hover'],
             xticks=axis_tick_labels,  # Custom x-axis tick labels
@@ -249,18 +296,33 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         layers = [heatmap *borders] + [streamplots[control] for control in selected_controls if control in streamplots]
 
         return hv.Overlay(layers)
+    
+    #Save to .gif
+    if save_to_path != None:
+        holomap = hv.HoloMap({step: get_current_patchwork(step, [], selected_color = 'Entropy') for step in range(number_of_steps) }, kdims= ['Step'])
+        hv.save(holomap, save_to_path, fmt='gif')
+
 
     # Interactive slider and selection widget
     slider = pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
     vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
-    color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Patches', 'Entropy'])
+    color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches'])
+    
     # Bind the function to the slider
     interactive_plot = pn.bind(get_current_patchwork, step=slider, selected_controls = vector_selector_streamplots, selected_color = color_selector)
 
     # Title for the widgetbox
     title = pn.pane.Markdown(f"<h1> Patchwork Visualization </h1> <br />  {title}")
+
+    # Colorbar
+    colorbar_pane = pn.pane.Matplotlib(create_colorbar(entropy_cmap, entropy_norm), tight=True)
+    
     # Layout
-    dashboard = pn.Row(pn.Column(title, pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, color_selector)), interactive_plot)
+    dashboard = pn.Row(
+        pn.Column(title, pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, color_selector)),
+        interactive_plot,
+        pn.Column(pn.Spacer(height=90), colorbar_pane)  # Add spacer to adjust the position of the colorbar
+    )
     dashboard.servable() 
     dashboard.show()
 
