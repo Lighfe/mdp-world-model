@@ -11,9 +11,8 @@ class StateDiversityLoss(nn.Module):
     Loss that encourages diverse usage of states across a batch by minimizing correlations 
     between different state activations.
     """
-    def __init__(self, weight=1.0, normalize=True):
+    def __init__(self, normalize=True):
         super(StateDiversityLoss, self).__init__()
-        self.weight = weight
         self.normalize = normalize  # Whether to normalize state activations
         
     def forward(self, state_batch, epsilon=1e-8):
@@ -54,21 +53,25 @@ class StateDiversityLoss(nn.Module):
         # Sum squared correlations (both positive and negative hurt diversity)
         off_diag_correlations = (corr_matrix * mask).pow(2).sum()
         
-        return self.weight * off_diag_correlations
+        return off_diag_correlations
 class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
-                 use_state_diversity=True, diversity_weight=1.0,
-                 use_entropy_reg=False, entropy_weight=5.0, use_entropy_decay=True):
+                 use_state_diversity=False, diversity_weight=0.001,
+                 use_entropy_reg=False, entropy_weight=5.0, 
+                 use_entropy_decay=True, entropy_decay_proportion=0.2):
         """
         Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
         
         Args:
             state_loss_weight: Weight for state prediction loss
             value_loss_weight: Weight for value prediction loss
-            diversity_weight: Weight for state diversity regularization
-            use_state_diversity: Whether to use state diversity loss
+            use_state_diversity: Whether to use diversity regularization
+            diversity_weight: Weight for diversity regularization
             use_entropy_reg: Whether to use entropy regularization
-            entropy_weight: Weight for entropy regularization
+            entropy_weight: Initial weight for entropy regularization
+            use_entropy_decay: Whether to decay entropy weight during training
+            entropy_decay_proportion: Proportion of training after which entropy weight 
+                                        reaches its minimum value (0.2 = 20% of training)
         """
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
@@ -76,38 +79,18 @@ class StableDRMLoss(nn.Module):
 
         self.diversity_weight = diversity_weight
         self.use_state_diversity = use_state_diversity
-        self.state_diversity = StateDiversityLoss(weight=1.0)
+        self.diversity_weight = diversity_weight if use_state_diversity else 0.0
+        self.state_diversity = StateDiversityLoss()
         
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
-        self.initial_entropy_weight = entropy_weight
+        self.initial_entropy_weight = entropy_weight if use_entropy_reg else 0.0
+        # TODO set weights for batch_entropy and individual entropy
         self.current_entropy_weight = entropy_weight
         self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
+        self.entropy_decay_proportion = entropy_decay_proportion
     
-    def entropy_loss(self, state_probs):
-        """
-        Enhanced entropy regularization that actively pushes toward higher entropy
-        rather than just preventing collapse below a threshold.
-        """
-        # Calculate average state usage across batch
-        avg_state_usage = torch.mean(state_probs, dim=0)
-        
-        # Add small epsilon to prevent log(0)
-        eps = 1e-10
-        avg_state_usage = torch.clamp(avg_state_usage, eps, 1.0)
-        
-        # Calculate entropy and normalize by maximum possible entropy
-        num_states = avg_state_usage.size(0)
-        max_entropy = torch.log(torch.tensor(float(num_states)))
-        entropy = -torch.sum(avg_state_usage * torch.log(avg_state_usage))
-        normalized_entropy = entropy / max_entropy
-        
-        # Instead of just penalizing below threshold, actively push toward maximum entropy
-        # The closer to 1.0, the smaller the penalty
-        entropy_loss = 1.0 - normalized_entropy
-        
-        return entropy_loss
     
     def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None):
         """
@@ -135,28 +118,34 @@ class StableDRMLoss(nn.Module):
             print("WARNING: NaN detected in KL divergence, setting to 0")
             state_loss = torch.tensor(0.0, device=s_y.device)
         
-        # Value loss calculation (new implementation)
+        # Value loss calculation
         value_loss = self._calculate_expected_value_loss(s_y_pred, v_pred_for_all_states, v_true)
         
         # Correlation-based diversity
         diversity_loss = torch.tensor(0.0, device=s_y.device)
-        if s_x is not None and self.use_state_diversity:
-            diversity_loss = self.state_diversity(s_x)
 
-        # Add entropy regularization if enabled
-        entropy_loss = torch.tensor(0.0, device=s_y.device)
-        if s_x is not None and self.use_entropy_reg:
-            entropy_loss = self.entropy_loss(s_x)
+        # Calculate batch and individual entropy metrics
+        batch_entropy = torch.tensor(0.0, device=s_y.device)
+        individual_entropy = torch.tensor(0.0, device=s_y.device)
+        
+        if s_x is not None:
+            # always calculate for tracking
+            diversity_loss = self.state_diversity(s_x)
+            batch_entropy = self.batch_entropy(s_x)
+            individual_entropy = self.individual_entropy(s_x)
+            # TODO go back to having a threshold for this
+            entropy_loss = 1.0 - batch_entropy
         
         # Combined loss
         total_loss = (
             self.state_loss_weight * state_loss + 
             self.value_loss_weight * value_loss +
-            diversity_loss + # has weight already 
-            self.current_entropy_weight * entropy_loss
+            self.diversity_weight * diversity_loss + # only when enabled
+            self.current_entropy_weight * entropy_loss # only when enabled
         )
         
-        return total_loss, state_loss, value_loss, diversity_loss, entropy_loss
+        # Return loss components and entropy metrics
+        return total_loss, state_loss, value_loss, diversity_loss, entropy_loss, batch_entropy, individual_entropy
     
     def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true):
         """
@@ -208,7 +197,60 @@ class StableDRMLoss(nn.Module):
             return self.current_entropy_weight # Don't think this if will be needed
         
         # Decay to minimum weight by 20% of training
-        progress = min(1.0, epoch / (0.2 * max_epochs))
+        progress = min(1.0, epoch / (self.entropy_decay_proportion * max_epochs))
         self.current_entropy_weight = self.initial_entropy_weight - progress * (
             self.initial_entropy_weight - self.min_entropy_weight)
         return self.current_entropy_weight
+    
+    def batch_entropy(self, state_probs):
+        """
+        Calculate normalized entropy of average state usage across batch.
+        Higher values (closer to 1.0) indicate more uniform state usage across the batch.
+        
+        Args:
+            state_probs: Batch of state probability distributions (batch_size, num_states)
+        
+        Returns:
+            Normalized entropy (0.0 to 1.0)
+        """
+        # Calculate average state usage across batch
+        avg_state_usage = torch.mean(state_probs, dim=0)
+        
+        # Add small epsilon to prevent log(0)
+        eps = 1e-10
+        avg_state_usage = torch.clamp(avg_state_usage, eps, 1.0)
+        
+        # Calculate entropy and normalize by maximum possible entropy
+        num_states = avg_state_usage.size(0)
+        max_entropy = torch.log(torch.tensor(float(num_states), device=state_probs.device))
+        entropy = -torch.sum(avg_state_usage * torch.log(avg_state_usage))
+        normalized_entropy = entropy / max_entropy
+        
+        return normalized_entropy
+    
+    def individual_entropy(self, state_probs):
+        """
+        Calculate normalized entropy for each individual state probability distribution,
+        then average across the batch. Lower values indicate more discrete/peaky distributions.
+        
+        Args:
+            state_probs: Batch of state probability distributions (batch_size, num_states)
+        
+        Returns:
+            Average normalized entropy across samples (0.0 to 1.0)
+        """
+        eps = 1e-10
+        state_probs = torch.clamp(state_probs, eps, 1.0)
+        
+        # Calculate entropy for each sample
+        num_states = state_probs.size(1)
+        max_entropy = torch.log(torch.tensor(float(num_states), device=state_probs.device))
+        
+        # Calculate entropy for each sample: -sum(p_i * log(p_i))
+        sample_entropies = -torch.sum(state_probs * torch.log(state_probs), dim=1)
+        
+        # Normalize by maximum possible entropy
+        normalized_entropies = sample_entropies / max_entropy
+        
+        # Return average across batch
+        return torch.mean(normalized_entropies)

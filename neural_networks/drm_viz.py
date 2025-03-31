@@ -768,3 +768,94 @@ def visualize_model_architecture(model, output_path):
         dot.render(fallback_path, format='png', cleanup=True)
         print(f"Fallback visualization saved to {fallback_path}.png")
         return fallback_path + '.png'
+    
+def plot_regulization_metrics(history, test_metrics, save_path=None):
+    """
+    Plot state diversity, batch entropy, individual entropy, and entropy loss curves.
+    
+    Args:
+        history: Dictionary containing training history with metrics
+        test_metrics: Dictionary containing test metrics
+        save_path: Path to save the visualization
+    
+    Returns:
+        fig: The figure object
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Flatten axes for easier iteration
+    axes = axes.flatten()
+    
+    # Define metrics to plot
+    metrics = [
+        {
+            'name': 'State Diversity',
+            'train_key': 'train_div_loss',
+            'val_key': 'val_div_loss',
+            'test_key': 'test_div_loss',
+            'title': 'State Diversity Loss',
+            'ylabel': 'Loss'
+        },
+        {
+            'name': 'Batch Entropy',
+            'train_key': 'train_batch_entropy',
+            'val_key': 'val_batch_entropy',
+            'test_key': 'test_batch_entropy',
+            'title': 'Batch Entropy (Higher = More Uniform State Usage)',
+            'ylabel': 'Normalized Entropy'
+        },
+        {
+            'name': 'Individual Entropy',
+            'train_key': 'train_individual_entropy',
+            'val_key': 'val_individual_entropy',
+            'test_key': 'test_individual_entropy',
+            'title': 'Individual Entropy (Lower = More Discrete States)',
+            'ylabel': 'Normalized Entropy'
+        },
+        {
+            'name': 'Entropy Loss',
+            'train_key': 'train_entropy_loss',
+            'val_key': 'val_entropy_loss',
+            'test_key': 'test_entropy_loss',
+            'title': 'Entropy Loss',
+            'ylabel': 'Loss'
+        }
+    ]
+    
+    # Plot each metric
+    for i, metric in enumerate(metrics):
+        ax = axes[i]
+        
+        # Plot training curve
+        if metric['train_key'] in history and len(history[metric['train_key']]) > 0:
+            ax.plot(history[metric['train_key']], label='Train', color='blue')
+        
+        # Plot validation curve
+        if metric['val_key'] in history and len(history[metric['val_key']]) > 0:
+            ax.plot(history[metric['val_key']], label='Validation', color='orange')
+        
+        # Add test result as horizontal line
+        if metric['test_key'] in test_metrics:
+            test_value = test_metrics[metric['test_key']]
+            ax.axhline(y=test_value, color='red', linestyle='--', 
+                      label=f'Test ({test_value:.4f})')
+        
+        # Add labels and grid
+        ax.set_title(metric['title'])
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel(metric['ylabel'])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Set y-limits for entropy metrics to [0, 1] range
+        if 'entropy' in metric['name'].lower() and 'loss' not in metric['name'].lower():
+            ax.set_ylim(0, 1)
+    
+    plt.tight_layout()
+    
+    # Save the figure if a path is provided
+    if save_path:
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        print(f"Saved entropy metrics visualization to {save_path}")
+    
+    return fig

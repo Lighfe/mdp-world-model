@@ -27,7 +27,7 @@ from data_generation.models.tech_substitution import TechnologySubstitution, Tec
 from data_generation.simulations.grid import tangent_transformation
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, 
-    visualize_transition_matrices, visualize_model_architecture, plot_training_curves
+    visualize_transition_matrices, visualize_model_architecture, plot_training_curves, plot_regulization_metrics
 )
 
 
@@ -57,6 +57,8 @@ def train_drm_model(db_path,
                     min_temp=0.1,
                     use_entropy_reg=False,
                     entropy_weight=5.0,
+                    use_entropy_decay=True,
+                    entropy_decay_proportion=0.2,
                     use_target_encoder=False,
                     ema_decay=0.996,
                     use_state_diversity=False,
@@ -175,7 +177,9 @@ def train_drm_model(db_path,
         use_state_diversity=use_state_diversity,
         diversity_weight=diversity_weight,
         use_entropy_reg=use_entropy_reg,
-        entropy_weight=entropy_weight
+        entropy_weight=entropy_weight,
+        use_entropy_decay=use_entropy_decay,
+        entropy_decay_proportion=entropy_decay_proportion
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -217,11 +221,15 @@ def train_drm_model(db_path,
         "train_value_loss": [],
         "train_div_loss": [],
         "train_entropy_loss": [],
+        "train_batch_entropy": [],
+        "train_individual_entropy": [],
         "val_loss": [],
         "val_state_loss": [],
         "val_value_loss": [],
         "val_div_loss": [],
-        "val_entropy_loss": []
+        "val_entropy_loss": [],
+        "val_batch_entropy": [],
+        "val_individual_entropy": []
     }
     
     best_val_loss = float("inf")
@@ -252,12 +260,14 @@ def train_drm_model(db_path,
         train_value_loss = 0.0
         train_div_loss = 0.0
         train_entropy_loss = 0.0
+        train_batch_entropy = 0.0 
+        train_individual_entropy = 0.0
 
 
-        if loss_fn.use_entropy_decay:
-            # Update entropy weight
+        if loss_fn.use_entropy_reg:
             entropy_weight = loss_fn.update_entropy_weight(epoch, epochs)
-            print(f"Epoch {epoch+1}/{epochs} - Entropy weight: {entropy_weight:.4f}")
+            decay_status = "decaying" if loss_fn.use_entropy_decay else "constant"
+            print(f"Epoch {epoch+1}/{epochs} - Entropy weight: {entropy_weight:.4f} ({decay_status})")
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
 
@@ -283,8 +293,8 @@ def train_drm_model(db_path,
                     continue
                 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(
-                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
+                total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy = loss_fn(
+                    s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
                 
                 # Check if loss is NaN
                 if torch.isnan(total_loss):
@@ -313,6 +323,8 @@ def train_drm_model(db_path,
                 train_value_loss += value_loss.item()
                 train_div_loss += div_loss.item()
                 train_entropy_loss += entropy_loss.item()
+                train_batch_entropy += batch_entropy.item()
+                train_individual_entropy += individual_entropy.item()
                 
             except Exception as e:
                 print(f"Error in batch {batch_idx}: {e}")
@@ -328,6 +340,8 @@ def train_drm_model(db_path,
             train_value_loss /= num_batches
             train_div_loss /= num_batches
             train_entropy_loss /= num_batches
+            train_batch_entropy /= num_batches
+            train_individual_entropy /= num_batches
         
         # Validation phase
         model.eval()
@@ -336,6 +350,8 @@ def train_drm_model(db_path,
         val_value_loss = 0.0
         val_div_loss = 0.0
         val_entropy_loss = 0.0
+        val_batch_entropy = 0.0
+        val_individual_entropy = 0.0
         valid_batches = 0
         
         with torch.no_grad():
@@ -357,8 +373,8 @@ def train_drm_model(db_path,
                         continue
                     
                     # Calculate loss
-                    total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(
-                            s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
+                    total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy = loss_fn(
+                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
                     
                     # Check if loss is NaN
                     if torch.isnan(total_loss):
@@ -370,6 +386,8 @@ def train_drm_model(db_path,
                     val_value_loss += value_loss.item()
                     val_div_loss += div_loss.item()
                     val_entropy_loss += entropy_loss.item()
+                    val_batch_entropy += batch_entropy.item()
+                    val_individual_entropy += individual_entropy.item()
                     valid_batches += 1
                     
                 except Exception as e:
@@ -381,7 +399,10 @@ def train_drm_model(db_path,
             val_loss /= valid_batches
             val_state_loss /= valid_batches
             val_value_loss /= valid_batches
+            val_div_loss /= valid_batches
             val_entropy_loss /= valid_batches
+            val_batch_entropy /= valid_batches
+            val_individual_entropy /= valid_batches
         
         # Update history
         history["train_loss"].append(train_loss)
@@ -389,28 +410,25 @@ def train_drm_model(db_path,
         history["train_value_loss"].append(train_value_loss)
         history["train_div_loss"].append(train_div_loss)
         history["train_entropy_loss"].append(train_entropy_loss)
+        history["train_batch_entropy"].append(train_batch_entropy)
+        history["train_individual_entropy"].append(train_individual_entropy)
         history["val_loss"].append(val_loss)
         history["val_state_loss"].append(val_state_loss)
         history["val_value_loss"].append(val_value_loss)
         history["val_div_loss"].append(val_div_loss)
         history["val_entropy_loss"].append(val_entropy_loss)
+        history["val_batch_entropy"].append(val_batch_entropy)
+        history["val_individual_entropy"].append(val_individual_entropy)
         
         # Print progress
-        if loss_fn.use_entropy_reg:
-            print(f"Epoch {epoch+1}/{epochs} - "
-                f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, "
-                f"Entropy: {train_entropy_loss:.4f}) - "
-                f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, "
-                f"Entropy: {val_entropy_loss:.4f})")
-        # lazy
-        if loss_fn.use_state_diversity:
-            print(f"Epoch {epoch+1}/{epochs} - "
-                f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, Div: {train_div_loss:.4f}) - "
-                f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, Div: {val_div_loss:.4f})")
-        else:
-            print(f"Epoch {epoch+1}/{epochs} - "
-                f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}) - "
-                f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f})")
+        # Print progress with all metrics
+        print(f"Epoch {epoch+1}/{epochs} - "
+            f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, "
+            f"Div: {train_div_loss:.4f}, Entropy: {train_entropy_loss:.4f})")
+        print(f"  Batch Entropy: {train_batch_entropy:.4f}, Individual Entropy: {train_individual_entropy:.4f}")
+        print(f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, "
+            f"Div: {val_div_loss:.4f}, Entropy: {val_entropy_loss:.4f})")
+        print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
 
         if epoch == 5 or epoch == 25:
 
@@ -496,6 +514,8 @@ def train_drm_model(db_path,
     test_value_loss = 0.0
     test_div_loss = 0.0
     test_entropy_loss = 0.0
+    test_batch_entropy = 0.0
+    test_individual_entropy = 0.0
     test_samples = 0
     test_value_predictions = []
     test_value_targets = []
@@ -518,9 +538,11 @@ def train_drm_model(db_path,
                 if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
                     continue
                 
+                # TODO: entropy
+
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss, entropy_loss = loss_fn(
-                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
+                total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy = loss_fn(
+                    s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
                 
                 # Skip if loss is NaN
                 if torch.isnan(total_loss):
@@ -539,6 +561,8 @@ def train_drm_model(db_path,
                 test_value_loss += value_loss.item() * len(x)
                 test_div_loss += div_loss.item() * len(x)
                 test_entropy_loss += entropy_loss.item() * len(x)
+                test_batch_entropy += batch_entropy.item() * len(x)
+                test_individual_entropy += individual_entropy.item() * len(x)
                 test_samples += len(x)
                 
             except Exception as e:
@@ -552,6 +576,8 @@ def train_drm_model(db_path,
         test_value_loss /= test_samples
         test_div_loss /= test_samples
         test_entropy_loss /= test_samples
+        test_batch_entropy /= test_samples
+        test_individual_entropy /= test_samples
     
     # Calculate additional metrics if needed
     test_value_predictions = np.concatenate(test_value_predictions) if test_value_predictions else np.array([])
@@ -570,26 +596,24 @@ def train_drm_model(db_path,
         "test_div_loss": float(test_div_loss),
         "test_value_loss": float(test_value_loss),
         "test_entropy_loss": float(test_entropy_loss),
+        "test_batch_entropy": float(test_batch_entropy),
+        "test_individual_entropy": float(test_individual_entropy),
         "test_r2_score": float(r2_score),
         "test_samples": test_samples
     }
     
     # Print test results
-    print(f"Test Results - Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Div: {test_div_loss:.4f}, Value: {test_value_loss:.4f}), Entropy: {test_entropy_loss:.4f}, R²: {r2_score:.4f}")
+    print(f"Test Results:")
+    print(f"  Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Value: {test_value_loss:.4f})")
+    print(f"  Div Loss: {test_div_loss:.4f}, Entropy Loss: {test_entropy_loss:.4f}")
+    print(f"  Batch Entropy: {test_batch_entropy:.4f}, Individual Entropy: {test_individual_entropy:.4f}")
+    print(f"  R²: {r2_score:.4f}")
     
     # Save test results
     test_results_path = os.path.join(output_dir, f"drm_test_results_{run_id}.json")
     with open(test_results_path, 'w') as f:
         json.dump(test_metrics, f, indent=4)
     print(f"Saved test results to {test_results_path}")
-    
-    # Print test errors
-    print(f"\nTest Set Evaluation Results:")
-    print(f"  Test Loss: {test_loss:.4f}")
-    print(f"  Test State Loss: {test_state_loss:.4f}")
-    print(f"  Test Value Loss: {test_value_loss:.4f}")
-    if test_div_loss > 0:
-        print(f"  Test Diversity Loss: {test_div_loss:.4f}")
 
     # For multi-dimensional outputs, report per-dimension errors if applicable
     if test_value_predictions.ndim > 1 and test_value_predictions.shape[1] > 1:
@@ -624,10 +648,8 @@ def train_drm_model(db_path,
     
     # Plot training curves
     plot_training_curves(history, os.path.join(output_dir, f"training_curves_{run_id}.png"))
-    
-    # Calculate training time
-    training_time = time.time() - start_time
-    print(f"Training completed in {training_time:.2f} seconds")
+    # Plot regulization metrics
+    plot_regulization_metrics(history, test_metrics, os.path.join(output_dir, f"entropy_metrics_{run_id}.png"))
 
 
     # Visualize Modl Architecture
@@ -662,7 +684,7 @@ def train_drm_model(db_path,
     argmax_vis_path = os.path.join(output_dir, f"argmax_transitions_{run_id}.png")
     visualize_transition_matrices(argmax_transitions, control_values, argmax_vis_path)
 
-    # 3. Analyze and visualize state transitions with soft assignment
+    # Analyze and visualize state transitions with soft assignment
     soft_transitions = analyze_state_transitions(
         model=model,
         transformations=[
@@ -675,6 +697,10 @@ def train_drm_model(db_path,
     )
     soft_vis_path = os.path.join(output_dir, f"soft_transitions_{run_id}.png")
     visualize_transition_matrices(soft_transitions, control_values, soft_vis_path)
+
+    # Calculate training time
+    training_time = time.time() - start_time
+    print(f"Training completed in {training_time:.2f} seconds")
 
     return model, history
 
@@ -724,6 +750,13 @@ if __name__ == "__main__":
                     help='Use entropy regularization to prevent state collapse')
     parser.add_argument('--entropy_weight', type=float, default=5.0,
                         help='Weight for entropy regularization loss')
+    parser.add_argument('--use_entropy_decay', action='store_true', 
+                        help='Decay entropy regularization weight during training')
+    parser.add_argument('--no_entropy_decay', dest='use_entropy_decay', action='store_false',
+                        help='Keep entropy regularization weight constant')
+    parser.set_defaults(use_entropy_decay=True)  # Default is to use entropy decay
+    parser.add_argument('--entropy_decay_proportion', type=float, default=0.2,
+                    help='Proportion of training after which entropy weight reaches minimum (0.2 = 20%%)')
     
     parser.add_argument('--use_target_encoder', action='store_true',
                     help='Use target encoder with EMA updates')
@@ -786,6 +819,8 @@ if __name__ == "__main__":
         min_temp=args.min_temp,
         use_entropy_reg=args.use_entropy_reg,
         entropy_weight=args.entropy_weight,
+        use_entropy_decay=args.use_entropy_decay,
+        entropy_decay_proportion=args.entropy_decay_proportion,
         use_target_encoder=args.use_target_encoder,
         ema_decay=args.ema_decay,
         use_state_diversity=args.use_state_diversity,
