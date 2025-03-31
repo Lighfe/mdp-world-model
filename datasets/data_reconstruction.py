@@ -11,6 +11,8 @@ import numpy as np
 from data_generation.simulations.grid import Grid, logistic_transformation, fractional_transformation
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.models.general_ode_solver import FitzHughNagumoModel, GeneralODENumericalSolver
+from data_generation.models.simple_test_models import *
+
 
 
 
@@ -73,11 +75,14 @@ def reconstruct_solver_and_grid(run_id, configs_dict):
     resolution = co_grid['resolution']
 
     #Work-Around as we take the whole dictionary for FHN but only the param for TechSub Model # TODO fix this
-    if 'param' in co_grid['transformation_params'][0].keys():
-        transformations = [globals()[name](params['param']) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
+    if co_grid['transformation_params']:
+        if 'param' in co_grid['transformation_params'][0].keys():
+            transformations = [globals()[name](params['param']) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
+        else:
+            transformations = [globals()[name](params) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
+        grid = Grid(bounds, resolution, transformations)
     else:
-        transformations = [globals()[name](params) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
-    grid = Grid(bounds, resolution, transformations)
+        grid = Grid(bounds,resolution)
 
     # Extract class names
     model_class_name = co_solver['model']['model']
