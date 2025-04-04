@@ -2,6 +2,7 @@ import os
 import sys
 import bisect
 from scipy.stats import entropy
+import numpy as np
 parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 sys.path.append(parent_dir)
 
@@ -191,15 +192,16 @@ class Patchwork:
 
         merged_probs = dict((action, dict()) for action in self.action_to_control_dict.keys())
         merged_entropy_dict = dict()
+        total_patch_relevance = self.patch_relevances[patch1] + self.patch_relevances[patch2]
 
         for a in self.action_to_control_dict.keys():
             # For each action, sum probabilities from both patches, weighting them bei patch_relevances
             for s in [patch1,patch2]:
                 for s_prime, prob in self.trans_probs[s][a].items():
                     if s_prime != patch1 and s_prime != patch2:
-                        merged_probs[a][s_prime] = merged_probs[a].get(s_prime,0) + self.patch_relevances[s]*prob
+                        merged_probs[a][s_prime] = merged_probs[a].get(s_prime,0) + (self.patch_relevances[s] / total_patch_relevance) *prob
                     else:
-                        merged_probs[a][newpatch] = merged_probs[a].get(newpatch,0) + self.patch_relevances[s]*prob
+                        merged_probs[a][newpatch] = merged_probs[a].get(newpatch,0) + (self.patch_relevances[s] / total_patch_relevance) *prob
             # For each action, calculate the entropy 
             merged_entropy_dict[a] = entropy(list(merged_probs[a].values()), base = 2)
         
@@ -222,6 +224,7 @@ class Patchwork:
         relevance2, avg_entropy2 = self.patch_relevances[patch2], self.entropy_dict[patch2]['avg']
 
         merged_entropy, merged_probs = self.compute_merged_entropy(patch1,patch2)
+        
 
         entropy_loss = (relevance1 + relevance2) * merged_entropy['avg'] - (relevance1 * avg_entropy1 + relevance2 * avg_entropy2)
 
@@ -464,6 +467,13 @@ def create_patchwork(db_name, table_name, run_ids):
     grid, solver = reconstruct_solver_and_grid(run_ids[0], configs_dict)
     controls = df['c'].unique() #np.array([np.array(control) for control in df['c'].unique()])
 
-    patchwork = Patchwork(grid, df) 
+    #Handle finite spaces by throwing out every data which lands outside
+    # TODO: make this better, until now we assume that all upper borders are the same
+
+    if grid.bounds[0][-1] != np.inf:
+        df = df[df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])] #as we run out of the defined space
+        patchwork = Patchwork(grid,df)
+    else:
+        patchwork = Patchwork(grid, df) 
 
     return patchwork, controls, solver
