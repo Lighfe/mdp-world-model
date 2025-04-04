@@ -19,7 +19,7 @@ datasets/results/*
 !datasets/raw/.gitkeep
 !datasets/processed/.gitkeep
 data_generation/tests/plots/*
-clustering/tests/*
+clustering/results/*
 
 
 # Visualizations
