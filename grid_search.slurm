@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=drm_state_div
+#SBATCH --job-name=drm_state_loss
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=02:00:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
-#SBATCH --output=log/drm_state_div_%A_%a.out
-#SBATCH --error=log/drm_state_div_%A_%a.err
-#SBATCH --array=1-6
+#SBATCH --output=log/drm_state_loss_%A_%a.out
+#SBATCH --error=log/drm_state_loss_%A_%a.err
+#SBATCH --array=1-16
 
 # Print job info
 echo "Job started at $(date)"
@@ -34,120 +34,88 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available()); pr
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
-# Get configuration based on array task ID
-task_id=$SLURM_ARRAY_TASK_ID
+# Fixed configuration parameters for all runs
+db_path="datasets/results/tech_sim.db"
+base_output_dir="neural_networks/output/state_loss_exp"
+val_size=2000
+test_size=2000
+batch_size=64
+epochs=100
+patience=100
+num_states=4
+hidden_dim=64
+predictor_type="bilinear"
+value_method="market_share"
 
 # Fixed parameters
-predictor="bilinear"
-hidden_dim="64"
-batch_size="128"
-value_method="market_share"
-db_path="datasets/results/tech_angular_lt.db"
-warmup="--use_warmup --warmup_epochs=5"
-lr="0.00005"
-loss_weights="--state_loss_weight=0.5 --value_loss_weight=2.0"
-gumbel="--use_gumbel"
-temp="--initial_temp=5.0 --min_temp=0.5"
-target_encoder="--use_target_encoder"
-patience="20"
-state_div="--use_state_diversity"
+value_loss_weight=2.0
+lr=5e-5
+min_lr=5e-6
+use_lr_scheduler="--use_lr_scheduler --scheduler_type=cosine --min_lr=$min_lr"
+use_warmup="--use_warmup --warmup_epochs=5"
+use_target_encoder="--use_target_encoder --ema_decay=0.9"
+use_entropy="--use_entropy_reg --entropy_weight=3.0 --use_entropy_decay --entropy_decay_proportion=0.1"
+use_gumbel="--use_gumbel --initial_temp=5.0 --min_temp=0.1"
 
-# Exploring options
-ema_decay_options=(
-    "0.9"
-    "0.996"
-)
+# Define state loss types and weights
+state_loss_types=("kl_div" "mse" "js_div" "cross_entropy")
+state_weights=(0.5 1.0 2.0 3.0)
 
-entropy_options=(
-    ""
-    "--use_entropy_reg --entropy_weight=5.0"
-)
+# Map array task ID to configuration
+# We have 16 unique configurations (4 loss types × 4 weights)
+loss_idx=$(( (SLURM_ARRAY_TASK_ID-1) / 4 ))
+weight_idx=$(( (SLURM_ARRAY_TASK_ID-1) % 4 ))
 
-div_weight_options=(
-    "--diversity_weight=0.001"
-    "--diversity_weight=0.01"
-    "--diversity_weight=0.1"
-)
+loss_type=${state_loss_types[$loss_idx]}
+weight=${state_weights[$weight_idx]}
 
-# Calculate total number of combinations
-# 2 ema_decay options × 2 entropy options × 3 div_weight options = 12 combinations
-total_combinations=$((2 * 2 * 3))
+echo "This job will run configuration: loss_type=$loss_type, weight=$weight"
 
-# Calculate which combinations to run based on task_id
-# Each task will run 2 combinations (each combination twice)
-# Task 1 runs combinations 0,1; Task 2 runs combinations 2,3; etc.
-start_combo_idx=$(( 2 * (task_id - 1) ))
-second_combo_idx=$(( start_combo_idx + 1 ))
+# Create output directory
+output_dir="${base_output_dir}/${loss_type}/weight${weight}"
+mkdir -p "$output_dir"
 
-# Function to run a single experiment
-run_experiment() {
-    local combo_idx=$1
-    local repeat_id=$2
-    local timestamp=$(date +"%Y%m%d_%H%M%S")
+# Run the job twice sequentially
+for run in {1..2}; do
+    # Generate timestamp for this run
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    run_id="${loss_type}_weight${weight}_run${run}_${timestamp}"
     
-    # Calculate indices for each parameter set
-    local ema_decay_idx=$(( combo_idx / 6 ))         # 0-1 (2 options)
-    local entropy_idx=$(( (combo_idx % 6) / 3 ))     # 0-1 (2 options)
-    local div_weight_idx=$(( combo_idx % 3 ))        # 0-2 (3 options)
+    echo "-------------------------------------------"
+    echo "Starting job: $run_id at $(date)"
+    echo "Configuration:"
+    echo "- State loss type: $loss_type"
+    echo "- State weight: $weight"
+    echo "- Run: $run of 2"
     
-    # Select parameters
-    local ema_decay="${ema_decay_options[$ema_decay_idx]}"
-    local entropy="${entropy_options[$entropy_idx]}"
-    local div_weight="${div_weight_options[$div_weight_idx]}"
-    
-    # Create a descriptive run ID
-    local run_id="sd_ema${ema_decay_idx}_e${entropy_idx}_dw${div_weight_idx}_r${repeat_id}_${timestamp}"
-    
-    echo "Running configuration (repeat ${repeat_id}): $run_id"
-    echo "Database: $db_path"
-    echo "Predictor (fixed): $predictor"
-    echo "Hidden dim (fixed): $hidden_dim"
-    echo "Batch size (fixed): $batch_size"
-    echo "Learning rate (fixed): $lr"
-    echo "EMA decay: $ema_decay"
-    echo "Entropy: ${entropy:-'(none)'}"  # Show (none) if entropy is empty
-    echo "Loss weights: $loss_weights"
-    echo "State diversity: $state_div"
-    echo "Diversity weight: $div_weight"
-    echo "Gumbel: $gumbel"
-    echo "Target encoder: $target_encoder"
-    echo "Warmup: $warmup"
-    
-    # Run the training command
-    python -m neural_networks.train_drm $db_path \
-      --output_dir=neural_networks/output \
-      --run_id="$run_id" \
-      --val_size=2000 \
-      --test_size=2000 \
+    # Construct the command
+    cmd="python -m neural_networks.train_drm $db_path \
+      --output_dir=$output_dir \
+      --run_id=$run_id \
+      --val_size=$val_size \
+      --test_size=$test_size \
       --batch_size=$batch_size \
-      --epochs=100 \
-      --lr=$lr \
+      --epochs=$epochs \
       --patience=$patience \
-      --num_states=4 \
+      --num_states=$num_states \
       --hidden_dim=$hidden_dim \
-      --predictor_type=$predictor \
-      --value_method="$value_method" \
-      --ema_decay=$ema_decay \
-      $loss_weights \
-      $warmup \
-      $gumbel \
-      $temp \
-      $target_encoder \
-      $state_div \
-      $div_weight \
-      $entropy
+      --state_loss_weight=$weight \
+      --value_loss_weight=$value_loss_weight \
+      --predictor_type=$predictor_type \
+      --value_method=$value_method \
+      --state_loss_type=$loss_type \
+      --lr=$lr \
+      $use_lr_scheduler \
+      $use_warmup \
+      $use_gumbel \
+      $use_target_encoder \
+      $use_entropy"
     
-    echo "Experiment ${repeat_id} finished at $(date)"
-}
-
-# Run first combination
-echo "Running combination $start_combo_idx (of $total_combinations total)"
-run_experiment $start_combo_idx 0
-run_experiment $start_combo_idx 1
-
-# Run second combination
-echo "Running combination $second_combo_idx (of $total_combinations total)"
-run_experiment $second_combo_idx 0
-run_experiment $second_combo_idx 1
+    echo "Running command: $cmd"
+    eval $cmd
+    
+    echo "Completed run at $(date)"
+    echo "-------------------------------------------"
+done
 
 echo "Job finished at $(date)"

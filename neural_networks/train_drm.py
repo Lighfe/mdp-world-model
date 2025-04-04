@@ -64,7 +64,8 @@ def train_drm_model(db_path,
                     use_target_encoder=False,
                     ema_decay=0.996,
                     use_state_diversity=False,
-                    diversity_weight=1.0
+                    diversity_weight=1.0,
+                    state_loss_type="kl_div"
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -181,7 +182,8 @@ def train_drm_model(db_path,
         use_entropy_reg=use_entropy_reg,
         entropy_weight=entropy_weight,
         use_entropy_decay=use_entropy_decay,
-        entropy_decay_proportion=entropy_decay_proportion
+        entropy_decay_proportion=entropy_decay_proportion,
+        state_loss_type=state_loss_type
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -763,6 +765,10 @@ if __name__ == "__main__":
     parser.add_argument('--diversity_weight', type=float, default=1.0,
                         help='Weight for state diversity regularization')
     
+    parser.add_argument('--state_loss_type', type=str, default='kl_div',
+                    choices=['kl_div', 'cross_entropy', 'mse', 'js_div'],
+                    help='Type of state loss function to use')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -816,7 +822,8 @@ if __name__ == "__main__":
         use_target_encoder=args.use_target_encoder,
         ema_decay=args.ema_decay,
         use_state_diversity=args.use_state_diversity,
-        diversity_weight=args.diversity_weight
+        diversity_weight=args.diversity_weight,
+        state_loss_type=args.state_loss_type
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

@@ -58,7 +58,8 @@ class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
                  use_state_diversity=False, diversity_weight=0.001,
                  use_entropy_reg=False, entropy_weight=5.0, 
-                 use_entropy_decay=True, entropy_decay_proportion=0.2):
+                 use_entropy_decay=True, entropy_decay_proportion=0.2,
+                 state_loss_type="kl_div"):
         """
         Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
         
@@ -72,6 +73,7 @@ class StableDRMLoss(nn.Module):
             use_entropy_decay: Whether to decay entropy weight during training
             entropy_decay_proportion: Proportion of training after which entropy weight 
                                         reaches its minimum value (0.2 = 20% of training)
+            state_loss_type: Type of state loss ("kl_div", "cross_entropy", "mse", "js_div")
         """
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
@@ -90,6 +92,47 @@ class StableDRMLoss(nn.Module):
         self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
         self.entropy_decay_proportion = entropy_decay_proportion
+
+                # State loss type
+        self.state_loss_type = state_loss_type
+        if state_loss_type not in ["kl_div", "cross_entropy", "mse", "js_div"]:
+            raise ValueError(f"Unsupported state loss type: {state_loss_type}. Must be one of 'kl_div', 'mse', or 'js_div'")
+    
+    def _kl_div_loss(self, s_y, s_y_pred):
+        """KL divergence loss (original implementation)"""
+        epsilon = 1e-8
+        s_y = torch.clamp(s_y, epsilon, 1.0 - epsilon)
+        s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
+        return F.kl_div(torch.log(s_y_pred), s_y, reduction='batchmean')
+    
+    def _cross_entropy_loss(self, s_y, s_y_pred):
+        """Cross entropy loss with soft targets"""
+        epsilon = 1e-8
+        s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
+        return -torch.sum(s_y * torch.log(s_y_pred), dim=1).mean()
+    
+    def _mse_loss(self, s_y, s_y_pred):
+        """Mean Squared Error between probability distributions"""
+        return torch.mean(torch.sum((s_y - s_y_pred) ** 2, dim=1))
+    
+    def _js_div_loss(self, s_y, s_y_pred):
+        """Jensen-Shannon divergence: 0.5 * KL(P || M) + 0.5 * KL(Q || M) where M = 0.5 * (P + Q)"""
+        epsilon = 1e-8
+        s_y = torch.clamp(s_y, epsilon, 1.0 - epsilon)
+        s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
+        
+        # Calculate the mixture distribution M = 0.5 * (P + Q)
+        m = 0.5 * (s_y + s_y_pred)
+        m = torch.clamp(m, epsilon, 1.0 - epsilon)
+        
+        # Calculate KL(P || M)
+        kl_p_m = torch.sum(s_y * torch.log(s_y / m), dim=1).mean()
+        
+        # Calculate KL(Q || M)
+        kl_q_m = torch.sum(s_y_pred * torch.log(s_y_pred / m), dim=1).mean()
+        
+        # JS divergence is 0.5 * (KL(P || M) + KL(Q || M))
+        return 0.5 * (kl_p_m + kl_q_m)
     
     
     def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None):
@@ -110,8 +153,13 @@ class StableDRMLoss(nn.Module):
         s_y = torch.clamp(s_y, epsilon, 1.0 - epsilon)
         s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
         
-        # Manual calculation of KL divergence for better stability
-        state_loss = F.kl_div(torch.log(s_y_pred), s_y, reduction='batchmean')
+                # Compute appropriate state loss based on type
+        if self.state_loss_type == "kl_div":
+            state_loss = self._kl_div_loss(s_y, s_y_pred)
+        elif self.state_loss_type == "mse":
+            state_loss = self._mse_loss(s_y, s_y_pred)
+        elif self.state_loss_type == "js_div":
+            state_loss = self._js_div_loss(s_y, s_y_pred)
         
         # Check for NaN in KL divergence and replace with zero if any
         if torch.isnan(state_loss):
