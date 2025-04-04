@@ -859,3 +859,139 @@ def plot_regulization_metrics(history, test_metrics, save_path=None):
         print(f"Saved entropy metrics visualization to {save_path}")
     
     return fig
+
+
+    import torch
+import numpy as np
+import graphviz
+import os
+from pathlib import Path
+
+def analyze_mdp_from_model(model, control_values=None, device='cpu'):
+    """
+    Analyze MDP representation from a trained DRM model using one-hot encoding
+    
+    Args:
+        model: Trained DRM model
+        control_values: List of control values to analyze (default: [0.5, 1.0])
+        device: Device to run computation on
+        
+    Returns:
+        Dictionary containing:
+        - transition_matrices: Dict of transition probability matrices for each control
+        - state_values: Values predicted for each state
+        - control_values: List of control values analyzed
+    """
+    if control_values is None:
+        control_values = [0.5, 1.0]
+    
+    # Move model to device and set to evaluation mode
+    model = model.to(device)
+    model.eval()
+    
+    num_states = model.num_states
+    
+    # Create one-hot encoded states
+    one_hot_states = torch.eye(num_states, device=device)
+    
+    # Get state values directly from the value network
+    with torch.no_grad():
+        state_values = model.compute_value(one_hot_states).cpu().numpy()
+    
+    # Initialize results dictionary
+    transition_matrices = {}
+    
+    # Calculate transition probabilities for each control value
+    for control_value in control_values:
+        # Prepare control tensor (same control for all states)
+        control_batch = torch.full((num_states, 1), control_value, dtype=torch.float32, device=device)
+        
+        # Get next state predictions for each one-hot state
+        with torch.no_grad():
+            next_state_probs = model.predict_next_state(one_hot_states, control_batch)
+            
+        # Convert to numpy for analysis
+        transition_matrix = next_state_probs.cpu().numpy()
+        transition_matrices[control_value] = transition_matrix
+    
+    return {
+        'transition_matrices': transition_matrices,
+        'state_values': state_values,
+        'control_values': control_values
+    }
+
+def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.05):
+    """
+    Create a graphviz visualization of the MDP
+    
+    Args:
+        mdp_data: Output from analyze_mdp_from_model
+        output_path: Path to save the visualization
+        min_prob_to_show: Minimum probability to display (for cleaner graphs)
+        
+    Returns:
+        Rendered graphviz graph
+    """
+    transition_matrices = mdp_data['transition_matrices']
+    state_values = mdp_data['state_values']
+    control_values = mdp_data['control_values']
+    
+    num_states = state_values.shape[0]
+    
+    # Create a digraph for each control value
+    graphs = {}
+    
+    for control_value in control_values:
+        dot = graphviz.Digraph(comment=f'MDP for control={control_value}')
+        dot.attr('graph', rankdir='LR', splines='true', nodesep='0.8', ranksep='1.5')
+        dot.attr('node', shape='box', style='filled', fontname='Arial', fontsize='12')
+        dot.attr('edge', fontname='Arial', fontsize='10')
+        
+        # Add state nodes
+        for state in range(num_states):
+            value_str = ", ".join([f"{val:.3f}" for val in state_values[state]])
+            dot.node(f's{state+1}', 
+                     f's{state+1}\nValue: {value_str}', 
+                     shape='circle', 
+                     fillcolor='#f8d7e0',  # Light pink
+                     style='filled')
+        
+        # Add action nodes and transitions
+        for from_state in range(num_states):
+            transitions = transition_matrices[control_value][from_state]
+            
+            # Create unique action nodes for each origin state
+            for to_state in range(num_states):
+                prob = transitions[to_state]
+                
+                # Skip low probability transitions for clarity
+                if prob < min_prob_to_show:
+                    continue
+                
+                # Create unique action node for this transition
+                action_id = f'a_{from_state+1}_{to_state+1}'
+                action_label = f'a{control_value}'
+                dot.node(action_id, action_label, shape='diamond', fillcolor='#d7d7f8', style='filled')  # Light purple
+                
+                # Connect state to action and action to next state
+                dot.edge(f's{from_state+1}', action_id)
+                dot.edge(action_id, f's{to_state+1}', label=f'{prob:.3f}', color='green')
+        
+        graphs[control_value] = dot
+    
+    # Render all graphs
+    rendered_paths = {}
+    for control_value, graph in graphs.items():
+        if output_path:
+            # Create output directory if it doesn't exist
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            
+            # Generate unique filename for each control value
+            filename = f"{output_path.replace('.png', '')}_{control_value}"
+            rendered_path = graph.render(filename, format='png', cleanup=True)
+            rendered_paths[control_value] = rendered_path
+            print(f"Rendered MDP visualization for control={control_value} to {rendered_path}")
+        else:
+            graph.view()
+    
+    return graphs, rendered_paths

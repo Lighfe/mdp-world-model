@@ -27,7 +27,9 @@ from data_generation.models.tech_substitution import TechnologySubstitution, Tec
 from data_generation.simulations.grid import tangent_transformation
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, 
-    visualize_transition_matrices, visualize_model_architecture, plot_training_curves, plot_regulization_metrics
+    visualize_transition_matrices, visualize_model_architecture, 
+    plot_training_curves, plot_regulization_metrics,
+    analyze_mdp_from_model, visualize_mdp
 )
 
 
@@ -684,19 +686,9 @@ def train_drm_model(db_path,
     argmax_vis_path = os.path.join(output_dir, f"argmax_transitions_{run_id}.png")
     visualize_transition_matrices(argmax_transitions, control_values, argmax_vis_path)
 
-    # Analyze and visualize state transitions with soft assignment
-    soft_transitions = analyze_state_transitions(
-        model=model,
-        transformations=[
-            transformation,  # For x1 dimension
-            transformation   # For x2 dimension
-        ],
-        control_values=control_values,
-        assignment_method='soft',
-        device=device
-    )
-    soft_vis_path = os.path.join(output_dir, f"soft_transitions_{run_id}.png")
-    visualize_transition_matrices(soft_transitions, control_values, soft_vis_path)
+    mdp_vis_path = os.path.join(output_dir, f"mdp_visualization_{run_id}.png")
+    mdp_data = analyze_mdp_from_model(model, control_values=control_values, device='cuda' if torch.cuda.is_available() else 'cpu')
+    graphs, paths = visualize_mdp(mdp_data, output_path=mdp_vis_path, min_prob_to_show=0.02)
 
     # Calculate training time
     training_time = time.time() - start_time
