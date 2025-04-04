@@ -3,7 +3,7 @@ from sqlalchemy import Column, String, Float, JSON, ForeignKey, MetaData, Table
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.sqlite import FLOAT as SQLITE_FLOAT
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 # Create shared metadata instance
 metadata = MetaData()
@@ -49,3 +49,32 @@ def get_engine(filename):
 def init_db(engine):
     """Initialize database with all tables"""
     metadata.create_all(engine)
+
+def clear_data_by_run_id(filename, tablename, run_ids):
+    
+    engine = create_engine(f'sqlite:///{filename}')
+    init_db(engine)
+
+    # Convert run_ids into a format for SQL query
+    if isinstance(run_ids, (list, tuple, set)):
+        run_ids_tuple = tuple(run_ids)
+    else:
+        raise ValueError("run_ids must be a list, tuple, or set of IDs")
+    
+    try:
+        with engine.connect() as connection:
+            # Use a parameterized query to prevent SQL injection
+            query = text(f"DELETE FROM {tablename} WHERE run_id IN ({', '.join([':id' + str(i) for i in range(len(run_ids_tuple))])})")
+            params = {f"id{i}": run_id for i, run_id in enumerate(run_ids_tuple)}
+            connection.execute(query, params)
+            connection.commit()  # Commit the changes
+
+            # Delete also in configs table
+            query = text(f"DELETE FROM configs WHERE run_id IN ({', '.join([':id' + str(i) for i in range(len(run_ids_tuple))])})")
+            params = {f"id{i}": run_id for i, run_id in enumerate(run_ids_tuple)}
+            connection.execute(query, params)
+            connection.commit()  # Commit the changes
+            print(f"Successfully deleted rows with run_id in {run_ids_tuple}.")
+    
+    except Exception as e:
+        print(f"Error deleting rows: {e}")
