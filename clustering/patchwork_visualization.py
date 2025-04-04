@@ -1,11 +1,13 @@
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplcol
 import holoviews as hv
 import panel as pn
 import pandas as pd
 import colorcet as cc  # Better categorical colormaps
-from data_generation.visualization.create_plots import create_2D_vectorfield
+from data_generation.visualization.create_plots import create_2D_vectorfield, plot_2D_vector_field_over_grid
+from patchwork import create_patchwork
 
 hv.extension('bokeh')
 
@@ -42,89 +44,6 @@ def plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5):
     cbar.ax.tick_params(labelsize=10)
 
 
-def test_hv():
-    # Generate flow field (example: simple vortex)
-    x, y = np.linspace(-2, 2, 20), np.linspace(-2, 2, 20)
-    X, Y = np.meshgrid(x, y)
-    U, V = -Y, X  # Rotational field
-
-    def plot_streamplot(step):
-        fig, ax = plt.subplots()
-        ax.streamplot(X, Y, U, V, color='b', linewidth=1)
-        ax.set_title(f"Streamplot at step {step}")
-        return fig
-
-    # Create interactive widget
-    slider = pn.widgets.IntSlider(name="Step", start=0, end=10, step=1)
-    interactive_plot = pn.bind(plot_streamplot, step=slider)
-
-    dashboard = pn.Column(slider, interactive_plot)
-    dashboard.servable()
-    dashboard.show()
-    
-    return
-
-def create_interactive_streamplot():
-    """Creates an interactive streamplot with a button to change vector fields."""
-    
-   
-    # Define vector fields
-    x, y = np.linspace(-2, 2, 20), np.linspace(-2, 2, 20)
-    X, Y = np.meshgrid(x, y)
-
-    vector_fields = {
-        "None": None,  # No streamplot
-        "Rotational": (-Y, X),  # Circular flow
-        "Linear": (np.ones_like(X), np.zeros_like(Y)),  # Uniform flow
-        "Random": (np.random.randn(*X.shape), np.random.randn(*Y.shape)),  # Random
-    }
-
-    def plot_streamplot(step, field_name):
-        """Generates a streamplot for the selected vector field."""
-        
-        data = [(i/5 + 0.1, j/5 +0.1,  i*j) for i in range(5) for j in range(5) if i!=j]
-        hm = hv.HeatMap(data).sort().opts(width = 500, height= 500, tools=['hover'] )
-        
-        if field_name == "None":
-            return hm  # Return an empty figure
-
-        U, V = vector_fields[field_name]
-        fig, ax = plt.subplots(figsize = (10,10))
-        ax.streamplot(X, Y, U, V, color='b', linewidth=1)
-
-        # Convert the Matplotlib plot to a NumPy array
-        fig.canvas.draw()  # Draw the figure on the canvas
-        # Extract the image as a numpy array from the canvas
-        ax.axis('off')  # Turn off the axis
-        fig.tight_layout(pad=0)  # Remove padding
-        ax.margins(0)  # Remove margins
-        ax.set_axis_off()  # Turn off the axis
-        fig.canvas.draw()  # Draw the figure on the canvas
-        image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))  # Reshape to height x width x 3 (RGB)
-        
-        # Make white pixels transparent
-        image = np.where(np.all(image == [255, 255, 255], axis=-1, keepdims=True), [0, 0, 0, 0], np.concatenate([image, np.full((*image.shape[:2], 1), 255)], axis=-1))
-        plt.close(fig)  # Close the figure to prevent it from displaying immediately
-        im = hv.RGB(image, bounds=(0, 0, 1, 1)) #fig.canvas.get_width_height()[0], fig.canvas.get_width_height()[1]))
-
-        
-
-        return hm *im 
-    # Create widgets
-    slider = pn.widgets.IntSlider(name="Step", start=0, end=10, step=1)
-    dropdown = pn.widgets.Select(name="Vector Field", options=list(vector_fields.keys()))
-
-    # Bind interactive plot
-    interactive_plot = pn.bind(plot_streamplot, step=slider, field_name=dropdown)
-
-    dashboard = pn.Column(slider, dropdown,  interactive_plot)
-    dashboard.servable()
-    dashboard.show()
-    
-    return 
-
-
 
 def generate_random_grayscale_cmap(num_categories, seed=42):
     """
@@ -154,7 +73,7 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 
 
-def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 15, save_to_path = None):
+def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 15, save_to_path = None, save_steps = 10, show_interactive = True):
 
     grid_resolution = patchwork.grid.resolution
     grid_size = grid_resolution[0]
@@ -219,8 +138,9 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         im = hv.RGB(image, bounds=(0, 0, 1, 1)) 
         return im
 
-    # Precompute streamplots based on controls
-    streamplots = {control: generate_streamplot(control, count) for count, control in enumerate(controls)}
+    if show_interactive == True:
+        # Precompute streamplots based on controls
+        streamplots = {control: generate_streamplot(control, count) for count, control in enumerate(controls)}
   
     #Create a grayscale + color map for patch color mapping
     grayscale_cmap = generate_random_grayscale_cmap(num_cells)
@@ -235,7 +155,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
     def create_colorbar(colormap, norm, label="Entropy"):
         """Creates a matplotlib colorbar using the given colormap and normalization."""
-        fig, ax = plt.subplots(figsize=(0.3, 3.5))  # Adjust figure size for the colorbar
+        fig, ax = plt.subplots(figsize=(0.3, 3.5), dpi = 200)  # Adjust figure size for the colorbar
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
         sm.set_array([])  # Needed for the colorbar to work
         cbar = plt.colorbar(sm, cax=ax, orientation="vertical")
@@ -299,31 +219,73 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     
     #Save to .gif
     if save_to_path != None:
-        holomap = hv.HoloMap({step: get_current_patchwork(step, [], selected_color = 'Entropy') for step in range(number_of_steps) }, kdims= ['Step'])
-        hv.save(holomap, save_to_path, fmt='gif')
+        patchworks = {step: get_current_patchwork(step, [], selected_color='Entropy') for step in range(0,number_of_steps,save_steps)}
+        holomap = hv.HoloMap(patchworks, kdims=['Step'])
+        hv.save(holomap, save_to_path +".gif", fmt='gif')
 
+        #Save colorbar externally
+        fig = create_colorbar(entropy_cmap, entropy_norm)
+        fig.savefig(save_to_path + "_colormap.png", bbox_inches='tight')
 
-    # Interactive slider and selection widget
-    slider = pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
-    vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
-    color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches'])
-    
-    # Bind the function to the slider
-    interactive_plot = pn.bind(get_current_patchwork, step=slider, selected_controls = vector_selector_streamplots, selected_color = color_selector)
+    if show_interactive == True:
+        # Interactive slider and selection widget
+        slider = pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
+        vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
+        color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches'])
+        
+        # Bind the function to the slider
+        interactive_plot = pn.bind(get_current_patchwork, step=slider, selected_controls = vector_selector_streamplots, selected_color = color_selector)
 
-    # Title for the widgetbox
-    title = pn.pane.Markdown(f"<h1> Patchwork Visualization </h1> <br />  {title}")
+        # Title for the widgetbox
+        title = pn.pane.Markdown(f"<h1> Patchwork Visualization </h1> <br />  {title}")
 
-    # Colorbar
-    colorbar_pane = pn.pane.Matplotlib(create_colorbar(entropy_cmap, entropy_norm), tight=True)
-    
-    # Layout
-    dashboard = pn.Row(
-        pn.Column(title, pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, color_selector)),
-        interactive_plot,
-        pn.Column(pn.Spacer(height=90), colorbar_pane)  # Add spacer to adjust the position of the colorbar
-    )
-    dashboard.servable() 
-    dashboard.show()
+        # Colorbar
+        colorbar_pane = pn.pane.Matplotlib(create_colorbar(entropy_cmap, entropy_norm), tight=True)
+        
+        # Layout
+        dashboard = pn.Row(
+            pn.Column(title, pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, color_selector)),
+            interactive_plot,
+            pn.Column(pn.Spacer(height=90), colorbar_pane)  # Add spacer to adjust the position of the colorbar
+        )
+        dashboard.servable() 
+        dashboard.show()
 
     return
+
+
+
+def create_plot_and_save_patchwork(db_name, table_name, run_ids, path_to_save = None, gif_steps = 10, title_interactive = "", show_interactive = False):
+    """
+    Create a patchwork, plot it together with its first entropy and save the results to the corresponding path.
+    Parameters:
+        db_name (str): Path of the database to load data from.
+        table_name (str): Name of the table in the database.
+        run_ids (list): List of run IDs to include in the patchwork.
+        path_to_save (str, optional): Path to save the generated patchwork visualization. Defaults to None, then nothing is saved.
+        gif_steps (int, optional): Number of steps between frames in the saved GIF. Defaults to 10.
+        title_interactive (str, optional): Title for the interactive visualization. Defaults to an empty string.
+            Possibly something like techsub_title + f"resolution: {res}x{res} cells  <br /> timestep: {delta_t} <br /> samples per cell: {samples_per_cell} </h3>  <br />"
+        show_interactive (bool, optional): Whether to display the interactive visualization. Defaults to False.
+    """
+    
+    
+    #Create subfolder and name
+    if path_to_save != None:
+        path_id = os.path.join(path_to_save, "-".join(run_ids)) 
+        if not os.path.exists(path_id):
+            os.makedirs(path_id)
+        path_to_save = path_id + f"/firstPatchwork_{str(gif_steps)}stepsPerTime"
+
+    patchwork, controls, solver = create_patchwork(db_name, table_name, run_ids)
+    
+    fig, ax = plt.subplots(figsize=(7, 6))
+    plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)
+    plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5)
+    if path_to_save != None:
+        fig.savefig(path_id + "/StartEntropy.png")
+    
+    patchwork.run()
+    plot_interactive_patchwork(patchwork, controls, solver, title_interactive, save_to_path=path_to_save, save_steps = gif_steps, show_interactive=show_interactive)
+
+
