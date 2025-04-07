@@ -651,7 +651,8 @@ def train_drm_model(db_path,
     print(f"Saved training history to {history_path}")
     
     # Plot training curves
-    plot_training_curves(history, os.path.join(output_dir, f"training_curves_{run_id}.png"))
+    plot_training_curves(history, os.path.join(output_dir, f"training_curves_{run_id}.png"), 
+                         state_loss_type=loss_fn.state_loss_type)
     # Plot regulization metrics
     plot_regulization_metrics(history, test_metrics, os.path.join(output_dir, f"entropy_metrics_{run_id}.png"))
 

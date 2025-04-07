@@ -34,7 +34,7 @@ from data_generation.simulations.grid import tangent_transformation
 NOTE: Important, don't get confused with the layout of the grid. It is in a coordinate system. 
 [0, 0] is bottom left, not like with typical numpy array top left! Same applies in higher dimensions.
 """
-def plot_training_curves(history, save_path=None):
+def plot_training_curves(history, save_path=None, state_loss_type=None):
     """Plot training and validation loss curves"""
     plt.figure(figsize=(15, 10))
     
@@ -52,7 +52,10 @@ def plot_training_curves(history, save_path=None):
     plt.subplot(2, 2, 2)
     plt.plot(history['train_state_loss'], label='Train State Loss')
     plt.plot(history['val_state_loss'], label='Validation State Loss')
-    plt.title('State Loss (KL Divergence)')
+    if state_loss_type is None:
+        plt.title('State Loss')
+    else:
+        plt.title(f'State Loss ({state_loss_type})')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
@@ -920,9 +923,9 @@ def analyze_mdp_from_model(model, control_values=None, device='cpu'):
         'control_values': control_values
     }
 
-def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.05):
+def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.02):
     """
-    Create a graphviz visualization of the MDP
+    Create a unified graphviz visualization of the MDP with all control values
     
     Args:
         mdp_data: Output from analyze_mdp_from_model
@@ -938,29 +941,29 @@ def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.05):
     
     num_states = state_values.shape[0]
     
-    # Create a digraph for each control value
-    graphs = {}
+    # Create a single digraph for all controls
+    dot = graphviz.Digraph(comment='MDP with all controls')
+    dot.attr('graph', rankdir='LR', splines='true', nodesep='0.8', ranksep='1.5')
+    dot.attr('node', shape='box', style='filled', fontname='Arial', fontsize='12')
+    dot.attr('edge', fontname='Arial', fontsize='10')
     
+    # Add state nodes
+    for state in range(num_states):
+        value_str = ", ".join([f"{val:.3f}" for val in state_values[state]])
+        dot.node(f's{state+1}', 
+                 f's{state+1}\nValue: {value_str}', 
+                 shape='circle', 
+                 fillcolor='#f8d7e0',  # Light pink
+                 style='filled')
+    
+    # Track already created action nodes to avoid duplicates
+    created_actions = set()
+    
+    # Add action nodes and transitions for all control values
     for control_value in control_values:
-        dot = graphviz.Digraph(comment=f'MDP for control={control_value}')
-        dot.attr('graph', rankdir='LR', splines='true', nodesep='0.8', ranksep='1.5')
-        dot.attr('node', shape='box', style='filled', fontname='Arial', fontsize='12')
-        dot.attr('edge', fontname='Arial', fontsize='10')
-        
-        # Add state nodes
-        for state in range(num_states):
-            value_str = ", ".join([f"{val:.3f}" for val in state_values[state]])
-            dot.node(f's{state+1}', 
-                     f's{state+1}\nValue: {value_str}', 
-                     shape='circle', 
-                     fillcolor='#f8d7e0',  # Light pink
-                     style='filled')
-        
-        # Add action nodes and transitions
         for from_state in range(num_states):
             transitions = transition_matrices[control_value][from_state]
             
-            # Create unique action nodes for each origin state
             for to_state in range(num_states):
                 prob = transitions[to_state]
                 
@@ -968,30 +971,29 @@ def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.05):
                 if prob < min_prob_to_show:
                     continue
                 
-                # Create unique action node for this transition
-                action_id = f'a_{from_state+1}_{to_state+1}'
-                action_label = f'a{control_value}'
-                dot.node(action_id, action_label, shape='diamond', fillcolor='#d7d7f8', style='filled')  # Light purple
+                # Create action node identifier
+                # We'll use control value in the action node ID to distinguish between actions
+                # with the same source and destination but different controls
+                action_id = f'a{control_value}_{from_state+1}_{to_state+1}'
+                
+                # Only create the action node if we haven't already
+                if action_id not in created_actions:
+                    action_label = f'a{control_value}'
+                    dot.node(action_id, action_label, shape='diamond', fillcolor='#d7d7f8', style='filled')
+                    created_actions.add(action_id)
                 
                 # Connect state to action and action to next state
                 dot.edge(f's{from_state+1}', action_id)
                 dot.edge(action_id, f's{to_state+1}', label=f'{prob:.3f}', color='green')
+    
+    # Render the graph
+    if output_path:
+        # Create output directory if it doesn't exist
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         
-        graphs[control_value] = dot
+        rendered_path = dot.render(output_path.replace('.png', ''), format='png', cleanup=True)
+        print(f"Rendered unified MDP visualization to {rendered_path}")
+    else:
+        dot.view()
     
-    # Render all graphs
-    rendered_paths = {}
-    for control_value, graph in graphs.items():
-        if output_path:
-            # Create output directory if it doesn't exist
-            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            
-            # Generate unique filename for each control value
-            filename = f"{output_path.replace('.png', '')}_{control_value}"
-            rendered_path = graph.render(filename, format='png', cleanup=True)
-            rendered_paths[control_value] = rendered_path
-            print(f"Rendered MDP visualization for control={control_value} to {rendered_path}")
-        else:
-            graph.view()
-    
-    return graphs, rendered_paths
+    return dot, output_path

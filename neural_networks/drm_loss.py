@@ -134,6 +134,8 @@ class StableDRMLoss(nn.Module):
         # JS divergence is 0.5 * (KL(P || M) + KL(Q || M))
         return 0.5 * (kl_p_m + kl_q_m)
     
+    # TODO: KS divergence turned around
+    
     
     def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None):
         """
@@ -153,9 +155,11 @@ class StableDRMLoss(nn.Module):
         s_y = torch.clamp(s_y, epsilon, 1.0 - epsilon)
         s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
         
-                # Compute appropriate state loss based on type
+        # Compute appropriate state loss based on type
         if self.state_loss_type == "kl_div":
             state_loss = self._kl_div_loss(s_y, s_y_pred)
+        elif self.state_loss_type == "cross_entropy":
+            state_loss = self._cross_entropy_loss(s_y, s_y_pred)
         elif self.state_loss_type == "mse":
             state_loss = self._mse_loss(s_y, s_y_pred)
         elif self.state_loss_type == "js_div":

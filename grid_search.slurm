@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=drm_state_loss
+#SBATCH --job-name=drm_cross_entropy
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=1:00:00
@@ -8,9 +8,9 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
-#SBATCH --output=log/drm_state_loss_%A_%a.out
-#SBATCH --error=log/drm_state_loss_%A_%a.err
-#SBATCH --array=1-16
+#SBATCH --output=log/drm_cross_entropy_%A_%a.out
+#SBATCH --error=log/drm_cross_entropy_%A_%a.err
+#SBATCH --array=1-4
 
 # Print job info
 echo "Job started at $(date)"
@@ -36,7 +36,7 @@ export OMP_PROC_BIND=true
 
 # Fixed configuration parameters for all runs
 db_path="datasets/results/tech_sim.db"
-base_output_dir="neural_networks/output/state_loss_exp"
+base_output_dir="neural_networks/output/cross_entropy_exp"
 val_size=2000
 test_size=2000
 batch_size=64
@@ -57,22 +57,20 @@ use_target_encoder="--use_target_encoder --ema_decay=0.9"
 use_entropy="--use_entropy_reg --entropy_weight=3.0 --use_entropy_decay --entropy_decay_proportion=0.1"
 use_gumbel="--use_gumbel --initial_temp=5.0 --min_temp=0.1"
 
-# Define state loss types and weights
-state_loss_types=("kl_div" "mse" "js_div" "cross_entropy")
+# Fixed loss type - only cross_entropy
+loss_type="cross_entropy"
+
+# Define state loss weights
 state_weights=(0.5 1.0 2.0 3.0)
 
-# Map array task ID to configuration
-# We have 16 unique configurations (4 loss types × 4 weights)
-loss_idx=$(( (SLURM_ARRAY_TASK_ID-1) / 4 ))
-weight_idx=$(( (SLURM_ARRAY_TASK_ID-1) % 4 ))
-
-loss_type=${state_loss_types[$loss_idx]}
+# Map array task ID to weight index (1-4 → 0-3)
+weight_idx=$((SLURM_ARRAY_TASK_ID-1))
 weight=${state_weights[$weight_idx]}
 
 echo "This job will run configuration: loss_type=$loss_type, weight=$weight"
 
 # Create output directory
-output_dir="${base_output_dir}/${loss_type}/weight${weight}"
+output_dir="${base_output_dir}/weight${weight}"
 mkdir -p "$output_dir"
 
 # Run the job twice sequentially
