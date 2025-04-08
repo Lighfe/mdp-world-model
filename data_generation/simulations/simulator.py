@@ -402,9 +402,12 @@ class Simulator:
         # Step 1: Global search
         global_result = differential_evolution(lambda t: neighbor_transition_fraction(t), bounds=[search_space]) 
         global_t = global_result.x[0]
+        print(f"Global search optimal delta_t: {global_t:.4f}, max_fraction: {-global_result.fun:.4f}")
 
         # Step 2: Local refinement
-        local_result = minimize_scalar(lambda t: neighbor_transition_fraction(t), bounds=(global_t-1, global_t+1), method="bounded")
+        refinement_radius = 0.2 * global_t
+        local_result = minimize_scalar(lambda t: neighbor_transition_fraction(t), bounds=(global_t-refinement_radius, global_t+refinement_radius), method="bounded")
+        print(f"Local search optimal delta_t: {local_result.x:.4f}, max_fraction: {-local_result.fun:.4f}")
 
         optimal_delta_t = local_result.x
         #max_fraction = -local_result.fun

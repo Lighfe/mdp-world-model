@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 import logging
 import time
+import matplotlib.pyplot as plt
 from math import floor, log10
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.models.general_ode_solver import FitzHughNagumoModel, GeneralODENumericalSolver
@@ -41,9 +42,28 @@ def determine_delta_t(config, simulator, config_path, significant_figures=3):
     """
     
     search_space = config['delta_t']
-    delta_t_optimizition_plot_path = config_path.replace(".json", "") + "_delta_t_optimization_plot.png" #TODO maybe improve this
-    optimal_delta_t = simulator.get_optimal_delta_t(np.array(config['controls']), search_space, path_to_save_plot = delta_t_optimizition_plot_path)
-    print('got here')
+    delta_t_optimization_plot_path = config_path.replace(".json", "") + "_delta_t_optimization_plot.png" #TODO maybe improve this
+    optimal_delta_t = simulator.get_optimal_delta_t(np.array(config['controls']), search_space, path_to_save_plot = delta_t_optimization_plot_path)
+    
+    
+    while True:
+        #Show the plot and ask the user for confirmation
+        print(f"Plot of optimal delta_t search saved at {delta_t_optimization_plot_path}.")
+
+        user_input = input(f"Optimal delta_t found at {round(optimal_delta_t, 2)}. Proceed with this value? (yes/no): ").strip().lower()
+        if user_input in ['yes', 'y']:
+            plt.close()
+            break
+        else:
+            new_bounds = input("Enter new bounds for delta_t search as a comma-separated list (e.g., 0.01,0.1): ").strip()
+            try:
+                new_bounds = [float(bound) for bound in new_bounds.split(',')]
+                optimal_delta_t = simulator.get_optimal_delta_t(np.array(config['controls']), new_bounds, path_to_save_plot = delta_t_optimization_plot_path)
+            except ValueError:
+                logging.error("Invalid bounds entered. Exiting.")
+                sys.exit(1)
+            plt.close()
+
     # Use a rounded value for delta_t
     config['delta_t'] =  round(optimal_delta_t, -int(floor(log10(abs(optimal_delta_t)))) + (significant_figures - 1)) #Rounds to number of significant figures
     config['comment'] += f"  Delta_t value was optimized at {time.strftime('%Y-%m-%d %H:%M:%S')}."
