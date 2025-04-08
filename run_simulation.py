@@ -6,6 +6,8 @@ from pathlib import Path
 import argparse
 import numpy as np
 import logging
+import time
+from math import floor, log10
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.models.general_ode_solver import FitzHughNagumoModel, GeneralODENumericalSolver
 from data_generation.models.simple_test_models import *
@@ -31,6 +33,34 @@ def load_config(config_path):
         return json.load(file)
 
 
+def determine_delta_t(config, simulator, config_path, significant_figures=3):
+    """
+    Determine the optimal delta_t for the simulation, 
+    round it to a specified number of significant figures, 
+    and update the configuration file.
+    """
+    
+    search_space = config['delta_t']
+    delta_t_optimizition_plot_path = config_path.replace(".json", "") + "_delta_t_optimization_plot.png" #TODO maybe improve this
+    optimal_delta_t = simulator.get_optimal_delta_t(np.array(config['controls']), search_space, path_to_save_plot = delta_t_optimizition_plot_path)
+    print('got here')
+    # Use a rounded value for delta_t
+    config['delta_t'] =  round(optimal_delta_t, -int(floor(log10(abs(optimal_delta_t)))) + (significant_figures - 1)) #Rounds to number of significant figures
+    config['comment'] += f"  Delta_t value was optimized at {time.strftime('%Y-%m-%d %H:%M:%S')}."
+    print(config_path)
+    # Save the updated configuration back to the JSON file
+    with open(config_path, "r") as file:
+        save_config = json.load(file)
+    with open(config_path, "w") as file:
+        save_config['delta_t'] = config['delta_t']
+        save_config['comment'] = config['comment']
+        json.dump(save_config, file, indent=4)
+
+
+    logging.info(f"Delta_t was not provided. Using optimized value: {config['delta_t']}")
+    
+    return config
+
 def replace_inf(value):
     """Recursively replace 'np.inf' strings with actual np.inf values."""
     if isinstance(value, list):
@@ -49,7 +79,11 @@ def update_run_dict(config):
     if run_dict_path.exists():
         with open(run_dict_path, "r") as file:
             run_dict = json.load(file)
-        next_key = sorted([int(key) for key in run_dict[config['model']].keys()])[-1] +1 
+        if config['model'] not in run_dict.keys():
+            run_dict[config['model']] = {}
+            next_key = 1
+        else:
+            next_key = sorted([int(key) for key in run_dict[config['model']].keys()])[-1] +1 
     else:
         run_dict = {}
         run_dict[config['model']] = {}
@@ -75,49 +109,52 @@ def store_run_dict(run_dict, config):
 
 
 
-def initialize_simulation(config):
+def initialize_simulation(config, config_path):
     """Initialize the grid, model, and solver based on the configuration."""
     
     if config["transformations"] != None: #check if it not nOe
         transformations = [globals()[transformation](config['trafo_params'][i]) for i, transformation in enumerate(config["transformations"])]
+    else:
+        transformations = None
+    
     config["bounds"] = replace_inf(config["bounds"])
 
     grid = Grid(bounds=config["bounds"], resolution=config["resolution"], grid_transformations=transformations)
-    
 
-    if config['control_params']:
+
+    if 'control_params' in config.keys():
         model = globals()[config["model"]](control_params=config["control_params"])
     else:
         model = globals()[config["model"]]()
 
     solver = globals()[config["solver"]](model)
-
+    simulator = Simulator(grid, model, solver)
+    
+    # Check if delta_t is given, else determine optimal delta_t and save it to the config json file
+    if type(config['delta_t']) == list:
+        config = determine_delta_t(config, simulator, config_path)
+    
     # Log simulation start
     logging.info(f"Initialized simulation of {config["model"]} with the following parameters:")
     logging.info(f"Bounds: {config["bounds"]}")
-    print(transformations)
     logging.info(f"Transformations: {None if transformations == None else [tf[0].__name__ for tf in transformations]}")
     logging.info(f"Transformation Parameters: {config['trafo_params']}")
     logging.info(f"Resolution: {config["resolution"]}")
     logging.info(f"Number of samples per cell: {config['num_samples_per_cell']}")
     logging.info(f"Delta t: {config['delta_t']}")
 
-    return Simulator(grid, model, solver)
+    return simulator
 
 
-def run_and_store_simulations(config):
+def run_and_store_simulations(config, config_path):
     """Run simulations based on the configuration, possibly for multiple controls."""
     
-    
-    
-    if config["run_dict_name"]:
-        key_run_dict, run_dict = update_run_dict(config)
     run_ids = []
 
     for control in np.array(config['controls']):
         
         try:
-            simulator = initialize_simulation(config)
+            simulator = initialize_simulation(config, config_path)
             logging.info(f"Starting simulation with control: {control}")
             # Run simulation
             simulator.simulate(
@@ -126,7 +163,7 @@ def run_and_store_simulations(config):
                 num_samples_per_cell=config['num_samples_per_cell'],
                 num_steps=config['num_steps'],
                 save_result=True )
-            
+                     
             # Store results
             db_path = config['output_path'] / config['db-name']
             simulator.store_results_to_sqlite(db_path)
@@ -162,6 +199,7 @@ def run_and_store_simulations(config):
         time.sleep(1) #if the simulation is faster than 1 second, to keep the ids unique
 
     if config["run_dict_name"]:
+        key_run_dict, run_dict = update_run_dict(config)
         run_dict[config['model']][key_run_dict]['run_ids'].extend(run_ids)
         store_run_dict(run_dict, config)
         
@@ -181,13 +219,14 @@ def main():
     # Load from JSON configuration file
     config = load_config(args.config)
 
+
      # Setup paths
     config['output_path'] = Path(config['output_path'])
     config['output_path'].mkdir(parents=True, exist_ok=True)
 
     # Run simulations
     start_time = time.time()
-    run_and_store_simulations(config)
+    run_and_store_simulations(config, args.config)
     end_time = time.time()
 
     logging.info(f"Simulations completed in {end_time - start_time:.2f} seconds.")
