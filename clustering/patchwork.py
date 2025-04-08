@@ -471,6 +471,8 @@ def create_patchwork(db_name, table_name, run_ids):
     # TODO: make this better, until now we assume that all upper borders are the same
 
     if grid.bounds[0][-1] != np.inf:
+        rows_to_delete_percentage = df[~df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])].shape[0] / df.shape[0] * 100
+        print(f"Percentage of data rows deleted: {rows_to_delete_percentage:.2f}%")
         df = df[df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])] #as we run out of the defined space
         patchwork = Patchwork(grid,df)
     else:
