@@ -6,6 +6,8 @@ import platform
 import psutil
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize_scalar, differential_evolution
 from data_generation.models import tech_substitution as ts
 from data_generation.simulations.grid import Grid
 from datasets.database import get_engine, init_db, create_results_table
@@ -349,15 +351,85 @@ class Simulator:
         num_centers = np.prod(grid.resolution)
         derivatives = np.zeros((controls.shape[0], num_centers, grid.dimension))
         transformed_derivates = np.zeros((controls.shape[0], num_centers, grid.dimension))
-
+        print('got here')
         for k, c in enumerate(controls):
             derivatives[k] = solver.get_derivative(centers, controls[k])
-            #Transform the vectorfield, multiply with Jacobian of transformation
-            for i in range(grid.dimension):
-                transformed_derivates[k, :, i] = np.multiply(np.vectorize(grid.transformation_derivatives[i])(centers[:,i]), derivatives[k,:,i])
+            if grid.transformed_bool:
+                #Transform the vectorfield, multiply with Jacobian of transformation
+                for i in range(grid.dimension):
+                    transformed_derivates[k, :, i] = np.multiply(np.vectorize(grid.transformation_derivatives[i])(centers[:,i]), derivatives[k,:,i])
+            else:
+                transformed_derivates[k] = derivatives[k]
 
         return centers, transformed_centers, derivatives, transformed_derivates
     
+
+
+    def get_optimal_delta_t(self, controls, search_space=(0.001, 10), path_to_save_plot=None):
+        """
+        Calculate the optimal delta_t for the simulation based on the transformed derivates.
+        The calculated delta_t is optimal such that the maximum number of transformed derivatives from the grid cell centers
+         'lands' in a neighboring cell (also diagonal allowed).
+        
+        Args:
+            controls (np.array): Array of control values for which to calculate the optimal delta_t
+            search_space (tuple): Search space for delta_t, default is (0.001, 100)
+            
+        Returns:
+            float: Optimal delta_t value
+        """
+        _ , _, _, transformed_derivatives = self.get_gridcell_centers_and_derivatives(controls)
+        
+        if not all(res == self.grid.resolution[0] for res in self.grid.resolution):
+            raise ValueError("All entries of self.grid.resolution must be equal, otherwise the implementation has to be changed.")
+        gridcellwidth = 1/self.grid.resolution[0]
+
+        td_2d = transformed_derivatives.reshape(-1, transformed_derivatives.shape[-1])
+        td_abs = np.abs(td_2d) 
+
+        def neighbor_transition_fraction(t):
+            if t <= 0:
+                return 0  # Avoid division by zero or negative t
+            stretched_td =  t * td_abs
+            stretched_td_minus_w = stretched_td - gridcellwidth/2
+
+            stretched_td_to_neighbor = stretched_td_minus_w[~np.all(stretched_td_minus_w < 0, axis=1)] - 2*gridcellwidth/2
+            negative_rows_count_neighbor = np.sum(np.all(stretched_td_to_neighbor < 0, axis=1))
+
+            return -negative_rows_count_neighbor/len(td_abs)
+
+
+        # Step 1: Global search
+        global_result = differential_evolution(lambda t: neighbor_transition_fraction(t), bounds=[search_space]) 
+        global_t = global_result.x[0]
+
+        # Step 2: Local refinement
+        local_result = minimize_scalar(lambda t: neighbor_transition_fraction(t), bounds=(global_t-1, global_t+1), method="bounded")
+
+        optimal_delta_t = local_result.x
+        #max_fraction = -local_result.fun
+    
+
+        if path_to_save_plot is not None:
+
+            fig, ax = plt.subplots()
+        
+            t_values = np.linspace(search_space[0], search_space[1], 100)  # Avoid t=0 to prevent division by zero
+            coverage_values = [-neighbor_transition_fraction(t) for t in t_values]
+
+            ax.plot(t_values, coverage_values)
+            ax.axvline(x=optimal_delta_t, color='r', linestyle='--', label=f'Optimal $\\Delta t$ = {optimal_delta_t:.4f}')
+            ax.set_xlabel(f'$\\Delta t$')
+            ax.set_ylabel('Fraction of direct neighbor transitions')
+            ax.set_title(f'Direct neighbor transitions of center gradients as a function of $\\Delta t$')
+            ax.legend()
+            ax.grid(True)
+            fig.savefig(path_to_save_plot, bbox_inches='tight', dpi=300)
+            
+        return optimal_delta_t
+
+
+
     def calculate_importance_measure(self, controls, method='angular', alpha=1.0, debug=False):
         """
         Calculate a normalized importance measure for each grid cell based on the variance 
