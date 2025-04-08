@@ -170,14 +170,11 @@ class StableNode:
 
 class TwoStableNodesOneSaddlePoint:
     """
-    ODE System for two stable nodes at (-1,0) and (1,0) as well as a saddle point at (0,0)
-    Standard control at c = 0.1, two remain with two stable nodes, c >= 0 (c> 0 for attraction basin points, c= attraction basin lines)
-    For c>0, the higher c, the more vertical is the vector field towards the points of attraction
-
-
+    ODE System for two stable nodes at (-1,c) and (1,c) as well as a saddle point at (0,c)
+    Standard control at c = 0, changing c changes the position of the fixpoints
     """    
 
-    def __init__(self, c = 0.1, control_params=[]):
+    def __init__(self, c = 0, control_params=[]):
         """
         ODE System for 
         Args: c (scalars): default parameters
@@ -220,7 +217,7 @@ class TwoStableNodesOneSaddlePoint:
         
         v, w = z
         dvdt = - v * (v-1) * (v+1)
-        dwdt = - c * w
+        dwdt = - w + c
         return np.array([dvdt, dwdt])
 
 
@@ -247,7 +244,7 @@ class TwoStableNodesOneSaddlePoint:
 
         #ODEs
         dvdt = - v * (v-1) * (v+1)
-        dwdt = - c * w
+        dwdt = - w + c
 
         
         return np.append(dvdt, dwdt)
