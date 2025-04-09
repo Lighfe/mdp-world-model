@@ -933,7 +933,7 @@ def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.02):
         min_prob_to_show: Minimum probability to display (for cleaner graphs)
         
     Returns:
-        Rendered graphviz graph
+        Rendered graphviz graph and output path
     """
     transition_matrices = mdp_data['transition_matrices']
     state_values = mdp_data['state_values']
@@ -956,12 +956,18 @@ def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.02):
                  fillcolor='#f8d7e0',  # Light pink
                  style='filled')
     
-    # Track already created action nodes to avoid duplicates
-    created_actions = set()
-    
     # Add action nodes and transitions for all control values
     for control_value in control_values:
         for from_state in range(num_states):
+            # Create ONE action node per state-control pair
+            action_id = f'a{control_value}_{from_state+1}'
+            action_label = f'a{control_value}'
+            dot.node(action_id, action_label, shape='diamond', fillcolor='#d7d7f8', style='filled')
+            
+            # Connect state to its action node
+            dot.edge(f's{from_state+1}', action_id)
+            
+            # Process all possible transitions from this state-action
             transitions = transition_matrices[control_value][from_state]
             
             for to_state in range(num_states):
@@ -971,20 +977,13 @@ def visualize_mdp(mdp_data, output_path=None, min_prob_to_show=0.02):
                 if prob < min_prob_to_show:
                     continue
                 
-                # Create action node identifier
-                # We'll use control value in the action node ID to distinguish between actions
-                # with the same source and destination but different controls
-                action_id = f'a{control_value}_{from_state+1}_{to_state+1}'
-                
-                # Only create the action node if we haven't already
-                if action_id not in created_actions:
-                    action_label = f'a{control_value}'
-                    dot.node(action_id, action_label, shape='diamond', fillcolor='#d7d7f8', style='filled')
-                    created_actions.add(action_id)
-                
-                # Connect state to action and action to next state
-                dot.edge(f's{from_state+1}', action_id)
-                dot.edge(action_id, f's{to_state+1}', label=f'{prob:.3f}', color='green')
+                # Connect action to next state with probability as label
+                # Adjust line weight (penwidth) based on probability 
+                penwidth = 1.0 + 3.0 * prob  # Scale between 1 and 4 based on probability
+                dot.edge(action_id, f's{to_state+1}', 
+                         label=f'{prob:.3f}', 
+                         color='green',
+                         penwidth=str(penwidth))
     
     # Render the graph
     if output_path:
