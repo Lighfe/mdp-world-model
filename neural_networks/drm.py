@@ -226,19 +226,19 @@ class DiscreteRepresentationsModel(nn.Module):
         # Get logits
         logits = encoder_to_use(x)
         
-        # Rest of the method remains the same
-        if self.use_gumbel and training:
-            # During training with Gumbel
-            gumbel_dist = torch.distributions.RelaxedOneHotCategorical(
-                self.current_temp, logits=logits)
-            prob_x = gumbel_dist.rsample()
-        elif self.use_gumbel and hard:
-            # During inference with hard assignments
+        if hard:
+            # Always use hard argmax when requested regardless of Gumbel setting
             index = torch.argmax(logits, dim=1).unsqueeze(1)
             prob_x = torch.zeros_like(logits).scatter_(1, index, 1.0)
+        elif self.use_gumbel and training:
+            # During training with Gumbel
+            prob_x = F.gumbel_softmax(logits, tau=self.current_temp, hard=False)
         else:
-            # Regular softmax
-            prob_x = F.softmax(logits, dim=1)
+            # Regular softmax (possibly temperature-scaled)
+            if self.use_gumbel:
+                prob_x = F.softmax(logits / self.current_temp, dim=1)
+            else:
+                prob_x = F.softmax(logits, dim=1)
         
         return prob_x
     

@@ -15,6 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
     print(f"Added {PROJECT_ROOT} to Python path")
 
+from data_generation.simulations.grid import tangent_transformation
+
 class TechSubstitutionDataset(Dataset):
     def __init__(self, db_path, tech_sub_solver, value_method):
         """
@@ -111,31 +113,47 @@ class TechSubstitutionDataset(Dataset):
         
         return x, c, y, v_true
     
-    def f_v(self, y, value_method):
-        if isinstance(y, (tuple, list)):
-            y = np.array(y)
+def f_v(self, y, value_method):
+    if isinstance(y, (tuple, list)):
+        y = np.array(y)
 
-        # Now y is a NumPy array.
-        if y.ndim == 1:
-            # Expecting a single pair: (y1, y2)
-            y1, y2 = y
-        elif y.ndim == 2 and y.shape[1] == 2:
-            # Expecting an array of shape (n, 2)
-            y1 = y[:, 0]
-            y2 = y[:, 1]
-        else:
-            raise ValueError("Input must be a tuple of two values or an array of shape (n, 2)")
+    # Now y is a NumPy array.
+    if y.ndim == 1:
+        # Expecting a single pair: (y1, y2)
+        y1, y2 = y
+    elif y.ndim == 2 and y.shape[1] == 2:
+        # Expecting an array of shape (n, 2)
+        y1 = y[:, 0]
+        y2 = y[:, 1]
+    else:
+        raise ValueError("Input must be a tuple of two values or an array of shape (n, 2)")
+    
+    if value_method is None or value_method == 'market_share': # this is default
+        v_true = y2 / (y1+y2 +1e-10)
+        return torch.tensor([v_true], dtype=torch.float32)
+    elif value_method == 'identity':
+        # Get the tangent transformation function
+        x0 = 3.0  # Center parameter
+        alpha = 0.5  # Alpha parameter
         
-        if value_method is None or value_method == 'market_share': # this is default
-            v_true = y2 / (y1+y2 +1e-10)
-            return torch.tensor([v_true], dtype=torch.float32)
-        elif value_method =='identity':
-            return torch.tensor(y, dtype=torch.float32)
-        elif value_method == '90% market share':
-            v_true = (y2 / (y1+y2 +1e-10)) >= 0.9
-            return torch.tensor([v_true], dtype=torch.float32) # treating boolean as a float here
+        # Unpack only the forward transformation from the returned tuple
+        transform_func, _, _ = tangent_transformation(x0, alpha)
+        
+        # Transform each dimension of y
+        if y.ndim == 1:
+            transformed_y = np.array([transform_func(y1), transform_func(y2)])
+            return torch.tensor(transformed_y, dtype=torch.float32)
         else:
-            raise NotImplementedError(f"Method '{value_method}' is not implemented.")
+            # Apply transformation to each element
+            transformed_y1 = np.array([transform_func(val) for val in y1])
+            transformed_y2 = np.array([transform_func(val) for val in y2])
+            transformed_y = np.column_stack((transformed_y1, transformed_y2))
+            return torch.tensor(transformed_y, dtype=torch.float32)  # Shape (batch_size, 2)
+    elif value_method == '90% market share':
+        v_true = (y2 / (y1+y2 +1e-10)) >= 0.9
+        return torch.tensor([v_true], dtype=torch.bool)
+    else:
+        raise NotImplementedError(f"Method '{value_method}' is not implemented.")
 
 
 def create_data_loaders(db_path, tech_sub_solver, value_method= None, batch_size=64, val_size=1000, test_size=1000, seed=42):
