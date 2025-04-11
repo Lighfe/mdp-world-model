@@ -36,7 +36,7 @@ export OMP_PROC_BIND=true
 
 # Fixed configuration parameters for all runs
 db_path="datasets/results/tech_sim.db"
-base_output_dir="neural_networks/output/grid_search"
+base_output_dir="neural_networks/output/value_functions"
 val_size=2000
 test_size=2000
 batch_size=64
