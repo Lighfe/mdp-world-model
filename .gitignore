@@ -21,6 +21,7 @@ datasets/results/*
 
 # Visualizations
 data_generation/visualization/figures/*
+data_generation/figs/*
 
 # IDE-specific files
 .vscode/
