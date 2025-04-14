@@ -208,18 +208,6 @@ class DiscreteRepresentationsModel(nn.Module):
                 tgt_param.data.mul_(self.ema_decay).add_(src_param.data, alpha=1 - self.ema_decay)
     
     def get_state_probs(self, x, training=True, hard=False, use_target=False):
-        """
-        Get the state probabilities of an observation.
-        
-        Args:
-            x: Observation tensor
-            training: Whether the model is in training mode
-            hard: Whether to use hard (one-hot) assignments
-            use_target: Whether to use the target encoder (if available)
-        
-        Returns:
-            prob_x: State probabilities
-        """
         # Choose encoder
         encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
         
@@ -227,17 +215,19 @@ class DiscreteRepresentationsModel(nn.Module):
         logits = encoder_to_use(x)
         
         if hard:
-            # Always use hard argmax when requested regardless of Gumbel setting
+            # Always use hard argmax when requested regardless of other settings
             index = torch.argmax(logits, dim=1).unsqueeze(1)
             prob_x = torch.zeros_like(logits).scatter_(1, index, 1.0)
-        elif self.use_gumbel and training:
-            # During training with Gumbel
+        elif self.use_gumbel and training and not use_target:
+            # Only main encoder during training uses Gumbel noise
             prob_x = F.gumbel_softmax(logits, tau=self.current_temp, hard=False)
         else:
-            # Regular softmax (possibly temperature-scaled)
+            # Target encoder OR validation: deterministic softmax with temperature
             if self.use_gumbel:
+                # Temperature scaled softmax (no Gumbel noise)
                 prob_x = F.softmax(logits / self.current_temp, dim=1)
             else:
+                # Regular softmax
                 prob_x = F.softmax(logits, dim=1)
         
         return prob_x
