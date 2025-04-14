@@ -11,6 +11,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import psutil
 
 # Define project root at the module level
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -603,8 +604,12 @@ def train_drm_model(db_path,
         "test_batch_entropy": float(test_batch_entropy),
         "test_individual_entropy": float(test_individual_entropy),
         "test_r2_score": float(r2_score),
-        "test_samples": test_samples
+        "test_samples": test_samples,
     }
+    # Add performance metrics to test_metrics
+    test_metrics["peak_memory_mb"] = psutil.Process().memory_info().rss / (1024 * 1024)
+    test_metrics["cpu_percent"] = psutil.Process().cpu_percent()
+    test_metrics["execution_time_sec"] = time.time() - start_time
     
     # Print test results
     print(f"Test Results:")
