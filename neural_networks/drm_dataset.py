@@ -151,7 +151,7 @@ class TechSubstitutionDataset(Dataset):
                 return torch.tensor(transformed_y, dtype=torch.float32)  # Shape (batch_size, 2)
         elif value_method == '90% market share':
             v_true = (y2 / (y1+y2 +1e-10)) >= 0.9
-            return torch.tensor([v_true], dtype=torch.bool)
+            return torch.tensor([v_true], dtype=torch.float32)
         else:
             raise NotImplementedError(f"Method '{value_method}' is not implemented.")
 
