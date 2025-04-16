@@ -130,11 +130,11 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         fig, ax = plt.subplots(figsize = (20,20))
         #TODO improve this color choice
         color = ['#ff7f00',  # orange
-                 '#1d16f0',  # blue
+                 '#0248fa', #'#0293fa', #'#02b8fa', #'#1d16f0',  # blue
                  '#4e5252',  # gray
                 '#f52f98'  # pink – good light contrast, use sparingly
                 ][count % 4] #[ '#1D58F3', '#DC267F', '#FFB000']
-        ax.streamplot(X1, X2, U, V, color=color, linewidth=4, density = 0.7, arrowsize=3, broken_streamlines=False)
+        ax.streamplot(X1, X2, U, V, color=color, linewidth=4, density = 0.7, arrowsize=4, broken_streamlines=False)
 
         # Convert the Matplotlib plot to a NumPy array
         ax.axis('off')  # Turn off the axis
@@ -145,8 +145,10 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))  # Reshape to height x width x 3 (RGB)
         # Make white and almost white pixels transparent
         threshold = 190  # Define a threshold for "almost white"
-        image = np.where(np.all(image >= threshold, axis=-1, keepdims=True), [0, 0, 0, 0], np.concatenate([image, np.full((*image.shape[:2], 1), 255)], axis=-1))
+        alpha = np.where(np.all(image >= threshold, axis=-1), 0, 255).astype(np.uint8)
+        image = np.dstack((image, alpha))
         plt.close(fig)  # Close the figure to prevent it from displaying immediately
+        image[..., 3] = (image[..., 3].astype(float) * 0.7).astype(np.uint8)
         im = hv.RGB(image, bounds=(0, 0, 1, 1)) 
         return im
     
@@ -160,8 +162,8 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                  '#161717',  # almost black
                  '#750641'  # dark pink
                 ][count % 4] #[ '#1D58F3', '#DC267F', '#FFB000']
-        ax.contour(X1, X2, U, levels=[0], colors=[nullcline_colors], linewidths=6)
-        ax.contour(X1, X2, V, levels=[0], colors=[nullcline_colors], linewidths=6)
+        ax.contour(X1, X2, U, levels=[0], colors=[nullcline_colors], linewidths=11)
+        ax.contour(X1, X2, V, levels=[0], colors=[nullcline_colors], linewidths=11)
 
         # Convert the Matplotlib plot to a NumPy array
         ax.axis('off')  # Turn off the axis
@@ -172,9 +174,11 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))  # Reshape to height x width x 3 (RGB)
         # Make white and almost white pixels transparent
         threshold = 190  # Define a threshold for "almost white"
-        image = np.where(np.all(image >= threshold, axis=-1, keepdims=True), [0, 0, 0, 0], np.concatenate([image, np.full((*image.shape[:2], 1), 255)], axis=-1))
+        alpha = np.where(np.all(image >= threshold, axis=-1), 0, 255).astype(np.uint8)
+        image = np.dstack((image, alpha))
         plt.close(fig)  # Close the figure to prevent it from displaying immediately
-        im = hv.RGB(image, bounds=(0, 0, 1, 1)) 
+        image[..., 3] = (image[..., 3].astype(float) * 0.5).astype(np.uint8)
+        im = hv.RGB(image, bounds=(0, 0, 1, 1))
         return im
 
     if show_interactive == True:
@@ -226,7 +230,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         elif selected_color == 'Entropy':
             entropy_values = {patch: patchwork.entropy_dict[patch]['avg'] for patch in unique_patches}
             cmap_dict = {str(patch): mplcol.to_hex(entropy_cmap(entropy_norm(entropy))) for patch, entropy in entropy_values.items()}
-        elif selected_color == 'All white':
+        elif selected_color == 'White':
             cmap_dict = {str(patch): '#FFFFFF' for patch in unique_patches}
         
         heatmap =  hv.HeatMap(cell_infos, kdims=['x', 'y'], vdims=['patch', 'entropy']).opts(alpha = 0.5,
@@ -236,6 +240,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             width=600, height=600, tools=['hover'],
             xticks=x_axis_tick_labels,  # Custom x-axis tick labels
             yticks=y_axis_tick_labels   # Custom y-axis tick labels
+
             )
         # Identify patch borders
         patch_borders = []
@@ -257,11 +262,12 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 patch_borders.append((cx - dx, cy + dx, cx + dx, cy + dx))  # Top border
 
         # Create border segments
-        if selected_color == 'All white':
-            linewidth = 3 / (1 + 0.2 * grid_resolution[0]**1.1)
+        if selected_color == 'White':
+            linewidth = 3 / (1 + 0.3 * grid_resolution[0]**1.1)
+            borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
         else:
             linewidth = 3 / (1 + 0.1 * grid_resolution[0]**1.1) #smaller lines for higher resolutions
-        borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
+            borders = hv.Segments(patch_borders).opts(color='white', line_width=linewidth) 
 
         #Overlay 
         layers = [heatmap *borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
@@ -283,7 +289,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         slider = pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
         vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[])
         vector_selector_nullclines = pn.widgets.MultiChoice(name="Select Controls for Nullclines", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
-        color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches', 'All white'])
+        color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches', 'White'])
         
         # Bind the function to the slider
         interactive_plot = pn.bind(get_current_patchwork, 

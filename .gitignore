@@ -19,6 +19,8 @@ datasets/results/*
 !datasets/raw/.gitkeep
 !datasets/processed/.gitkeep
 data_generation/tests/plots/*
+data_generation/simulations/configs/*
+data_generation/simulations/simulation.log
 clustering/results/*
 
 
