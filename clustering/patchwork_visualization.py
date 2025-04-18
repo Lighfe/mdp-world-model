@@ -199,7 +199,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
     #Entropy colormap
     entropy_cmap = plt.cm.get_cmap('viridis')
-    max_entropy = max(patchwork.entropy_dict[patch]['avg'] for patch in patchwork.entropy_dict)
+    max_entropy = max(entropy for lst in patchwork.patch_to_history_of_avg_entropy.values() for _, entropy in lst)
     entropy_norm = mplcol.Normalize(vmin=0, vmax=max_entropy)
 
     def create_colorbar(colormap, norm, label="Entropy"):
@@ -217,18 +217,19 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     def get_current_patchwork(step, selected_controls, selected_nullcline_controls, selected_color):
         
         cells_to_current_patches = patchwork.get_cells_to_current_patches(step)
+        patch_to_current_avg_entropy = patchwork.get_patches_to_current_avg_entropy(step)
 
         # Normalize coordinates (scale x and y from [0, grid_size-1] to [0,1]) #maybe this should be changed if we don't map to (0,1)
         normalize = lambda v: ((v / grid_size) + 0.5*cell_size)
 
-        cell_infos = [(normalize(x), normalize(y), str(patch), patchwork.entropy_dict[patch]['avg']) for (x,y), patch in cells_to_current_patches.items()]
+        cell_infos = [(normalize(x), normalize(y), str(patch), patch_to_current_avg_entropy[patch]) for (x,y), patch in cells_to_current_patches.items()]
 
         # Assign colors to patches
         unique_patches = set(int(patch) for (_, _, patch, _) in cell_infos)
         if selected_color == 'Patches':
             cmap_dict = {str(patch): patch_color_mapping[patch] for patch in unique_patches}
         elif selected_color == 'Entropy':
-            entropy_values = {patch: patchwork.entropy_dict[patch]['avg'] for patch in unique_patches}
+            entropy_values = {patch: patch_to_current_avg_entropy[patch] for patch in unique_patches}
             cmap_dict = {str(patch): mplcol.to_hex(entropy_cmap(entropy_norm(entropy))) for patch, entropy in entropy_values.items()}
         elif selected_color == 'White':
             cmap_dict = {str(patch): '#FFFFFF' for patch in unique_patches}
@@ -317,7 +318,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
 
 
-def create_plot_and_save_patchwork(db_name, table_name, run_ids, path_to_save = None, gif_steps = 10, title_interactive = "", show_interactive = False):
+def create_plot_and_save_patchwork(db_name, table_name, run_ids,  path_to_save = None, gif_steps = 10, title_interactive = "", show_interactive = False, entropy_strategy_strg= 'ShannonEntropyOnlyMerged',):
     """
     Create a patchwork, plot it together with its first entropy and save the results to the corresponding path.
     Parameters:
@@ -339,7 +340,7 @@ def create_plot_and_save_patchwork(db_name, table_name, run_ids, path_to_save = 
             os.makedirs(path_id)
         path_to_save = path_id + f"/firstPatchwork_{str(gif_steps)}stepsPerTime"
 
-    patchwork, controls, solver = create_patchwork(db_name, table_name, run_ids)
+    patchwork, controls, solver = create_patchwork(db_name, table_name, run_ids,  entropy_strategy_strg)
     
     fig, ax = plt.subplots(figsize=(7, 6))
     plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)

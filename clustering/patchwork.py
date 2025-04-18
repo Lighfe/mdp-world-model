@@ -3,22 +3,26 @@ import sys
 import bisect
 from scipy.stats import entropy
 import numpy as np
+import time
 parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 sys.path.append(parent_dir)
 
 from datastructures import SortedValueDict
 from datasets.data_reconstruction import get_and_reconstruct_data, reconstruct_solver_and_grid
+from patchwork_entropy_strategies import *
 
 class Patchwork:
     #TODO: Add docstring for the class
 
-    def __init__(self, grid, df):
+    def __init__(self, grid, df, entropy_strategy: EntropyStrategy = ShannonEntropyOnlyMerged()):
         """
         Initializes the Patchwork object.
         Args:
             grid (Grid): The grid object on which the simulation data is based.
             df (DataFrame): The DataFrame containing the simulation data, already prepared with columns 'x', 'y', 'c'.
         """
+
+        self.entropy_strategy = entropy_strategy
 
         #TODO save patches also somehow geometrically?
         self.grid = grid                                        
@@ -29,7 +33,7 @@ class Patchwork:
         #Clustering history                                           
         self.children = dict()                                                                  #Dict
         self.parents = {patch: patch for patch in self.current_patches}                         #Dict    
-        self.cell_to_history_of_patches = {cell: [self.cell_to_patchindex[cell]] for cell in self.grid.indices} #Dict                           
+        self.cell_to_history_of_patches = {cell: [self.cell_to_patchindex[cell]] for cell in self.grid.indices} #Dict                      
         
         self.action_to_control_dict, self.action_df = self._switch_from_control_to_action(df)        #Dict, DataFrame
         self.trans_probs = self._init_tp(self.action_df)                                             #Dict
@@ -37,6 +41,7 @@ class Patchwork:
 
         self.predecessors = self._init_predecessors()                                           #Dict
         self.entropy_dict = self._init_entropy_dict()                                           #Dict
+        self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
         self.adjacent_cells_losses = self._init_adjacent_cells_losses()                         #SortedValueDict
     
     def _init_patch_nb(self):
@@ -102,15 +107,7 @@ class Patchwork:
         The dictionary is nested: entropy_dict[s][a] = entropy of the probability distribution of action a in patch s.
         Moreover, there is an additional key 'avg' for the average entropy of all actions in patch s.
         """
-        entropy_dict = dict()
-     
-        for s in self.current_patches:
-            for a in self.trans_probs[s]:
-                # Calculate entropy for each action and save it in entropy_dict[s][a]
-                entropy_dict.setdefault(s, {})[a] = entropy(list(self.trans_probs[s][a].values()), base=2)
-            entropy_dict[s]['avg'] = sum(entropy_dict[s].values()) / len(entropy_dict[s].values())
-        
-        return entropy_dict
+        return self.entropy_strategy._init_entropy_dict(patchwork=self)
 
     def _init_adjacent_cells_losses(self):
         """
@@ -188,27 +185,12 @@ class Patchwork:
             merged_entropy_dict (dict): A dictionary with the entropy of the merged patch for each action, as well as for ['avg'] the average entropy over all actions.
             merged_probs (dict): A dictionary with the transition probabilities of the merged patch for each action.
         """
-        #TODO test if correct!!!! maybe make more efficient
-
-        merged_probs = dict((action, dict()) for action in self.action_to_control_dict.keys())
-        merged_entropy_dict = dict()
-        total_patch_relevance = self.patch_relevances[patch1] + self.patch_relevances[patch2]
-
-        for a in self.action_to_control_dict.keys():
-            # For each action, sum probabilities from both patches, weighting them bei patch_relevances
-            for s in [patch1,patch2]:
-                for s_prime, prob in self.trans_probs[s][a].items():
-                    if s_prime != patch1 and s_prime != patch2:
-                        merged_probs[a][s_prime] = merged_probs[a].get(s_prime,0) + (self.patch_relevances[s] / total_patch_relevance) *prob
-                    else:
-                        merged_probs[a][newpatch] = merged_probs[a].get(newpatch,0) + (self.patch_relevances[s] / total_patch_relevance) *prob
-            # For each action, calculate the entropy 
-            merged_entropy_dict[a] = entropy(list(merged_probs[a].values()), base = 2)
         
-        # Calculate the average of the action entropies
-        merged_entropy_dict['avg'] = sum(merged_entropy_dict.values()) / len(merged_entropy_dict)
-
-        return merged_entropy_dict, merged_probs
+        return self.entropy_strategy.compute_merged_entropy(self, patch1, patch2, newpatch)
+    
+    def calculate_loss_of_merging(self, patch1, patch2):
+        # Here: use the class of Loss Function
+        pass
 
     def calculate_entropy_loss(self, patch1, patch2):
         """
@@ -220,15 +202,8 @@ class Patchwork:
         Returns:
                 entropy_loss (float): The relevance-weighted entropy loss of merging patch1 and patch2.
         """
-        relevance1, avg_entropy1 = self.patch_relevances[patch1], self.entropy_dict[patch1]['avg']
-        relevance2, avg_entropy2 = self.patch_relevances[patch2], self.entropy_dict[patch2]['avg']
 
-        merged_entropy, merged_probs = self.compute_merged_entropy(patch1,patch2)
-        
-
-        entropy_loss = (relevance1 + relevance2) * merged_entropy['avg'] - (relevance1 * avg_entropy1 + relevance2 * avg_entropy2)
-
-        return entropy_loss
+        return self.entropy_strategy.calculate_entropy_loss(self, patch1, patch2)
 
     def merge_adjacent_patches(self, patch1, patch2, newpatch):
         """
@@ -241,9 +216,9 @@ class Patchwork:
         self._update_entropy_dict(patch1, patch2, newpatch, merged_entropy_dict)
         self._update_patch_relevances(patch1, patch2, newpatch)
 
-        self._update_predecessors(patch1, patch2, newpatch)
+        old_predecessors = self._update_predecessors(patch1, patch2, newpatch)
         self._update_patch_neighbors(patch1, patch2, newpatch)
-        self._update_adjacent_cells_losses(patch1, patch2, newpatch)
+        self._update_adjacent_cells_losses(patch1, patch2, newpatch, old_predecessors)
 
         self._update_children_and_parents(patch1, patch2, newpatch)
         self._update_cell_to_patch_history(patch1, patch2, newpatch)
@@ -278,7 +253,10 @@ class Patchwork:
         If n_steps is None, the algorithm runs until no more patches can be merged.
         """
         step = 0
+        start_time = time.time()
         while n_steps is None or step < n_steps:
+            if step % 100 == 0:
+                print(f"Step {step}, number of patches: {len(self.current_patches)}, time: {time.time() - start_time:.2f}")
             if not self.step():
                 print(f"Done, after {step} steps")
                 break
@@ -319,11 +297,8 @@ class Patchwork:
         Updates the entropy dictionary for merging patch1 and patch2 into newpatch.
         The entropies of patch1 and patch2 are removed from the dictionary.
         """
-        self.entropy_dict[newpatch] = merged_entropy_dict
-        self.entropy_dict[patch1]
-        self.entropy_dict[patch2]
 
-        return
+        return self.entropy_strategy._update_entropy_dict(self, patch1, patch2, newpatch, merged_entropy_dict)
     
     def _update_patch_relevances(self, patch1, patch2, newpatch):
         """
@@ -344,6 +319,9 @@ class Patchwork:
         Additionally, the predecessors-set of all patches where patch1 or patch2 are predecessors is updated by replacing patch1 or/and patch2 with newpatch.
         The predecessors of patch1 and patch2 are removed from the dictionary.
         """
+        
+        old_predecessors = copy.deepcopy(self.predecessors)
+        
         # Update all predecessors of newpatch (prior predecessors of patch1 and patch2)
         self.predecessors[newpatch] = dict()
         for patch in [patch1, patch2]:
@@ -358,10 +336,10 @@ class Patchwork:
                 self.predecessors[s_prime][a].discard(patch2) #removes or does nothing
            
         # Remove patch1 and patch2 entries rom the predecessors dictionary
-        del self.predecessors[patch1]
-        del self.predecessors[patch2]
-
-        return
+        predecessors1 =  self.predecessors.pop(patch1)
+        predecessors2 =  self.predecessors.pop(patch2)
+        
+        return old_predecessors
     
     def _update_children_and_parents(self, patch1, patch2, newpatch):
         """
@@ -387,6 +365,7 @@ class Patchwork:
         for cell in self.grid.indices:
             if self.cell_to_history_of_patches[cell][-1] in {patch1, patch2}:
                 self.cell_to_history_of_patches[cell].append(newpatch)
+
            
     def _update_patch_neighbors(self, patch1, patch2, newpatch):
         """
@@ -410,7 +389,7 @@ class Patchwork:
 
         return
     
-    def _update_adjacent_cells_losses(self, patch1, patch2, newpatch):
+    def _update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors):
 
         """
         Updates the adjacent cells losses dictionary for merging patch1 and patch2 into newpatch.
@@ -418,15 +397,8 @@ class Patchwork:
         And the entries which contain patch1 and patch2 are removed from the dictionary.
             (Here the entry for (patch1,patch2) is already removed in the merge_adjacent_patches function.)
         """
-        
-        for neighbor in self.patch_neighbors[newpatch]:
-            # Create newpatch entries
-            self.adjacent_cells_losses.insert((neighbor, newpatch) , self.calculate_entropy_loss(neighbor, newpatch)) #always neighbor < newpatch 
-            # Remove all patch1 and patch2 entries
-            for patch in [patch1, patch2]:
-                key = tuple(sorted((patch, neighbor)))
-                self.adjacent_cells_losses.remove_by_key(key)
-        return
+
+        return self.entropy_strategy._update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors)
     
 
     #****************************************************************************************************************
@@ -451,12 +423,24 @@ class Patchwork:
 
         return cells_to_current_patches
     
+    def get_patches_to_current_avg_entropy(self, step):
+        """
+        Returns a dictionary mapping each patch to the current average entropy.
+        """
+        patches_to_current_avg_entropy = dict()
+
+        for patch, avg_entropy_history in self.patch_to_history_of_avg_entropy.items():
+            index = bisect.bisect_right([change[0] for change in avg_entropy_history], step) - 1
+            patches_to_current_avg_entropy[patch] = avg_entropy_history[index][1]
+        return patches_to_current_avg_entropy
 
 
 
 
-def create_patchwork(db_name, table_name, run_ids):    
+def create_patchwork(db_name, table_name, run_ids, entropy_strategy_strg= 'ShannonEntropyOnlyMerged'):    
     
+    entropy_strategy = globals()[entropy_strategy_strg]()
+
     #Get the data
     df, configs_dict = get_and_reconstruct_data(db_name, table_name, run_ids)
 
@@ -468,14 +452,14 @@ def create_patchwork(db_name, table_name, run_ids):
     controls = df['c'].unique() #np.array([np.array(control) for control in df['c'].unique()])
 
     #Handle finite spaces by throwing out every data which lands outside
-    # TODO: make this better, until now we assume that all upper borders are the same
+    # TODO: make this better, until now we assume that all upper borders are the same and that a space is finite if grid.bounds[0][-1] != np.inf
 
     if grid.bounds[0][-1] != np.inf:
         rows_to_delete_percentage = df[~df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])].shape[0] / df.shape[0] * 100
         print(f"Percentage of data rows deleted: {rows_to_delete_percentage:.2f}%")
         df = df[df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])] #as we run out of the defined space
-        patchwork = Patchwork(grid,df)
+        patchwork = Patchwork(grid,df, entropy_strategy)
     else:
-        patchwork = Patchwork(grid, df) 
+        patchwork = Patchwork(grid, df, entropy_strategy)
 
     return patchwork, controls, solver
