@@ -167,7 +167,7 @@ class ShannonEntropyOnlyMerged(EntropyStrategy):
         
         for neighbor in patchwork.patch_neighbors[newpatch]:
             # Create newpatch entries
-            patchwork.adjacent_cells_losses.insert((neighbor, newpatch) , self.calculate_entropy_loss(patchwork, neighbor, newpatch)) #always neighbor < newpatch 
+            patchwork.adjacent_cells_losses.insert((neighbor, newpatch) , patchwork.calculate_loss_of_merging(neighbor, newpatch)) #always neighbor < newpatch 
             # Remove all patch1 and patch2 entries
             for patch in [patch1, patch2]:
                 key = tuple(sorted((patch, neighbor)))
@@ -255,7 +255,7 @@ class ShannonEntropyAll(EntropyStrategy):
         patchwork.patch_to_history_of_avg_entropy[newpatch] = [(step, merged_entropy_dict['avg'])]
 
         # Update the overall entropy
-        self.overall_entropy += patchwork.patch_relevances[newpatch] * merged_entropy_dict['avg']
+        self.overall_entropy += (patchwork.patch_relevances[patch1] + patchwork.patch_relevances[patch2]) * merged_entropy_dict['avg']
         self.overall_entropy -= patchwork.patch_relevances[patch1] * patchwork.entropy_dict[patch1]['avg']
         self.overall_entropy -= patchwork.patch_relevances[patch2] * patchwork.entropy_dict[patch2]['avg']
         
@@ -278,6 +278,7 @@ class ShannonEntropyAll(EntropyStrategy):
         """
         # Update all adjacent cell losses for predecessors and their neighbors
         # The entropy only changes if both former patches are reached by the predecessor and its neighbor 
+
         # Get the predecessors of patch1 and patch2
         predecessors1 = set().union(*[preds for preds in old_predecessors[patch1].values()])
         predecessors2 = set().union(*[preds for preds in old_predecessors[patch2].values()])
@@ -318,16 +319,17 @@ class ShannonEntropyAll(EntropyStrategy):
             # TODO check how many are actually changing something
             old_loss = patchwork.adjacent_cells_losses()[couple]
             patchwork.adjacent_cells_losses.remove_by_key(couple)
-            new_loss = self.calculate_entropy_loss(patchwork, couple[0], couple[1])
+            new_loss = patchwork.calculate_loss_of_merging(couple[0], couple[1])
             patchwork.adjacent_cells_losses.insert(couple, new_loss)
             if new_loss != old_loss:
                 #print(f"changed loss {new_loss-old_loss} for {couple}")
                 pass
 
-        # Update all adjacent cell losses for direct neighbors of newpatch
+        # Update separately all adjacent cell losses for direct neighbors of newpatch
+        # Here we also need to remove the entries for merging patch1 or patch2 with the neighbor
         for neighbor in patchwork.patch_neighbors[newpatch]:
             # Create newpatch entries
-            patchwork.adjacent_cells_losses.insert((neighbor, newpatch) , self.calculate_entropy_loss(patchwork, neighbor, newpatch)) #always neighbor < newpatch 
+            patchwork.adjacent_cells_losses.insert((neighbor, newpatch) , patchwork.calculate_loss_of_merging(neighbor, newpatch)) #always neighbor < newpatch 
             # Remove all patch1 and patch2 entries
             for patch in [patch1, patch2]:
                 key = tuple(sorted((patch, neighbor)))

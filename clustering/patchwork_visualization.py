@@ -318,7 +318,15 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
 
 
-def create_plot_and_save_patchwork(db_name, table_name, run_ids,  path_to_save = None, gif_steps = 10, title_interactive = "", show_interactive = False, entropy_strategy_strg= 'ShannonEntropyOnlyMerged',):
+def create_plot_and_save_patchwork(db_name, 
+                                   table_name,
+                                   run_ids,  
+                                   path_to_save = None, 
+                                   gif_steps = 10, 
+                                   title_interactive = "", 
+                                   show_interactive = False, 
+                                   entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
+                                   loss_function_strg = 'TransitionEntropyLoss'):
     """
     Create a patchwork, plot it together with its first entropy and save the results to the corresponding path.
     Parameters:
@@ -340,7 +348,7 @@ def create_plot_and_save_patchwork(db_name, table_name, run_ids,  path_to_save =
             os.makedirs(path_id)
         path_to_save = path_id + f"/firstPatchwork_{str(gif_steps)}stepsPerTime"
 
-    patchwork, controls, solver = create_patchwork(db_name, table_name, run_ids,  entropy_strategy_strg)
+    patchwork, controls, solver = create_patchwork(db_name, table_name, run_ids,  entropy_strategy_strg, loss_function_strg)
     
     fig, ax = plt.subplots(figsize=(7, 6))
     plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)

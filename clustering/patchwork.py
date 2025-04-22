@@ -10,11 +10,14 @@ sys.path.append(parent_dir)
 from datastructures import SortedValueDict
 from datasets.data_reconstruction import get_and_reconstruct_data, reconstruct_solver_and_grid
 from patchwork_entropy_strategies import *
+from patchwork_loss_functions import *
 
 class Patchwork:
     #TODO: Add docstring for the class
 
-    def __init__(self, grid, df, entropy_strategy: EntropyStrategy = ShannonEntropyOnlyMerged()):
+    def __init__(self, grid, df, 
+                 entropy_strategy: EntropyStrategy = ShannonEntropyOnlyMerged(),
+                 loss_function: LossFunction = TransitionEntropyLoss()):
         """
         Initializes the Patchwork object.
         Args:
@@ -23,6 +26,7 @@ class Patchwork:
         """
 
         self.entropy_strategy = entropy_strategy
+        self.loss_function = loss_function
 
         #TODO save patches also somehow geometrically?
         self.grid = grid                                        
@@ -121,7 +125,7 @@ class Patchwork:
         for cell, neighbors in self.patch_neighbors.items():
             for neighbor in neighbors:
                 if neighbor > cell: #only calculate once for each pair
-                    adjacent_cells_losses.insert((cell, neighbor),self.calculate_entropy_loss(cell, neighbor))
+                    adjacent_cells_losses.insert((cell, neighbor),self.calculate_loss_of_merging(cell, neighbor))
         return  adjacent_cells_losses 
     
     #****************************************************************************************************************
@@ -189,8 +193,17 @@ class Patchwork:
         return self.entropy_strategy.compute_merged_entropy(self, patch1, patch2, newpatch)
     
     def calculate_loss_of_merging(self, patch1, patch2):
-        # Here: use the class of Loss Function
-        pass
+        """
+        Calculate the loss incurred by merging two patches.
+        This method computes the loss associated with merging two given patches using the specified loss function.
+        Args:
+            patch1: The first patch to be merged.
+            patch2: The second patch to be merged.
+        Returns:
+            The calculated loss value as a result of merging the two patches.
+        """
+        
+        return self.loss_function.calculate_loss_of_merging(self, patch1, patch2)
 
     def calculate_entropy_loss(self, patch1, patch2):
         """
@@ -365,8 +378,7 @@ class Patchwork:
         for cell in self.grid.indices:
             if self.cell_to_history_of_patches[cell][-1] in {patch1, patch2}:
                 self.cell_to_history_of_patches[cell].append(newpatch)
-
-           
+    
     def _update_patch_neighbors(self, patch1, patch2, newpatch):
         """
         Updates the patch neighbors dictionary for merging patch1 and patch2 into newpatch.
@@ -387,6 +399,10 @@ class Patchwork:
         self.patch_neighbors[newpatch].remove(patch1)
         self.patch_neighbors[newpatch].remove(patch2)
 
+        # Remove patch1 and patch2 entries from the neighbors dictionary
+        del self.patch_neighbors[patch1]
+        del self.patch_neighbors[patch2]
+
         return
     
     def _update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors):
@@ -400,6 +416,51 @@ class Patchwork:
 
         return self.entropy_strategy._update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors)
     
+    #****************************************************************************************************************
+    # Test Functions  ****************************************************************************************
+    #****************************************************************************************************************
+
+    def test_adjacent_cells_losses(self, tol = 1e-10):
+        """ 
+        Test the calculation of the adjacent cell losses.
+        """
+        test_adjacent_cells_losses = SortedValueDict()
+        for cell, neighbors in self.patch_neighbors.items():
+            for neighbor in neighbors:
+                if neighbor > cell: #only calculate once for each pair
+                    test_adjacent_cells_losses.insert((cell, neighbor),self.calculate_loss_of_merging(cell, neighbor))
+        
+        # Compare the two dictionaries
+        # Check if the two sorted lists have the same entries
+        if set(self.adjacent_cells_losses().keys()) != set(test_adjacent_cells_losses().keys()):
+            print("Error: The two dictionaries do not have the same keys.")
+            diff_keys = set(self.adjacent_cells_losses.sorted_list).symmetric_difference(set(test_adjacent_cells_losses.sorted_list))
+            print(f"Difference in keys: {diff_keys}")
+            return False
+        
+        # Check if the two lists are in the same order
+        if [entry[0] for entry in self.adjacent_cells_losses.sorted_list] != [entry[0] for entry in test_adjacent_cells_losses.sorted_list]:           
+            diff_order = [(self.adjacent_cells_losses.sorted_list[i], test_adjacent_cells_losses.sorted_list[i]) 
+                          for i in range(len(self.adjacent_cells_losses.sorted_list)) 
+                          if self.adjacent_cells_losses.sorted_list[i][0] != test_adjacent_cells_losses.sorted_list[i][0]]
+            # Maybe the order is different, but the values are the same?
+            for pair in diff_order:
+                if abs(pair[0][1] - pair[1][1]) > tol:
+                    print(f"Error: The two sorted lists do not have the same order.")
+                    print(f"Difference in order: {pair[0]} vs {pair[1]}")
+                    print(f"Difference also in {diff_order}")
+                    return False
+
+        # Check if the two lists have the same values    
+        for i in range(len(self.adjacent_cells_losses.sorted_list)):
+            if abs(self.adjacent_cells_losses.sorted_list[i][1] - test_adjacent_cells_losses.sorted_list[i][1]) > tol:
+                print("Error: The second tuple entries differ beyond the allowed error range.")
+                print(f"Difference in values: {self.adjacent_cells_losses.sorted_list[i]} vs {test_adjacent_cells_losses.sorted_list[i]}")
+                return False
+            
+        #print("Test passed: The list of the adjacent cell losses is in the correct order.")
+        return  True
+
 
     #****************************************************************************************************************
     #Output Functions  ****************************************************************************************
@@ -437,9 +498,14 @@ class Patchwork:
 
 
 
-def create_patchwork(db_name, table_name, run_ids, entropy_strategy_strg= 'ShannonEntropyOnlyMerged'):    
+def create_patchwork(db_name, 
+                     table_name, 
+                     run_ids, 
+                     entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
+                     loss_function_strg='TransitionEntropyLoss'):    
     
     entropy_strategy = globals()[entropy_strategy_strg]()
+    loss_function = globals()[loss_function_strg]()
 
     #Get the data
     df, configs_dict = get_and_reconstruct_data(db_name, table_name, run_ids)
@@ -458,8 +524,8 @@ def create_patchwork(db_name, table_name, run_ids, entropy_strategy_strg= 'Shann
         rows_to_delete_percentage = df[~df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])].shape[0] / df.shape[0] * 100
         print(f"Percentage of data rows deleted: {rows_to_delete_percentage:.2f}%")
         df = df[df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])] #as we run out of the defined space
-        patchwork = Patchwork(grid,df, entropy_strategy)
+        patchwork = Patchwork(grid,df, entropy_strategy, loss_function)
     else:
-        patchwork = Patchwork(grid, df, entropy_strategy)
+        patchwork = Patchwork(grid, df, entropy_strategy, loss_function)
 
     return patchwork, controls, solver
