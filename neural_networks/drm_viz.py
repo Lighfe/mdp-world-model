@@ -107,7 +107,7 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
         print(f"Saved loss curves to {save_path}")
 
 def visualize_state_space(model, output_path=None, transformations=None, device='cpu',
-                          num_points=1000, num_states=None):
+                          num_points=1000, num_states=None, soft=False):
     """
     Visualize the state probabilities in z-space (transformed space) with x-space coordinate labels.
     
@@ -150,7 +150,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     model.to(device)
     model.eval()
     with torch.no_grad():
-        state_probs = model.get_state_probs(x_test, training=False)
+        state_probs = model.get_state_probs(x_test, training=False, soft=soft)
     
     # Infer number of states if not provided
     if num_states is None:
@@ -172,7 +172,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     # Format functions for ticks (z to x transformation)
     def format_x1_ticks(z, pos):
         x = inverse_transforms[0](z)
-        if np.isinf(x) or x > 1000:
+        if np.isinf(x) or x > 10000:
             return "∞"
         elif x < 0.1:
             return f"{x:.2e}"
@@ -181,7 +181,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     
     def format_x2_ticks(z, pos):
         x = inverse_transforms[1](z)
-        if np.isinf(x) or x > 1000:
+        if np.isinf(x) or x > 10000:
             return "∞"
         elif x < 0.1:
             return f"{x:.2e}"
@@ -196,7 +196,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         
         probs = state_probs[:, state].cpu().detach().numpy().reshape(z1_grid.shape)
         im = ax.pcolormesh(z1_grid, z2_grid, probs, vmin=0, vmax=1, cmap='viridis')
-        ax.set_title(f'State {state+1} Probability')
+        ax.set_title(f'State {state+1} Assignment Strength')
         
         # Set ticks
         ax.set_xticks(z1_ticks)
@@ -218,7 +218,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
         cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label('Probability')
+        cbar.set_label('State Assignment Strength')
     
     # Hide unused subplots
     for i in range(num_states, rows * cols_per_row):
@@ -393,6 +393,44 @@ def analyze_state_transitions(model,
         results[control_value] = transition_matrix
     
     return results
+
+def analyze_discrete_state_transitions(model, control_values=[0.5, 1.0], device='cpu'):
+    """
+    Analyze transitions between discrete states directly using one-hot encodings.
+    
+    Args:
+        model: Trained DRM model
+        control_values: List of control values to analyze
+        device: Device to run computation on
+        
+    Returns:
+        Dictionary containing transition matrices for each control value
+    """
+    # Move model to device and set to evaluation mode
+    model = model.to(device)
+    model.eval()
+    
+    num_states = model.num_states
+    
+    # Create one-hot encodings for each state
+    one_hot_states = torch.eye(num_states, device=device)
+    
+    # Initialize results
+    transition_matrices = {}
+    
+    # For each control value, compute transition probabilities
+    for control_value in control_values:
+        # Create control tensor (same control for all states)
+        control_batch = torch.full((num_states, 1), control_value, dtype=torch.float32, device=device)
+        
+        # Get next state predictions for each discrete state
+        with torch.no_grad():
+            next_state_probs = model.predict_next_state(one_hot_states, control_batch)
+            
+        # Store the transition matrix
+        transition_matrices[control_value] = next_state_probs.cpu().numpy()
+    
+    return transition_matrices
 
 def visualize_transition_matrices(transition_matrices, control_values, output_path=None):
 

@@ -207,7 +207,7 @@ class DiscreteRepresentationsModel(nn.Module):
             for src_param, tgt_param in zip(self.encoder.parameters(), self.target_encoder.parameters()):
                 tgt_param.data.mul_(self.ema_decay).add_(src_param.data, alpha=1 - self.ema_decay)
     
-    def get_state_probs(self, x, training=True, hard=False, use_target=False):
+    def get_state_probs(self, x, training=True, hard=False, use_target=False, soft=False):
         # Choose encoder
         encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
         
@@ -218,6 +218,9 @@ class DiscreteRepresentationsModel(nn.Module):
             # Always use hard argmax when requested regardless of other settings
             index = torch.argmax(logits, dim=1).unsqueeze(1)
             prob_x = torch.zeros_like(logits).scatter_(1, index, 1.0)
+        elif soft:
+            # To visualize with normal softmax
+            prob_x = F.softmax(logits, dim=1)
         elif self.use_gumbel and training and not use_target:
             # Only main encoder during training uses Gumbel noise
             prob_x = F.gumbel_softmax(logits, tau=self.current_temp, hard=False)

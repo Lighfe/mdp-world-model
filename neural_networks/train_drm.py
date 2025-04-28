@@ -27,7 +27,7 @@ from neural_networks.drm import DiscreteRepresentationsModel
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.simulations.grid import tangent_transformation
 from neural_networks.drm_viz import (
-    visualize_state_space, analyze_state_transitions, 
+    visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
     plot_training_curves, plot_regulization_metrics,
     analyze_mdp_from_model, visualize_mdp
@@ -663,8 +663,8 @@ def train_drm_model(db_path,
 
 
     # Visualize Modl Architecture
-    arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
-    visualize_model_architecture(model, arch_vis_path)
+    #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
+    #visualize_model_architecture(model, arch_vis_path)
 
     # Visualize the state space
     state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
@@ -679,24 +679,32 @@ def train_drm_model(db_path,
         num_states=num_states
     )
 
-    # Analyze and visualize state transitions with argmax assignment
-    control_values = [0.5, 1.0]  # Example control values, adjust as needed
-    argmax_transitions = analyze_state_transitions(
+    state_soft_vis_path = os.path.join(output_dir, f"states_soft_{run_id}.png")
+    visualize_state_space(
         model=model,
+        output_path=state_soft_vis_path,
         transformations=[
             transformation,  # For x1 dimension
             transformation   # For x2 dimension
         ],
+        device=device,
+        num_states=num_states,
+        soft=True
+    )
+
+    # Analyze and visualize state transitions with argmax assignment
+    control_values = [0.5, 1.0] 
+    transition_matrices = analyze_discrete_state_transitions(
+        model=model,
         control_values=control_values,
-        assignment_method='argmax',
         device=device
     )
-    argmax_vis_path = os.path.join(output_dir, f"argmax_transitions_{run_id}.png")
-    visualize_transition_matrices(argmax_transitions, control_values, argmax_vis_path)
-
-    mdp_vis_path = os.path.join(output_dir, f"mdp_visualization_{run_id}.png")
-    mdp_data = analyze_mdp_from_model(model, control_values=control_values, device='cuda' if torch.cuda.is_available() else 'cpu')
-    graphs, paths = visualize_mdp(mdp_data, output_path=mdp_vis_path, min_prob_to_show=0.02)
+    transitions_vis_path = os.path.join(output_dir, f"transitions_{run_id}.png")
+    visualize_transition_matrices(transition_matrices, control_values, transitions_vis_path)
+    #NOTE: visualization was too chaotic
+    #mdp_vis_path = os.path.join(output_dir, f"mdp_visualization_{run_id}.png")
+    #mdp_data = analyze_mdp_from_model(model, control_values=control_values, device='cuda' if torch.cuda.is_available() else 'cpu')
+    #graphs, paths = visualize_mdp(mdp_data, output_path=mdp_vis_path, min_prob_to_show=0.02)
 
     # Calculate training time
     training_time = time.time() - start_time
