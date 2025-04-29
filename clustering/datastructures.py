@@ -8,7 +8,7 @@ class SortedValueDict:
     """
     def __init__(self):
         self.value_dict = {}  # Key -> Value mapping
-        self.sorted_list = SortedKeyList([], key=lambda x: x[1])  # Sort by value
+        self.sorted_list = SortedKeyList([], key=lambda x: x[1][0])  # Sort by first entry of the second part of the tuple
 
     def __call__(self):
         return self.value_dict  # Calling the object returns the dictionary

@@ -46,8 +46,10 @@ class Patchwork:
         self.predecessors = self._init_predecessors()                                           #Dict
         self.entropy_dict = self._init_entropy_dict()                                           #Dict
         self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
-        self.adjacent_cells_losses = self._init_adjacent_cells_losses()                         #SortedValueDict
-    
+        self.adjacent_cells_losses = self._init_adjacent_cells_losses()  #SortedValueDict
+        
+        self.loss_function._reset(self)
+
     def _init_patch_nb(self):
         """
         Initializes a dictionary with the neighbors of each patch.
@@ -227,11 +229,12 @@ class Patchwork:
         merged_entropy_dict, merged_probs = self.compute_merged_entropy(patch1, patch2, newpatch)
         self._update_trans_probabilities(patch1, patch2, newpatch, merged_probs)
         self._update_entropy_dict(patch1, patch2, newpatch, merged_entropy_dict)
-        self._update_patch_relevances(patch1, patch2, newpatch)
+        patch1_rel, patch2_rel = self._update_patch_relevances(patch1, patch2, newpatch)
 
         old_predecessors = self._update_predecessors(patch1, patch2, newpatch)
         self._update_patch_neighbors(patch1, patch2, newpatch)
         self._update_adjacent_cells_losses(patch1, patch2, newpatch, old_predecessors)
+        self._update_loss_function_value(patch1_rel, patch2_rel)
 
         self._update_children_and_parents(patch1, patch2, newpatch)
         self._update_cell_to_patch_history(patch1, patch2, newpatch)
@@ -320,10 +323,9 @@ class Patchwork:
         The relevances of patch1 and patch2 are removed from the dictionary.
         """
         self.patch_relevances[newpatch] = self.patch_relevances[patch1] + self.patch_relevances[patch2]
-        del self.patch_relevances[patch1]
-        del self.patch_relevances[patch2]
-
-        return
+        rel1 = self.patch_relevances.pop(patch1)
+        rel2 = self.patch_relevances.pop(patch2)
+        return rel1, rel2
     
     def _update_predecessors(self, patch1, patch2, newpatch):
         """
@@ -349,8 +351,8 @@ class Patchwork:
                 self.predecessors[s_prime][a].discard(patch2) #removes or does nothing
            
         # Remove patch1 and patch2 entries rom the predecessors dictionary
-        predecessors1 =  self.predecessors.pop(patch1)
-        predecessors2 =  self.predecessors.pop(patch2)
+        self.predecessors.pop(patch1)
+        self.predecessors.pop(patch2)
         
         return old_predecessors
     
@@ -413,9 +415,31 @@ class Patchwork:
         And the entries which contain patch1 and patch2 are removed from the dictionary.
             (Here the entry for (patch1,patch2) is already removed in the merge_adjacent_patches function.)
         """
+        # Find all additional pairs of patches for which the transition entropy loss changes 
+        pairs_to_update = self.entropy_strategy._find_pairs_to_update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors)
+        for couple in pairs_to_update:
+            self.adjacent_cells_losses.remove_by_key(couple)
+            self.adjacent_cells_losses.insert(couple, self.calculate_loss_of_merging(couple[0], couple[1])) #the couple is assumed to be sorted
 
-        return self.entropy_strategy._update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors)
+        # Update separately all adjacent cell losses for direct neighbors of newpatch
+        # Here we also need to remove the entries for merging patch1 or patch2 with the neighbor
+        for neighbor in self.patch_neighbors[newpatch]:
+            # Create newpatch entries
+            self.adjacent_cells_losses.insert((neighbor, newpatch) , self.calculate_loss_of_merging(neighbor, newpatch)) #always neighbor < newpatch 
+            # Remove all patch1 and patch2 entries
+            for patch in [patch1, patch2]:
+                key = tuple(sorted((patch, neighbor)))
+                self.adjacent_cells_losses.remove_by_key(key)
+        return
     
+    def _update_loss_function_value(self,  patch1_rel, patch2_rel):
+        """
+        Updates the loss function value for the current patchwork.
+        The loss function value is the sum of the entropy losses.
+        """
+        self.loss_function.update_values(self, self.entropy_strategy.overall_entropy, patch1_rel, patch2_rel)
+        return
+
     #****************************************************************************************************************
     # Test Functions  ****************************************************************************************
     #****************************************************************************************************************
@@ -424,6 +448,7 @@ class Patchwork:
         """ 
         Test the calculation of the adjacent cell losses.
         """
+        #TODO maybe this won't work now as we've substituted the loss value by a tuple
         test_adjacent_cells_losses = SortedValueDict()
         for cell, neighbors in self.patch_neighbors.items():
             for neighbor in neighbors:

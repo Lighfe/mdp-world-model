@@ -157,6 +157,12 @@ class ShannonEntropyOnlyMerged(EntropyStrategy):
 
         return
     
+    def _find_pairs_to_update_adjacent_cells_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
+        """
+        Here no other pairs are updated than the direct neighbors of newpatch.
+        """
+        return set()
+    
     def _update_adjacent_cells_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
         """
         Updates the adjacent cells losses dictionary for merging patch1 and patch2 into newpatch.
@@ -316,7 +322,6 @@ class ShannonEntropyAll(EntropyStrategy):
 
         #print("pairs_to_update", len(pairs_to_update))
         for couple in pairs_to_update:
-            # TODO check how many are actually changing something
             old_loss = patchwork.adjacent_cells_losses()[couple]
             patchwork.adjacent_cells_losses.remove_by_key(couple)
             new_loss = patchwork.calculate_loss_of_merging(couple[0], couple[1])
@@ -337,3 +342,48 @@ class ShannonEntropyAll(EntropyStrategy):
 
 
         return
+    
+    def _find_pairs_to_update_adjacent_cells_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
+        """
+        Finds all pairs of patches for which the transition entropy loss changes by merging patch1 and patch2 into newpatch,
+        excluding the direct neighbors of newpatch.
+        """
+
+        
+        # Get the predecessors of patch1 and patch2
+        predecessors1 = set().union(*[preds for preds in old_predecessors[patch1].values()])
+        predecessors2 = set().union(*[preds for preds in old_predecessors[patch2].values()])
+        common_predecessors = predecessors1.intersection(predecessors2)
+        predecessors_only1 = predecessors1.difference(predecessors2)
+        predecessors_only2 = predecessors2.difference(predecessors1)
+        # Remove patch1 and patch2 from all three sets
+        for patch in [patch1, patch2]:
+            common_predecessors.discard(patch)
+            predecessors_only1.discard(patch)
+            predecessors_only2.discard(patch)
+
+        pairs_to_update = set()
+        for pred in common_predecessors:
+            for neighbor in patchwork.patch_neighbors[pred]:
+                if neighbor != newpatch:
+                    pairs_to_update.add(tuple(sorted((pred, neighbor))))
+        for pred in predecessors_only1:
+            for neighbor in patchwork.patch_neighbors[pred]:
+                if neighbor != newpatch and neighbor in predecessors_only2:
+                    pairs_to_update.add(tuple(sorted((pred, neighbor))))
+
+
+        #Consider couples of cells of which newpatch is a common predecessor
+        newpatch_targets = set().union([targetpatch 
+                                         for actiondict in patchwork.trans_probs[newpatch].values() 
+                                         for targetpatch in actiondict.keys()
+                                         if targetpatch != newpatch])
+        #find all neighbored pairs in newpatch_targets
+        newpatch_targets = sorted(list(newpatch_targets))  # Convert to list for indexing
+        for i, target1 in enumerate(newpatch_targets):
+            for target2 in newpatch_targets[i + 1:]:
+                if target2 in patchwork.patch_neighbors[target1]:
+                    pairs_to_update.add((target1, target2)) #is sorted because of sorting before
+
+        return pairs_to_update
+    

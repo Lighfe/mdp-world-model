@@ -11,6 +11,10 @@ sys.path.append(parent_dir)
 # Define an interface (abstract class) for entropy computation strategies
 class LossFunction(ABC):
 
+    def __init__(self):
+        self.current_total_loss_function_value = 0 
+    
+    @abstractmethod
     def _reset(self, patchwork):
         """
         Reset the loss function attributes to the actual current values.
@@ -19,15 +23,16 @@ class LossFunction(ABC):
         """
         pass
     
-    def _update(self, patchwork, patch, neighbor):
+    @abstractmethod
+    def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
         """
-        Update the loss function attributes based on the current state of the patchwork and the patches which are merged.
+        Update the current size entropy and transition entropy after merging patch1 and patch2.
         :param patchwork: The patchwork object containing the patches.
-        :param patch: The patch to be merged.
-        :param neighbor: The neighboring patch to merge with.
+        :param total_transition_entropy: The total transition entropy of the patchwork.
+        :param patch1_rel: The relevance of the first patch.
+        :param patch2_rel: The relevance of the second patch.
         """
         pass
-
 
     @abstractmethod
     def calculate_loss_of_merging(self, patchwork, patch, neighbor):
@@ -49,6 +54,33 @@ class TransitionEntropyLoss(LossFunction):
     Loss function based on transition entropy.
     """
 
+    def __init__(self):
+        self.current_transition_entropy = 0
+    
+    @property
+    def current_total_loss_function_value(self):
+        return self.current_transition_entropy
+
+    def _reset(self, patchwork):
+        """
+        Reset the current_transition_entropy and thus also the total loss_function_value
+        :param patchwork: The patchwork object containing the patches.
+        """
+        self.current_transition_entropy = patchwork.entropy_strategy.overall_entropy
+
+
+    def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
+        """
+        Update the current size entropy and transition entropy after merging patch1 and patch2.
+        :param patchwork: The patchwork object containing the patches.
+        :param total_transition_entropy: The total transition entropy of the patchwork.
+        :param patch1_rel: The relevance of the first patch.
+        :param patch2_rel: The relevance of the second patch.
+        """
+        self.current_transition_entropy = total_transition_entropy
+        return
+
+
     def calculate_loss_of_merging(self, patchwork, patch, neighbor):
         """
         Calculate the loss of merging two patches based on transition entropy.
@@ -57,8 +89,9 @@ class TransitionEntropyLoss(LossFunction):
         :param neighbor: The neighboring patch to merge with.
         :return: The loss of merging the two patches.
         """
-        
-        return patchwork.calculate_entropy_loss(patch,neighbor)
+        entropy_loss = patchwork.calculate_entropy_loss(patch,neighbor)
+        total_loss = entropy_loss
+        return (total_loss, entropy_loss)
     
 
 
@@ -81,6 +114,12 @@ class TransitionAndSizeEntropyLoss(LossFunction):
 
     def __init__(self):
         self.current_size_entropy = 0
+        self.current_transition_entropy = 0
+        self.coeff = 1
+
+    @property
+    def current_total_loss_function_value(self):
+        return self.current_transition_entropy - self.current_size_entropy 
 
     def _reset(self, patchwork):
         """
@@ -88,20 +127,20 @@ class TransitionAndSizeEntropyLoss(LossFunction):
         :param patchwork: The patchwork object containing the patches.
         """
         self.current_size_entropy = self.calculate_size_entropy(patchwork)
-        print(f"Reset current size entropy to {self.current_size_entropy}")
+        self.current_transition_entropy = patchwork.entropy_strategy.overall_entropy
 
-    def _update_adjacent_cells_losses(self, patchwork, patch, neighbor, newpatch, rel1, rel2):
+
+    def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
         """
-        Update the current size entropy based on the current state of the patchwork and the patches which are merged.
+        Update the current size entropy and transition entropy after merging patch1 and patch2.
         :param patchwork: The patchwork object containing the patches.
-        :param patch: The patch to be merged.
-        :param neighbor: The neighboring patch to merge with.
+        :param total_transition_entropy: The total transition entropy of the patchwork.
+        :param patch1_rel: The relevance of the first patch.
+        :param patch2_rel: The relevance of the second patch.
         """
-        for couple, loss  in patchwork.adjacent_cells_losses().items():
-            pass
-        
-        self.current_size_entropy = self.calculate_next_size_entropy(patchwork, patch, neighbor, rel1, rel2)
-        
+        self.current_size_entropy = self.update_size_entropy(patch1_rel, patch2_rel)
+        self.current_transition_entropy = total_transition_entropy
+        return
 
     def calculate_size_entropy(self, patchwork):
         """
@@ -110,8 +149,20 @@ class TransitionAndSizeEntropyLoss(LossFunction):
                             Assuming the patch_relevances are normalized to (patch_size / total_size)!
         :return: The size entropy.
         """
-        size_entropy = 1 - (sum(patchwork.patch_relevances[patch] * log2(patchwork.patch_relevances[patch]) for patch in patchwork.patches) / log2(len(patchwork.current_patches)))
+        size_entropy = - self.coeff * sum(patchwork.patch_relevances[patch] * log2(patchwork.patch_relevances[patch]) for patch in patchwork.current_patches) 
         return size_entropy
+    
+    
+    def calculate_size_entropy_loss(self, rel1, rel2):
+        """
+        Calculate the size entropy loss based on the sizes of the patches.
+        :param rel1: The relative size of the first patch.
+        :param rel2: The relative size of the second patch.
+        :return: The size entropy loss, the smaller the better.
+        """
+        size_entropy_loss = self.coeff*((rel1+rel2)*log2(rel1+rel2) - rel1*log2(rel1) - rel2*log2(rel2))
+        return size_entropy_loss
+    
 
     def calculate_loss_of_merging(self, patchwork, patch, neighbor):
         """
@@ -121,38 +172,20 @@ class TransitionAndSizeEntropyLoss(LossFunction):
         :param neighbor: The neighboring patch to merge with.
         :return: The loss of merging the two patches.
         """
-        transition_entropy_loss = patchwork.calculate_entropy_loss(patch,neighbor)
-        size_entropy_loss = self.calculate_size_entropy_loss(patch,neighbor)
-
-        return transition_entropy_loss + size_entropy_loss
+        transition_entropy_loss = patchwork.calculate_entropy_loss(patch,neighbor) 
+        size_entropy_loss = self.calculate_size_entropy_loss(patchwork.patch_relevances[patch], patchwork.patch_relevances[neighbor]) #the bigger the loss, the smaller the entropy
+        total_loss = transition_entropy_loss + size_entropy_loss 
+        # because we want to minimize both (for different reasons)
+        return (total_loss, transition_entropy_loss, size_entropy_loss)
     
-    def calculate_next_size_entropy(self, patch, neighbor, patchwork, rel1 = None, rel2 = None):
+
+    def update_size_entropy(self, rel1, rel2):
         """
         Calculate the next size entropy based on the sizes of the patches.
-        
-        :param patch: The patch to be merged.
-        :param neighbor: The neighboring patch to merge with.
-        :param patchwork: The patchwork object containing the patches.
+        :param rel1: The relative size of the first patch.
+        :param rel2: The relative size of the second patch.
         :return: The next size entropy.        
         """
-        if rel1 is None or rel2 is None:
-            # If the relevances are not provided, get them from the patchwork
-            rel1 = patchwork.patch_relevances[patch]
-            rel2 = patchwork.patch_relevances[neighbor]
-        n_patches = len(patchwork.current_patches)
-        old_kernel = (self.current_size_entropy - 1)*log2(n_patches)
-        new_kernel = old_kernel + rel1*log2(rel1) + rel2*log2(rel2) - (rel1+rel2)*log2(rel1+rel2)
-        new_size_entropy = (new_kernel / log2(n_patches - 1)) + 1
-        return new_size_entropy
-    
-    def calculate_size_entropy_loss(self, patchwork, patch, neighbor):
-        """
-        Calculate the size entropy loss based on the sizes of the patches.
-        :param patch: The patch to be merged.
-        :param neighbor: The neighboring patch to merge with.
-        :return: The size entropy loss, the smaller the better.
-        """
-        size_entropy_loss = self.calculate_next_size_entropy(patch, neighbor, patchwork) - self.current_size_entropy 
-        return size_entropy_loss
+        return self.current_size_entropy - self.calculate_size_entropy_loss(rel1,rel2)
     
 #****************************************************************************************************************
