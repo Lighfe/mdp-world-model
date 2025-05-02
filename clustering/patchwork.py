@@ -23,6 +23,8 @@ class Patchwork:
         Args:
             grid (Grid): The grid object on which the simulation data is based.
             df (DataFrame): The DataFrame containing the simulation data, already prepared with columns 'x', 'y', 'c'.
+            entropy_strategy (EntropyStrategy): Class instance which contains all functions about the transition entropy calculations
+            loss_function (LossFunction): Class instanc which contains the calculation of the loss function
         """
 
         self.entropy_strategy = entropy_strategy
@@ -39,8 +41,8 @@ class Patchwork:
         self.parents = {patch: patch for patch in self.current_patches}                         #Dict    
         self.cell_to_history_of_patches = {cell: [self.cell_to_patchindex[cell]] for cell in self.grid.indices} #Dict                      
         
-        self.action_to_control_dict, self.action_df = self._switch_from_control_to_action(df)        #Dict, DataFrame
-        self.trans_probs = self._init_tp(self.action_df)                                             #Dict
+        self.action_to_control_dict, self.action_df = self._switch_from_control_to_action(df)   #Dict, DataFrame
+        self.trans_probs = self._init_tp(self.action_df)                                        #Dict
         self.patch_relevances = self._init_uniform_patch_relevances()                           #Dict
 
         self.predecessors = self._init_predecessors()                                           #Dict
@@ -48,7 +50,9 @@ class Patchwork:
         self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
         self.adjacent_cells_losses = self._init_adjacent_cells_losses()  #SortedValueDict
         
+        # Use the patchwork to calculate the initial value(s) of the loss function
         self.loss_function._reset(self)
+
 
     def _init_patch_nb(self):
         """
@@ -109,15 +113,15 @@ class Patchwork:
     
     def _init_entropy_dict(self):
         """
-        Initializes a dictionary with the entropy of each patch.
+        Initializes a dictionary with the transition entropy of each patch.
         The dictionary is nested: entropy_dict[s][a] = entropy of the probability distribution of action a in patch s.
-        Moreover, there is an additional key 'avg' for the average entropy of all actions in patch s.
+        Moreover, there is an additional key 'avg' for the average transition entropy of all actions in patch s.
         """
         return self.entropy_strategy._init_entropy_dict(patchwork=self)
 
     def _init_adjacent_cells_losses(self):
         """
-        Initializes a SortedValueDict with the entropy loss of merging adjacent patches.
+        Initializes a SortedValueDict with the transition entropy loss of merging adjacent patches.
         The dictionary is sorted by the entropy loss and provides efficient functions for:
             - insert(key,value): Inserting a key-value pair.
             - extract_min(): Extracting the key-value pair with the smallest value.
@@ -527,11 +531,14 @@ def create_patchwork(db_name,
                      table_name, 
                      run_ids, 
                      entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
-                     loss_function_strg='TransitionEntropyLoss'):    
+                     loss_function_strg='TransitionEntropyLoss',
+                     loss_function_coeff = None):    
     
     entropy_strategy = globals()[entropy_strategy_strg]()
     loss_function = globals()[loss_function_strg]()
-
+    if loss_function_coeff is not None:
+        loss_function.coeff = loss_function_coeff #set the coeffecient of the loss function
+           
     #Get the data
     df, configs_dict = get_and_reconstruct_data(db_name, table_name, run_ids)
 

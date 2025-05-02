@@ -13,6 +13,7 @@ class LossFunction(ABC):
 
     def __init__(self):
         self.current_total_loss_function_value = 0 
+        self.history_of_loss_function_values = {"Loss Function Value": []}
     
     @abstractmethod
     def _reset(self, patchwork):
@@ -26,7 +27,8 @@ class LossFunction(ABC):
     @abstractmethod
     def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
         """
-        Update the current size entropy and transition entropy after merging patch1 and patch2.
+        Update the entropy values after merging patch1 and patch2.
+        Also, update the history of the loss function values.
         :param patchwork: The patchwork object containing the patches.
         :param total_transition_entropy: The total transition entropy of the patchwork.
         :param patch1_rel: The relevance of the first patch.
@@ -56,6 +58,7 @@ class TransitionEntropyLoss(LossFunction):
 
     def __init__(self):
         self.current_transition_entropy = 0
+        self.history_of_loss_function_values = {"Total Transition Entropy": [], "Loss Function Value": []}
     
     @property
     def current_total_loss_function_value(self):
@@ -67,6 +70,8 @@ class TransitionEntropyLoss(LossFunction):
         :param patchwork: The patchwork object containing the patches.
         """
         self.current_transition_entropy = patchwork.entropy_strategy.overall_entropy
+        self.history_of_loss_function_values["Total Transition Entropy"].append(self.current_transition_entropy)
+        self.history_of_loss_function_values["Loss Function Value"].append(self.current_total_loss_function_value)
 
 
     def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
@@ -78,6 +83,8 @@ class TransitionEntropyLoss(LossFunction):
         :param patch2_rel: The relevance of the second patch.
         """
         self.current_transition_entropy = total_transition_entropy
+        self.history_of_loss_function_values["Total Transition Entropy"].append(self.current_transition_entropy)
+        self.history_of_loss_function_values["Loss Function Value"].append(self.current_total_loss_function_value)
         return
 
 
@@ -101,6 +108,9 @@ class TransitionEntropyLoss(LossFunction):
 class TransitionAndSizeEntropyLoss(LossFunction):
     """
     Loss function based on transition and size entropy.
+
+    Loss function = total average transition entropy - size entropy
+
     The size entropy is calculated based on the sizes of the patches: 
         size_entropy = H(Größenverteilung) 
         #### not anymore 1 - (H(Größenverteilung) / log2(number of patches)), because of better updating
@@ -115,7 +125,9 @@ class TransitionAndSizeEntropyLoss(LossFunction):
     def __init__(self):
         self.current_size_entropy = 0
         self.current_transition_entropy = 0
+        self.history_of_loss_function_values = {"Total Size Entropy": [], "Total Transition Entropy": [], "Loss Function Value": []}
         self.coeff = 1
+        self.loss_function_strg = f"Loss_fct = = total transition prediction loss - {self.coeff}* H(size distribution)"
 
     @property
     def current_total_loss_function_value(self):
@@ -123,12 +135,16 @@ class TransitionAndSizeEntropyLoss(LossFunction):
 
     def _reset(self, patchwork):
         """
-        Reset the current size entropy to the actual size entropy.
+        Reset the current size and transition entropies to the actual values.
+        Reset the history of size and transition entropies.
         :param patchwork: The patchwork object containing the patches.
         """
         self.current_size_entropy = self.calculate_size_entropy(patchwork)
         self.current_transition_entropy = patchwork.entropy_strategy.overall_entropy
-
+        # reset the history of size and transition entropies
+        self.history_of_loss_function_values["Total Size Entropy"] = [self.current_size_entropy]
+        self.history_of_loss_function_values["Total Transition Entropy"] = [self.current_transition_entropy]
+        self.history_of_loss_function_values["Loss Function Value"] = [self.current_total_loss_function_value]
 
     def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
         """
@@ -140,6 +156,10 @@ class TransitionAndSizeEntropyLoss(LossFunction):
         """
         self.current_size_entropy = self.update_size_entropy(patch1_rel, patch2_rel)
         self.current_transition_entropy = total_transition_entropy
+        # update the history of size and transition entropies
+        self.history_of_loss_function_values["Total Size Entropy"].append(self.current_size_entropy)
+        self.history_of_loss_function_values["Total Transition Entropy"].append(self.current_transition_entropy)
+        self.history_of_loss_function_values["Loss Function Value"].append(self.current_total_loss_function_value)
         return
 
     def calculate_size_entropy(self, patchwork):
