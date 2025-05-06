@@ -2,6 +2,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplcol
+import seaborn as sns
 import holoviews as hv
 import panel as pn
 import pandas as pd
@@ -202,17 +203,109 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     max_entropy = max(entropy for lst in patchwork.patch_to_history_of_avg_entropy.values() for _, entropy in lst)
     entropy_norm = mplcol.Normalize(vmin=0, vmax=max_entropy)
 
-    def create_colorbar(colormap, norm, label="Entropy"):
+    def create_colorbar(colormap, norm, label="Patch Transition Entropy"):
         """Creates a matplotlib colorbar using the given colormap and normalization."""
-        fig, ax = plt.subplots(figsize=(0.3, 3.5), dpi = 200)  # Adjust figure size for the colorbar
+        fig, ax = plt.subplots(figsize=(3.5,0.3), dpi = 400)  # Adjust figure size for the colorbar
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
         sm.set_array([])  # Needed for the colorbar to work
-        cbar = plt.colorbar(sm, cax=ax, orientation="vertical")
+        cbar = plt.colorbar(sm, cax=ax, orientation="horizontal")
+        cbar.outline.set_visible(False)  # Remove the outer frame
         cbar.ax.tick_params(labelsize=8)  # Change the fontsize of the colorbar numbers
         cbar.set_label(label, fontsize=8)
         cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
         return fig
+   
+    def create_initial_loss_function_plot(patchwork):
+        """
+        Create a initial plot of the loss function value over time (with an initial vertical line).
+        """
+        sns.set_theme(style="whitegrid", font_scale=1.1)
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
 
+        # Colorblind-friendly palette
+        color_cycle = plt.get_cmap('tab10').colors
+
+        # Plot each loss function
+        for idx, (loss_type, values) in enumerate(patchwork.loss_function.history_of_loss_function_values.items()):
+            ax.plot(
+                values,
+                label=loss_type,
+                color=color_cycle[idx % len(color_cycle)],
+                marker='o',
+                markersize=4,
+                linewidth=3
+            )
+
+        # Axes labels and title
+        ax.set_xlabel('Time Step', fontsize=18)
+        ax.set_ylabel('Loss Function Value', fontsize=18)
+        ax.set_title('Loss Function Value Over Time', fontsize=25, pad=20)
+        ax.xaxis.labelpad = 15
+        ax.yaxis.labelpad = 15
+
+        # Grid and background
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.set_facecolor('#ffffff')
+
+        # Spine and tick aesthetics
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1.2)
+        ax.spines['bottom'].set_linewidth(1.2)
+        ax.tick_params(axis='both', which='major', labelsize=14)
+
+        # Legend styling
+        ax.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.05),
+            fontsize=16,
+            frameon=True,
+            borderaxespad=0,
+            borderpad=1,
+            bbox_transform=fig.transFigure,
+            ncol=len(patchwork.loss_function.history_of_loss_function_values.keys()) + 1
+        )
+        # Vertical line (initially hidden)
+        vline = ax.axvline(x=0, color='red', linestyle='--', linewidth=2)
+
+        return fig, ax, vline
+    
+    def update_vertical_line(vline, current_timestep):
+        vline.set_xdata([current_timestep])
+        vline.set_visible(True)
+
+
+    def create_loss_function_plot_hv(step=0):
+        """
+        Create a HoloViews plot of the loss function values over time with a vertical line.
+        """
+        curves = []
+        color_cycle = plt.get_cmap('tab10').colors #hv.Cycle('Category10')  # Colorblind-friendly
+
+        for idx, (loss_type, values) in enumerate(patchwork.loss_function.history_of_loss_function_values.items()):
+            curve = hv.Curve((list(range(len(values))), values), 'Time Step', 'Loss Function Value', label =loss_type)\
+                .opts(
+                    color=color_cycle[idx],
+                    line_width=2,
+                    hover_tooltips=["$label", 'Time Step', ('Value','@{Loss Function Value}')]
+                )
+            curves.append(curve)
+
+        # Create vertical line
+        vline = hv.VLine(step).opts(color='red', line_dash='dashed', line_width=2)
+
+        # Overlay curves and vertical line
+        overlay = hv.Overlay(curves + [vline]).opts(
+            title="Loss Function Value Over Time",
+            width=400,
+            height = 370,
+            legend_position='bottom',
+            legend_offset=(-50, 10),
+            fontsize={'title': 13, 'labels': 10, 'ticks': 8, 'legend': 8},
+            show_grid=True
+        )
+
+        return overlay
 
     def get_current_patchwork(step, selected_controls, selected_nullcline_controls, selected_color):
         
@@ -288,6 +381,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     if show_interactive == True:
         # Interactive slider and selection widget
         slider = pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
+        
         vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[])
         vector_selector_nullclines = pn.widgets.MultiChoice(name="Select Controls for Nullclines", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
         color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches', 'White'])
@@ -298,19 +392,58 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                                    selected_controls = vector_selector_streamplots, 
                                    selected_nullcline_controls = vector_selector_nullclines, 
                                    selected_color = color_selector)
+        
+        interactive_loss_function_plot = pn.bind(create_loss_function_plot_hv,
+                                                 step = slider)
+                                                 
 
         # Title for the widgetbox
         title = pn.pane.Markdown(f"<h1> Patchwork Visualization </h1> <br />  {title}")
 
-        # Colorbar
-        colorbar_pane = pn.pane.Matplotlib(create_colorbar(entropy_cmap, entropy_norm), tight=True)
+        # Colorbar ##########################################
+        colorbar_pane = pn.pane.Matplotlib(create_colorbar(entropy_cmap, entropy_norm), 
+                                           tight=True,     
+                                           #width=400,   # Adjust width as needed
+                                           height=110   # Adjust height as needed
+                                            )
+
+        # Loss Function Value Plot ##########################
+        # Generate the static plot once
+        fig, ax, vline = create_initial_loss_function_plot(patchwork)
+        loss_function_plot_pane = pn.pane.Matplotlib(fig, tight=True, height = 300)
+
+        def on_slider_update(timestep):
+            update_vertical_line(vline, timestep)
+            loss_function_plot_pane.param.trigger('object')  # Trigger refresh without recreating figure
+        slider.param.watch(lambda event: on_slider_update(event.new), 'value')
         
-        # Layout
-        dashboard = pn.Row(
-            pn.Column(title, pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, vector_selector_nullclines, color_selector)),
-            interactive_plot,
-            pn.Column(pn.Spacer(height=90), colorbar_pane)  # Add spacer to adjust the position of the colorbar
+        #### Layout ###########################################
+        # Title Column
+        loss_fct_explanation = pn.pane.Markdown("    ### " + patchwork.loss_function.loss_function_strg)
+        title_column = pn.Column(title,
+                                 pn.Spacer(height=5), 
+                        loss_fct_explanation,
+                        pn.Spacer(height=30),
+                        pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, vector_selector_nullclines, color_selector),
+                        )
+        
+        # Wrap the interactive plot in a fixed-height column to help with alignment
+        interactive_column = pn.Column(interactive_plot, sizing_mode='fixed', height=500)
+
+        # Right-side column with bottom-aligned plots
+        
+        right_column = pn.Column(
+            pn.Spacer(height=50), 
+            colorbar_pane,
+            pn.Spacer(height=50), 
+            #loss_function_plot_pane,
+            interactive_loss_function_plot,
+            sizing_mode='fixed',
+            height=500  # Match height with interactive_column
         )
+
+        # Full dashboard row with bottom alignment
+        dashboard = pn.Row(title_column, interactive_column, right_column)
         dashboard.servable() 
         dashboard.show()
 
@@ -326,7 +459,8 @@ def create_plot_and_save_patchwork(db_name,
                                    title_interactive = "", 
                                    show_interactive = False, 
                                    entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
-                                   loss_function_strg = 'TransitionEntropyLoss'):
+                                   loss_function_strg = 'TransitionEntropyLoss',
+                                   loss_function_coeff = None):
     """
     Create a patchwork, plot it together with its first entropy and save the results to the corresponding path.
     Parameters:
@@ -348,7 +482,12 @@ def create_plot_and_save_patchwork(db_name,
             os.makedirs(path_id)
         path_to_save = path_id + f"/firstPatchwork_{str(gif_steps)}stepsPerTime"
 
-    patchwork, controls, solver = create_patchwork(db_name, table_name, run_ids,  entropy_strategy_strg, loss_function_strg)
+    patchwork, controls, solver = create_patchwork(db_name, 
+                                                   table_name, 
+                                                   run_ids,  
+                                                   entropy_strategy_strg, 
+                                                   loss_function_strg,
+                                                   loss_function_coeff)
     
     fig, ax = plt.subplots(figsize=(7, 6))
     plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)

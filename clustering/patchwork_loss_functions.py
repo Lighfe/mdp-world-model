@@ -59,7 +59,8 @@ class TransitionEntropyLoss(LossFunction):
     def __init__(self):
         self.current_transition_entropy = 0
         self.history_of_loss_function_values = {"Total Transition Entropy": [], "Loss Function Value": []}
-    
+        self.loss_function_strg = f"Loss_fct = Total Transition Entropy"
+
     @property
     def current_total_loss_function_value(self):
         return self.current_transition_entropy
@@ -127,7 +128,7 @@ class TransitionAndSizeEntropyLoss(LossFunction):
         self.current_transition_entropy = 0
         self.history_of_loss_function_values = {"Total Size Entropy": [], "Total Transition Entropy": [], "Loss Function Value": []}
         self.coeff = 1
-        self.loss_function_strg = f"Loss_fct = = total transition prediction loss - {self.coeff}* H(size distribution)"
+        self.loss_function_strg = f"Loss_fct = Total Trans. H - {self.coeff}* H(size distr.)"
 
     @property
     def current_total_loss_function_value(self):
