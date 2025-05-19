@@ -28,6 +28,8 @@ from neural_networks.drm_dataset import create_data_loaders
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel, BilinearPredictor, StandardPredictor
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
+
+from neural_networks.system_registry import get_transformation, SystemType
 from data_generation.simulations.grid import tangent_transformation
 
 """ 
@@ -107,7 +109,7 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
         print(f"Saved loss curves to {save_path}")
 
 def visualize_state_space(model, output_path=None, transformations=None, device='cpu',
-                          num_points=1000, num_states=None, soft=False):
+                          num_points=1000, num_states=None, soft=False, system_type=None):
     """
     Visualize the state probabilities in z-space (transformed space) with x-space coordinate labels.
     
@@ -120,11 +122,11 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         num_states: Number of states in the model (if None, will be inferred).
     """
     if transformations is None:
-        # Default to tangent transformation if none provided
-        transformations = [
-            tangent_transformation(1.0, 0.5),  # For x1 dimension
-            tangent_transformation(1.0, 0.5)   # For x2 dimension
-        ]
+        if system_type is None:
+            raise ValueError("Either transformations or system_type must be provided")
+        # Get default transformation for the system
+        transformation = get_transformation(SystemType[system_type.upper()])
+        transformations = [transformation, transformation]  # Same for both dimensions
     
     # Unpack the transformation functions
     _, inverse_transforms, _ = zip(*transformations)
@@ -165,7 +167,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     fig, axes = plt.subplots(rows, cols_per_row, figsize=figsize, squeeze=False)
     
     # Generate tick positions for z-space
-    num_ticks = 5
+    num_ticks = 6
     z1_ticks = np.linspace(z_bounds[0][0], z_bounds[0][1], num_ticks)
     z2_ticks = np.linspace(z_bounds[1][0], z_bounds[1][1], num_ticks)
     
@@ -242,7 +244,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
 
 def analyze_state_transitions(model, 
                               transformations,
-                              control_values=[0.5, 1.0],
+                              control_values=None,
                               z_bounds=[(0, 1), (0, 1)],
                               num_points=1000,
                               assignment_method='argmax',
@@ -394,43 +396,57 @@ def analyze_state_transitions(model,
     
     return results
 
-def analyze_discrete_state_transitions(model, control_values=[0.5, 1.0], device='cpu'):
+def analyze_discrete_state_transitions(model, control_values, device='cpu'):
     """
-    Analyze transitions between discrete states directly using one-hot encodings.
+    Analyze state transitions for different control values using discrete state assignments.
     
     Args:
         model: Trained DRM model
         control_values: List of control values to analyze
-        device: Device to run computation on
-        
+        device: Device for computation
+    
     Returns:
-        Dictionary containing transition matrices for each control value
+        Dictionary of transition matrices for each control value
     """
-    # Move model to device and set to evaluation mode
+    # Move model to device
     model = model.to(device)
     model.eval()
     
     num_states = model.num_states
+    control_dim = model.predictor.control_dim
     
-    # Create one-hot encodings for each state
+    # Create one-hot encoded states
     one_hot_states = torch.eye(num_states, device=device)
     
-    # Initialize results
-    transition_matrices = {}
+    results = {}
     
-    # For each control value, compute transition probabilities
     for control_value in control_values:
-        # Create control tensor (same control for all states)
-        control_batch = torch.full((num_states, 1), control_value, dtype=torch.float32, device=device)
+        # Prepare control tensor based on control format
+        if hasattr(model, 'control_format') and model.control_format == 'categorical':
+            # For categorical controls, create one-hot encoding
+            control_batch = torch.zeros((num_states, control_dim), dtype=torch.float32, device=device)
+            control_batch[:, control_value] = 1.0
+        else:
+            # For continuous controls, use scalar value
+            control_batch = torch.full((num_states, 1), control_value, dtype=torch.float32, device=device)
         
-        # Get next state predictions for each discrete state
+        # Predict next state with error checking
         with torch.no_grad():
             next_state_probs = model.predict_next_state(one_hot_states, control_batch)
             
-        # Store the transition matrix
-        transition_matrices[control_value] = next_state_probs.cpu().numpy()
+            # Check for NaN
+            if torch.isnan(next_state_probs).any():
+                print("WARNING: NaN detected in next_state_probs!")
+                next_state_probs = torch.nan_to_num(next_state_probs, nan=0.0)
+                # Renormalize
+                row_sums = next_state_probs.sum(dim=1, keepdim=True)
+                next_state_probs = next_state_probs / torch.clamp(row_sums, min=1e-10)
+        
+        # Store transition matrix
+        transition_matrix = next_state_probs.cpu().numpy()
+        results[control_value] = transition_matrix
     
-    return transition_matrices
+    return results
 
 def visualize_transition_matrices(transition_matrices, control_values, output_path=None):
 

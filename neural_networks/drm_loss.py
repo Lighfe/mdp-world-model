@@ -54,12 +54,13 @@ class StateDiversityLoss(nn.Module):
         off_diag_correlations = (corr_matrix * mask).pow(2).sum()
         
         return off_diag_correlations
+
 class StableDRMLoss(nn.Module):
-    def __init__(self, state_loss_weight=1.0, value_loss_weight=1.0, 
+    def __init__(self, state_loss_weight=0.5, value_loss_weight=1.5, 
                  use_state_diversity=False, diversity_weight=0.001,
-                 use_entropy_reg=False, entropy_weight=5.0, 
+                 use_entropy_reg=True, entropy_weight=3.0, 
                  use_entropy_decay=True, entropy_decay_proportion=0.2,
-                 state_loss_type="kl_div"):
+                 state_loss_type="kl_div", value_loss_type="mse"):
         """
         Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
         
@@ -74,6 +75,7 @@ class StableDRMLoss(nn.Module):
             entropy_decay_proportion: Proportion of training after which entropy weight 
                                         reaches its minimum value (0.2 = 20% of training)
             state_loss_type: Type of state loss ("kl_div", "cross_entropy", "mse", "js_div")
+            value_loss_type: Type of value loss ("mse", "angular", "binary_cross_entropy")
         """
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
@@ -87,16 +89,20 @@ class StableDRMLoss(nn.Module):
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
         self.initial_entropy_weight = entropy_weight if use_entropy_reg else 0.0
-        # TODO set weights for batch_entropy and individual entropy
         self.current_entropy_weight = entropy_weight
         self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
         self.entropy_decay_proportion = entropy_decay_proportion
 
-                # State loss type
+        # State loss type
         self.state_loss_type = state_loss_type
         if state_loss_type not in ["kl_div", "cross_entropy", "mse", "js_div"]:
             raise ValueError(f"Unsupported state loss type: {state_loss_type}. Must be one of 'kl_div', 'mse', or 'js_div'")
+        
+        # Value loss type
+        self.value_loss_type = value_loss_type
+        if value_loss_type not in ["mse", "angular", "binary_cross_entropy"]:
+            raise ValueError(f"Unsupported value loss type: {value_loss_type}. Must be one of 'mse', 'angular', or 'binary_cross_entropy'")
     
     def _kl_div_loss(self, s_y, s_y_pred):
         """KL divergence loss (original implementation)"""
@@ -133,9 +139,60 @@ class StableDRMLoss(nn.Module):
         
         # JS divergence is 0.5 * (KL(P || M) + KL(Q || M))
         return 0.5 * (kl_p_m + kl_q_m)
-    
     # TODO: KS divergence turned around
     
+    def _angular_loss(self, v_pred, v_true):
+        """
+        Angular loss for angle predictions represented as (sin(θ), cos(θ))
+        
+        Args:
+            v_pred: Predicted values (batch_size, 2) - [sin(θ), cos(θ)]
+            v_true: True values (batch_size, 2) - [sin(θ), cos(θ)]
+            
+        Returns:
+            Angular loss value
+        """
+        # Ensure inputs are normalized (they should be if using tanh activation)
+        # Compute dot product between predicted and true unit vectors
+        dot_product = torch.sum(v_pred * v_true, dim=1)
+        
+        # Clamp to avoid numerical issues with arccos
+        dot_product = torch.clamp(dot_product, -1.0, 1.0)
+        
+        # Angular distance in radians
+        angular_distance = torch.acos(dot_product)
+        
+        # You can also square it for smoother gradients
+        return torch.mean(angular_distance)
+    
+    def _angular_mse_loss(self, v_pred, v_true):
+        """
+        MSE loss on the sine-cosine representation
+        This is simpler and often works well for angle prediction
+        
+        Args:
+            v_pred: Predicted values (batch_size, 2) - [sin(θ), cos(θ)]
+            v_true: True values (batch_size, 2) - [sin(θ), cos(θ)]
+            
+        Returns:
+            MSE loss on sine-cosine components
+        """
+        return torch.mean((v_pred - v_true) ** 2)
+    
+    def _binary_cross_entropy_loss(self, v_pred, v_true):
+        """
+        Binary cross entropy loss for binary predictions (e.g., 90% market share)
+        
+        Args:
+            v_pred: Predicted values (batch_size, 1) - probabilities
+            v_true: True values (batch_size, 1) - binary targets
+            
+        Returns:
+            Binary cross entropy loss
+        """
+        epsilon = 1e-8
+        v_pred = torch.clamp(v_pred, epsilon, 1.0 - epsilon)
+        return F.binary_cross_entropy(v_pred, v_true)
     
     def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None):
         """
@@ -148,6 +205,21 @@ class StableDRMLoss(nn.Module):
             v_pred_for_all_states: Predicted values for all one-hot encoded states (num_states, value_dim)
             s_x: Current state probabilities (for diversity/entropy regularization)
         """
+
+        # dimension checking
+        expected_dims = {
+            'mse': None,  # Can handle any dimension
+            'angular': 2,  # Must be 2D for sin/cos
+            'binary_cross_entropy': 1  # Must be 1D
+        }
+        if self.value_loss_type in expected_dims and expected_dims[self.value_loss_type] is not None:
+            expected_dim = expected_dims[self.value_loss_type]
+            actual_dim = v_true.shape[1]
+            if actual_dim != expected_dim:
+                raise ValueError(
+                    f"Value loss type '{self.value_loss_type}' expects {expected_dim}D values, "
+                    f"but got {actual_dim}D. Check if value_method matches value_loss_type."
+                )
         # Add small epsilon to avoid log(0)
         epsilon = 1e-8
         
@@ -165,13 +237,15 @@ class StableDRMLoss(nn.Module):
         elif self.state_loss_type == "js_div":
             state_loss = self._js_div_loss(s_y, s_y_pred)
         
-        # Check for NaN in KL divergence and replace with zero if any
+        # Check for NaN in state loss and replace with zero if any
         if torch.isnan(state_loss):
-            print("WARNING: NaN detected in KL divergence, setting to 0")
+            print("WARNING: NaN detected in state loss, setting to 0")
             state_loss = torch.tensor(0.0, device=s_y.device)
         
-        # Value loss calculation
-        value_loss = self._calculate_expected_value_loss(s_y_pred, v_pred_for_all_states, v_true)
+        # Value loss calculation based on type
+        value_loss = self._calculate_expected_value_loss(
+            s_y_pred, v_pred_for_all_states, v_true, loss_type=self.value_loss_type
+        )
         
         # Correlation-based diversity
         diversity_loss = torch.tensor(0.0, device=s_y.device)
@@ -185,8 +259,9 @@ class StableDRMLoss(nn.Module):
             diversity_loss = self.state_diversity(s_x)
             batch_entropy = self.batch_entropy(s_x)
             individual_entropy = self.individual_entropy(s_x)
-            batch_weight = 0.9 # hard coded
-            individual_weight = 0.1 # hard coded
+            # TODO: change back to 0.9 and 0.1
+            batch_weight = 0.5 # hard coded
+            individual_weight = 0.5 # hard coded
             entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
 
         
@@ -201,7 +276,7 @@ class StableDRMLoss(nn.Module):
         # Return loss components and entropy metrics
         return total_loss, state_loss, value_loss, diversity_loss, entropy_loss, batch_entropy, individual_entropy
     
-    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true):
+    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse"):
         """
         Calculate expected value loss under the predicted state distribution.
         
@@ -209,27 +284,28 @@ class StableDRMLoss(nn.Module):
             s_y_pred: Predicted next state probabilities (batch_size, num_states)
             v_pred_for_all_states: Values for all one-hot states (num_states, value_dim)
             v_true: True value (batch_size, value_dim)
+            loss_type: Type of loss to use ("mse", "angular", "binary_cross_entropy")
             
         Returns:
             Expected value loss
         """
-        # Reshape for broadcasting using unsqueeze
-        v_pred_expanded = v_pred_for_all_states.unsqueeze(0)  # [1, n_states, n_values]
-        v_true_expanded = v_true.unsqueeze(1)                 # [n_batch, 1, n_values]
+        # First, calculate the expected value under the predicted distribution
+        # Expected value: sum_i P(state_i) * value(state_i)
+        # Shape: (batch_size, value_dim)
+        expected_v_pred = torch.matmul(s_y_pred, v_pred_for_all_states)
         
-        # Squared differences in each value dimension --> shape: (n_batch, n_states, n_values)
-        value_losses_by_successor_and_value_direction = (v_pred_expanded - v_true_expanded)**2
-        
-        # Sum over all value directions, giving squared value loss for each possible successor state
-        # --> shape: (n_batch, n_states)
-        value_losses_by_successor = value_losses_by_successor_and_value_direction.sum(dim=2)
-        
-        # Expected value over all possible successor states according to predicted distribution
-        # --> shape: (n_batch)
-        expected_value_losses = (s_y_pred * value_losses_by_successor).sum(dim=1)
-        
-        # Finally, take the mean over all samples in the batch
-        value_loss = expected_value_losses.mean()
+        # Now calculate the loss based on type
+        if loss_type == "mse":
+            # Standard MSE loss
+            value_loss = torch.mean((expected_v_pred - v_true) ** 2)
+        elif loss_type == "angular":
+            # Use angular MSE loss for stability
+            value_loss = self._angular_mse_loss(expected_v_pred, v_true)
+        elif loss_type == "binary_cross_entropy":
+            # Binary cross entropy for binary predictions
+            value_loss = self._binary_cross_entropy_loss(expected_v_pred, v_true)
+        else:
+            raise ValueError(f"Unknown value loss type: {loss_type}")
         
         return value_loss
     

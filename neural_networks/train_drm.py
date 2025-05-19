@@ -21,11 +21,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # NOTE: absolute imports from project root
 # Import application-specific modules
-from neural_networks.drm_dataset import create_data_loaders
+from neural_networks.system_registry import SystemType, get_system_config, get_transformation
+from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel
-from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
-from data_generation.simulations.grid import tangent_transformation
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
@@ -33,10 +32,22 @@ from neural_networks.drm_viz import (
     analyze_mdp_from_model, visualize_mdp
 )
 
+def set_all_seeds(seed):
+    """Set seeds for reproducibility"""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Also set deterministic behavior for CUDNN
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 def train_drm_model(db_path, 
+                    system_type,
                     output_dir="./neural_networks/output",
                     run_id=None,
+                    seed=42,
                     val_size=2000,
                     test_size=2000, 
                     batch_size=64, 
@@ -46,17 +57,18 @@ def train_drm_model(db_path,
                     num_states=4,
                     hidden_dim=128,
                     checkpoint_every=10,
-                    state_loss_weight=1.0, 
-                    value_loss_weight=3.0,
-                    predictor_type='control_gate',
+                    state_loss_weight=0.5, 
+                    value_loss_weight=1.5,
+                    predictor_type='bilinear',
                     value_method=None,
+                    value_loss_type=None,
                     use_lr_scheduler=False,
                     scheduler_type='cosine',
                     use_warmup=False,
                     warmup_epochs=5,
                     min_lr=1e-5,
                     use_gumbel=False,
-                    initial_temp=1.0,
+                    initial_temp=5.0,
                     min_temp=0.1,
                     use_entropy_reg=False,
                     entropy_weight=5.0,
@@ -87,6 +99,43 @@ def train_drm_model(db_path,
         model: Trained model
         history: Dictionary containing training history
     """
+    # Set seeds for reproducibility at the very beginning
+    set_all_seeds(seed)
+
+    # Get system configuration
+    system_config = get_system_config(SystemType[system_type.upper()])
+    # Get system-specific transformation
+    transformation = get_transformation(SystemType[system_type.upper()])
+    
+    # Validate/set value_method
+    if value_method is None:
+        value_method = system_config['default_value_type']
+        print(f"Using default value method: {value_method}")
+    elif value_method not in system_config['value_types']:
+        raise ValueError(f"Invalid value method '{value_method}' for {system_type}. "
+                        f"Available: {system_config['value_types']}")
+    
+    # Set default loss types based on system if not specified
+    if state_loss_type is None:
+        state_loss_type = "kl_div"  # Default for all systems
+    
+    if value_loss_type is None:
+        # System-specific defaults
+        if system_type == 'saddle_system' and value_method == 'angle':
+            value_loss_type = 'angular'
+        elif value_method == '90% market share':
+            value_loss_type = 'binary_cross_entropy'
+        else:
+            value_loss_type = 'mse'
+        print(f"Using default value loss type: {value_loss_type}")
+
+
+    # Update default value_loss_type to use system registry
+    if value_loss_type is None:
+        # Get from system registry
+        value_loss_type = system_config['default_value_loss'][value_method]
+        print(f"Using default value loss type: {value_loss_type}")
+
 
     # Access the global project root
     project_root = PROJECT_ROOT
@@ -110,43 +159,42 @@ def train_drm_model(db_path,
     start_time = time.time()
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Fix Python path to import TechnologySubstitution
-    # Get the current file's directory
-    current_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Find the project root (assuming it's named "mdp-world-model")
-    project_root = current_dir
-    while project_root.name != "mdp-world-model" and project_root.parent != project_root:
-        project_root = project_root.parent
-    
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-        print(f"Added {project_root} to Python path")
-    
-    # Import the TechnologySubstitution model and NumericalSolver
-    tech_sub_model = TechnologySubstitution()
-    tech_sub_solver = TechSubNumericalSolver(tech_sub_model)
 
-    transformation = tangent_transformation(3.0, 0.5)
     
-    # Create data loaders
     train_loader, val_loader, test_loader = create_data_loaders(
+        system_type=system_type,
         db_path=db_path,
-        tech_sub_solver=tech_sub_solver,
         value_method=value_method,
         batch_size=batch_size,
-        val_size=val_size, test_size=test_size
+        val_size=val_size, 
+        test_size=test_size,
+        seed=seed
     )
 
-        # Get a batch from the train loader to determine dimensions
+    # Get dimensions from first batch
     for x, c, y, v_true in train_loader:
-        obs_dim = x.shape[1]  # Dimension of observation
-        control_dim = c.shape[1]  # Dimension of control
-        value_dim = v_true.shape[1]  # Dimension of value
-        break  # We just need one batch to determine dimensions
+        obs_dim = x.shape[1]
+        control_dim = c.shape[1]
+        value_dim = v_true.shape[1]
+        break
+
+
+    # Update checkpoint config to use actual dimensions
+    checkpoint_config = {
+        'obs_dim': obs_dim,
+        'control_dim': control_dim,
+        'value_dim': value_dim,
+        'num_states': num_states,
+        'hidden_dim': hidden_dim,
+        'system_type': system_type,
+        'value_method': value_method
+    }    
+
+    value_activation = system_config['value_activation'].get(value_method, None)
+    if value_activation is None:
+        value_activation = 'identity' 
     
-    # Initialize model
+    # Initialize model with system-specific settings
     model = DiscreteRepresentationsModel(
         obs_dim=obs_dim,
         control_dim=control_dim,
@@ -158,7 +206,8 @@ def train_drm_model(db_path,
         initial_temp=initial_temp,
         min_temp=min_temp,
         use_target_encoder=use_target_encoder,
-        ema_decay=ema_decay
+        ema_decay=ema_decay,
+        value_activation=value_activation
     )
     
     # Initialize model weights properly
@@ -174,7 +223,7 @@ def train_drm_model(db_path,
     print(f"Using device: {device}")
     model.to(device)
     
-    # init loss function
+    # Initialize loss function with appropriate types
     loss_fn = StableDRMLoss(
         state_loss_weight=state_loss_weight, 
         value_loss_weight=value_loss_weight,
@@ -184,7 +233,8 @@ def train_drm_model(db_path,
         entropy_weight=entropy_weight,
         use_entropy_decay=use_entropy_decay,
         entropy_decay_proportion=entropy_decay_proportion,
-        state_loss_type=state_loss_type
+        state_loss_type=state_loss_type,
+        value_loss_type=value_loss_type
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -435,7 +485,8 @@ def train_drm_model(db_path,
             f"Div: {val_div_loss:.4f}, Entropy: {val_entropy_loss:.4f})")
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
 
-        if epoch == 5 or epoch == 25:
+        #TODO: put back to 5 and 25
+        if epoch == 2 or epoch == 5 or epoch == 10 or epoch == 25:
 
             # Visualize the state space
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
@@ -447,7 +498,8 @@ def train_drm_model(db_path,
                     transformation   # For x2 dimension
                 ],
                 device=device,
-                num_states=num_states
+                num_states=num_states,
+                system_type=system_type
             )
 
         # Check for improvement
@@ -462,12 +514,7 @@ def train_drm_model(db_path,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': best_val_loss,
-                'config': {
-                    'obs_dim': 2,
-                    'control_dim': 1,
-                    'num_states': num_states,
-                    'hidden_dim': hidden_dim
-                }
+                'config': checkpoint_config
             }, best_model_path)
             print(f"Saved best model to {best_model_path}")
         else:
@@ -497,12 +544,7 @@ def train_drm_model(db_path,
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_loss': train_loss,
                 'val_loss': val_loss,
-                'config': {
-                    'obs_dim': 2,
-                    'control_dim': 1,
-                    'num_states': num_states,
-                    'hidden_dim': hidden_dim
-                }
+                'config': checkpoint_config
             }, checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
         
@@ -640,12 +682,7 @@ def train_drm_model(db_path,
         'optimizer_state_dict': optimizer.state_dict(),
         'train_loss': train_loss,
         'val_loss': val_loss,
-        'config': {
-            'obs_dim': 2,
-            'control_dim': 1,
-            'num_states': num_states,
-            'hidden_dim': hidden_dim
-        }
+        'config': checkpoint_config
     }, final_model_path)
     print(f"Saved final model to {final_model_path}")
     
@@ -676,7 +713,8 @@ def train_drm_model(db_path,
             transformation   # For x2 dimension
         ],
         device=device,
-        num_states=num_states
+        num_states=num_states,
+        system_type=system_type
     )
 
     state_soft_vis_path = os.path.join(output_dir, f"states_soft_{run_id}.png")
@@ -689,11 +727,23 @@ def train_drm_model(db_path,
         ],
         device=device,
         num_states=num_states,
-        soft=True
+        soft=True,
+        system_type=system_type
     )
 
     # Analyze and visualize state transitions with argmax assignment
-    control_values = [0.5, 1.0] 
+    
+    # Get control values based on system type
+    if system_type == 'tech_substitution':
+        # For continuous controls, use sensible defaults
+        control_values = [0.5, 1.0]
+    elif system_type == 'saddle_system':
+        # For categorical controls (derived from data loader)
+        control_values = list(range(control_dim)) #all categorical options
+        
+    else:
+        raise ValueError(f"Unknown system type: {system_type}")
+
     transition_matrices = analyze_discrete_state_transitions(
         model=model,
         control_values=control_values,
@@ -734,7 +784,6 @@ if __name__ == "__main__":
     parser.add_argument('--predictor_type', type=str, default='control_gate', 
                         choices=['standard', 'control_gate', 'bilinear'],
                         help='Type of predictor to use (standard, control_gate or bilinear)')
-    parser.add_argument('--value_method', type=str, default='None', help='Which value function should be used')
 
     parser.add_argument('--use_lr_scheduler', action='store_true', 
                         help='Use learning rate scheduler')
@@ -749,7 +798,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--use_gumbel', action='store_true', 
                         help='Use Gumbel softmax for state encoding')
-    parser.add_argument('--initial_temp', type=float, default=1.0,
+    parser.add_argument('--initial_temp', type=float, default=5.0,
                         help='Initial temperature for Gumbel softmax')
     parser.add_argument('--min_temp', type=float, default=0.1,
                         help='Minimum temperature for Gumbel softmax')
@@ -779,7 +828,7 @@ if __name__ == "__main__":
     parser.add_argument('--diversity_weight', type=float, default=1.0,
                         help='Weight for state diversity regularization')
     
-    parser.add_argument('--state_loss_type', type=str, default='kl_div',
+    parser.add_argument('--state_loss_type', type=str, default=None,
                     choices=['kl_div', 'cross_entropy', 'mse', 'js_div'],
                     help='Type of state loss function to use')
     
@@ -806,8 +855,10 @@ if __name__ == "__main__":
     # Run parsed training
     model, history = train_drm_model(
         db_path=args.db_path,
+        system_type=args.system_type,
         output_dir=str(output_dir),
         run_id=run_id,
+        seed=args.seed,
         val_size=args.val_size,
         test_size=args.test_size,
         batch_size=args.batch_size,

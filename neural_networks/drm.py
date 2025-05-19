@@ -10,118 +10,13 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from sqlalchemy import create_engine, select, Table, MetaData
 from sqlalchemy.orm import Session
-    
-class ControlGate(nn.Module):
-    # FiLM inspired
-    # NOTE: might want to replace this with a region aware method
-    def __init__(self, feature_dim, control_dim):
-        super().__init__()
-        # Scale network
-        self.scale_net = nn.Linear(control_dim, feature_dim)
-        # Shift network
-        self.shift_net = nn.Linear(control_dim, feature_dim)
-        
-    def forward(self, features, control):
-        # Scale range: [0, 3] to allow more amplification
-        scale = 3 * torch.sigmoid(self.scale_net(control))
-        # Shift range: [-1, 1] to allow bidirectional shifts
-        shift = torch.tanh(self.shift_net(control))
-        
-        # Apply both scale and shift
-        modulated_features = scale * features + shift
-        
-        return modulated_features
-    
-class BasePredictor(nn.Module):
-    """Base class for predictor implementations"""
-    def __init__(self, num_states, control_dim, hidden_dim):
-        super().__init__()
-        self.num_states = num_states
-        self.control_dim = control_dim
-        self.hidden_dim = hidden_dim
-    
-    def forward(self, s_x, c):
-        """
-        Predict next state representation
-        Args:
-            s_x: Current state probabilities (batch_size, num_states)
-            c: Control input (batch_size, control_dim)
-        Returns:
-            s_y_pred: Predicted next state probabilities (batch_size, num_states)
-        """
-        raise NotImplementedError("Subclasses must implement forward")
-    
-class StandardPredictor(BasePredictor):
-    """Standard predictor using concatenation of state and control"""
-    def __init__(self, num_states, control_dim, hidden_dim):
-        super().__init__(num_states, control_dim, hidden_dim)
 
-        # NOTE: Using a very simple encoding of controls with same amount of nodes as num_states
-        self.control_encoder = nn.Linear(control_dim, num_states)
 
-        self.predictor = nn.Sequential(
-            nn.Linear(2*num_states, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, num_states)
-        )
-
-    def forward(self, s_x, c):
-        c_enc = self.control_encoder(c)
-        # s_x is already encoded, no further encoding needed
-        predictor_input = torch.cat([s_x, c_enc], dim=1)
-        logits = self.predictor(predictor_input)
-        s_y_pred = F.softmax(logits, dim=1)
-        return s_y_pred
-        
-class BilinearPredictor(BasePredictor):
-    """Predictor that directly uses encoded state with control interaction"""
-    def __init__(self, num_states, control_dim, hidden_dim):
-        super().__init__(num_states, control_dim, hidden_dim)
-        # Only encode control - use state representation directly
-        self.control_encoder = nn.Linear(control_dim, hidden_dim)
-        
-        # Interaction layer - captures how control affects each state dimension
-        self.interaction = nn.Bilinear(num_states, hidden_dim, hidden_dim)
-        
-        # Output processing
-        self.hidden = nn.Linear(hidden_dim, hidden_dim)
-        self.output = nn.Linear(hidden_dim, num_states)
-    
-    def forward(self, s_x, c):
-        # Process control
-        control_features = F.relu(self.control_encoder(c))
-        
-        # Directly use s_x with control features to model interaction
-        interaction = self.interaction(s_x, control_features)
-        
-        # Further processing
-        hidden = F.relu(self.hidden(interaction))
-        logits = self.output(hidden)
-        s_y_pred = F.softmax(logits, dim=1)
-        return s_y_pred
-        
-class ControlGatePredictor(BasePredictor):
-    """Predictor using control gate to modulate features"""
-    def __init__(self, num_states, control_dim, hidden_dim):
-        super().__init__(num_states, control_dim, hidden_dim)
-        # apply control gate directly on the state embedding
-        self.control_gate = ControlGate(num_states, control_dim)
-        self.predictor_hidden = nn.Linear(num_states, hidden_dim)
-        self.predictor_output = nn.Linear(hidden_dim, num_states)
-    
-    def forward(self, s_x, c):
-        gated_features = self.control_gate(s_x, c)
-        hidden = F.relu(self.predictor_hidden(gated_features))
-        logits = self.predictor_output(hidden)
-        s_y_pred = F.softmax(logits, dim=1)
-        return s_y_pred
 
 class DiscreteRepresentationsModel(nn.Module):
     def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, 
                  predictor_type='bilinear', use_gumbel=False, initial_temp=5.0, min_temp=0.5,
-                 use_target_encoder=False, ema_decay=0.9):
+                 use_target_encoder=False, ema_decay=0.9, value_activation="sigmoid"):
         """
         Initialize the Discrete Representations architecture
         
@@ -136,6 +31,8 @@ class DiscreteRepresentationsModel(nn.Module):
             min_temp: Minimum temperature for Gumbel softmax
             use_target_encoder: Whether to use a target encoder with EMA updates
             ema_decay: EMA decay rate for target encoder (higher = slower updates)
+            control_format: Format of control input ('continuous' or 'categorical')
+            value_activation: Activation function to use for value output
         """
         super(DiscreteRepresentationsModel, self).__init__()
         
@@ -147,8 +44,6 @@ class DiscreteRepresentationsModel(nn.Module):
         # Store EMA parameters
         self.use_target_encoder = use_target_encoder
         self.ema_decay = ema_decay
-
-
         
         # initialize
         self.encoder = nn.Sequential(
@@ -190,8 +85,17 @@ class DiscreteRepresentationsModel(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, value_dim)
         )
+
+        # Set value activation function
+        if value_activation == "sigmoid":
+            self.value_activation = nn.Sigmoid()
+        elif value_activation == "tanh":
+            self.value_activation = nn.Tanh()
+        else:
+            self.value_activation = nn.Identity()
         
         self.num_states = num_states
+        self.value_dim = value_dim
 
     def _copy_weights(self, src_model, tgt_model):
         """Helper method to copy weights from source to target model"""
@@ -235,8 +139,24 @@ class DiscreteRepresentationsModel(nn.Module):
         
         return prob_x
     
-
-    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.8, delay_epochs=5):
+    def compute_value(self, s_y):
+        """
+        Extract value from state probabilities with appropriate activation.
+        
+        Args:
+            s_y: State probabilities (predicted)
+        
+        Returns:
+            val: Predicted value with activation applied
+        """
+        # Apply value network
+        val = self.value_net(s_y)
+        
+        # Apply activation function
+        return self.value_activation(val)
+    
+    # TODO: put back delay_epochs to 0.8 and 5
+    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.9, delay_epochs=5):
         """Much slower temperature annealing"""
         if not self.use_gumbel:
             return
@@ -323,3 +243,138 @@ class DiscreteRepresentationsModel(nn.Module):
         one_hot_states = torch.eye(self.num_states, device=next(self.parameters()).device)
         return self.compute_value(one_hot_states)
     
+class BasePredictor(nn.Module):
+    """Base class for predictor implementations"""
+    def __init__(self, num_states, control_dim, hidden_dim, control_format="continuous"):
+        super().__init__()
+        self.num_states = num_states
+        self.control_dim = control_dim
+        self.hidden_dim = hidden_dim
+        self.control_format = control_format
+    
+    def forward(self, s_x, c):
+        """
+        Predict next state representation
+        Args:
+            s_x: Current state probabilities (batch_size, num_states)
+            c: Control input (batch_size, control_dim)
+        Returns:
+            s_y_pred: Predicted next state probabilities (batch_size, num_states)
+        """
+        raise NotImplementedError("Subclasses must implement forward")
+    
+    def process_control(self, c):
+        """
+        Process control input based on format
+        Args:
+            c: Control input (batch_size, control_dim)
+        Returns:
+            Processed control input
+        """
+        # For categorical controls, the dataset already provides one-hot encoding
+        # So we just return the control as-is
+        return c
+    
+class StandardPredictor(BasePredictor):
+    """Standard predictor using concatenation of state and control"""
+    def __init__(self, num_states, control_dim, hidden_dim, control_format="continuous"):
+        super().__init__(num_states, control_dim, hidden_dim, control_format)
+        
+        # If control is categorical, control_dim is number of categories (saddle points)
+        self.control_encoder = nn.Linear(control_dim, num_states)
+
+        self.predictor = nn.Sequential(
+            nn.Linear(2*num_states, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_states)
+        )
+
+    def forward(self, s_x, c):
+        
+        # Encode control
+        c_enc = self.control_encoder(c)
+        
+        # s_x is already encoded, no further encoding needed
+        predictor_input = torch.cat([s_x, c_enc], dim=1)
+        logits = self.predictor(predictor_input)
+        s_y_pred = F.softmax(logits, dim=1)
+        return s_y_pred
+
+
+class BilinearPredictor(BasePredictor):
+    """Predictor that directly uses encoded state with control interaction
+    
+    Note: This predictor works with both continuous and categorical controls
+    since they are encoded before the bilinear operation.
+    """
+    def __init__(self, num_states, control_dim, hidden_dim, control_format="continuous"):
+        super().__init__(num_states, control_dim, hidden_dim, control_format)
+        
+        # Only encode control - use state representation directly
+        self.control_encoder = nn.Linear(control_dim, hidden_dim)
+        
+        # Interaction layer - captures how control affects each state dimension
+        self.interaction = nn.Bilinear(num_states, hidden_dim, hidden_dim)
+        
+        # Output processing
+        self.hidden = nn.Linear(hidden_dim, hidden_dim)
+        self.output = nn.Linear(hidden_dim, num_states)
+    
+    def forward(self, s_x, c):
+        
+        # Process control
+        control_features = F.relu(self.control_encoder(c))
+        
+        # Directly use s_x with control features to model interaction
+        interaction = self.interaction(s_x, control_features)
+        
+        # Further processing
+        hidden = F.relu(self.hidden(interaction))
+        logits = self.output(hidden)
+        s_y_pred = F.softmax(logits, dim=1)
+        return s_y_pred
+
+class ControlGatePredictor(BasePredictor):
+    """Predictor using control gate to modulate features"""
+    def __init__(self, num_states, control_dim, hidden_dim, control_format="continuous"):
+        super().__init__(num_states, control_dim, hidden_dim, control_format)
+        
+        # Apply control gate directly on the state embedding
+        self.control_gate = ControlGate(num_states, control_dim)
+        self.predictor_hidden = nn.Linear(num_states, hidden_dim)
+        self.predictor_output = nn.Linear(hidden_dim, num_states)
+    
+    def forward(self, s_x, c):
+        # Process control input
+        c_processed = self.process_control(c)
+        
+        # Apply control gating
+        gated_features = self.control_gate(s_x, c_processed)
+        hidden = F.relu(self.predictor_hidden(gated_features))
+        logits = self.predictor_output(hidden)
+        s_y_pred = F.softmax(logits, dim=1)
+        return s_y_pred
+
+class ControlGate(nn.Module):
+    # FiLM inspired
+    # NOTE: might want to replace this with a region aware method
+    def __init__(self, feature_dim, control_dim):
+        super().__init__()
+        # Scale network
+        self.scale_net = nn.Linear(control_dim, feature_dim)
+        # Shift network
+        self.shift_net = nn.Linear(control_dim, feature_dim)
+        
+    def forward(self, features, control):
+        # Scale range: [0, 3] to allow more amplification
+        scale = 3 * torch.sigmoid(self.scale_net(control))
+        # Shift range: [-1, 1] to allow bidirectional shifts
+        shift = torch.tanh(self.shift_net(control))
+        
+        # Apply both scale and shift
+        modulated_features = scale * features + shift
+        
+        return modulated_features
+
