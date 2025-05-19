@@ -259,9 +259,8 @@ class StableDRMLoss(nn.Module):
             diversity_loss = self.state_diversity(s_x)
             batch_entropy = self.batch_entropy(s_x)
             individual_entropy = self.individual_entropy(s_x)
-            # TODO: change back to 0.9 and 0.1
-            batch_weight = 0.5 # hard coded
-            individual_weight = 0.5 # hard coded
+            batch_weight = 0.8 # hard coded
+            individual_weight = 0.2 # hard coded
             entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
 
         
