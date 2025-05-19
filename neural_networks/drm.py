@@ -155,8 +155,7 @@ class DiscreteRepresentationsModel(nn.Module):
         # Apply activation function
         return self.value_activation(val)
     
-    # TODO: put back delay_epochs to 0.8 and 5
-    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.9, delay_epochs=5):
+    def update_temperature(self, epoch, total_epochs, annealing_proportion=0.8, delay_epochs=5):
         """Much slower temperature annealing"""
         if not self.use_gumbel:
             return
