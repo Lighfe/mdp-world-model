@@ -2,7 +2,7 @@
 #SBATCH --job-name=drm_grid
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=1:30:00
+#SBATCH --time=2:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -19,12 +19,12 @@ echo "SLURM_JOBID: $SLURM_JOBID"
 echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
 echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 
-# Load modules and activate environment
-module load anaconda
-source activate mdp-world-model
-
 # Create log directory if it doesn't exist
 mkdir -p log
+
+# Load modules and activate environment
+module load anaconda
+source activate mdp-world-model  # Replace with your actual environment name
 
 # Check GPU
 echo "Checking GPU availability..."
@@ -34,115 +34,129 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available()); pr
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
-# Fixed configuration parameters for all runs
-db_path="datasets/results/tech_sim.db"
-base_output_dir="neural_networks/output/target_deterministic"
-val_size=2000
-test_size=2000
-batch_size=64
-patience=200
-num_states=4
-hidden_dim=64
-predictor_type="bilinear"
+# Define databases
+DB_PATHS=("datasets/results/single_saddle_system.db" "datasets/results/single_saddle_system_horizontal.db")
+DB_NAMES=("regular" "horizontal")
 
-# Fixed parameters
-state_loss_weight=0.5
-lr=5e-5
-min_lr=5e-6
-use_lr_scheduler="--use_lr_scheduler --scheduler_type=cosine --min_lr=$min_lr"
-use_warmup="--use_warmup --warmup_epochs=10"
-use_target_encoder="--use_target_encoder --ema_decay=0.9"
-use_entropy="--use_entropy_reg --entropy_weight=3.0 --use_entropy_decay --entropy_decay_proportion=0.1"
+# Fixed parameters for all runs
+BASE_OUTPUT_DIR="neural_networks/output/saddle_grid_search"
+EPOCHS=100
+VAL_SIZE=2000
+TEST_SIZE=2000
+BATCH_SIZE=64
+PATIENCE=100
+HIDDEN_DIM=64
+LR=1e-5
+ENTROPY_WEIGHT=1.0
+USE_WARMUP="--use_warmup --warmup_epochs=10"
+USE_TARGET_ENCODER="--use_target_encoder --ema_decay=0.9"
+USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=$ENTROPY_WEIGHT"
+STATE_LOSS_TYPE="kl_div"
+VALUE_METHOD="angle"
+VALUE_LOSS_WEIGHT=2.0
 
-# Grid search parameters
-state_loss_types=("kl_div" "js_div")
-gumbel_min_temps=(0.1 0.5)
-value_loss_weights=(1.0 2.0)
-value_methods=("market_share" "identity")
-epoch_values=(100 200)
+# Define parameter values for grid search
+NUM_STATES_VALUES=(2 4)
+GUMBEL_TEMP_VALUES=(2.0 5.0)
+STATE_LOSS_WEIGHT_VALUES=(0.5 1.0)
+STATE_DIVERSITY_OPTIONS=("--use_state_diversity --diversity_weight=0.01" "")
+PREDICTOR_TYPE_VALUES=("bilinear" "standard")
+SEEDS=(42 11)
 
-# Calculate which combination to use based on array task ID
-# Array task ID ranges from 1 to 32
-# We have 2 state loss types × 2 gumbel min temps × 2 value loss weights × 2 value methods × 2 epoch values = 32 combinations
+# Each array task will handle 4 runs (2 configurations x 2 seeds)
+# Calculate the base configurations for this array task
+config_start=$((2 * (SLURM_ARRAY_TASK_ID - 1)))
+config_count=2  # Run 2 configurations per array task
 
-# Subtract 1 to make it zero-indexed
-idx=$((SLURM_ARRAY_TASK_ID - 1))
-
-# Calculate indices for each parameter using integer division and modulo
-state_loss_type_idx=$((idx / 16))
-remainder=$((idx % 16))
-gumbel_min_temp_idx=$((remainder / 8))
-remainder=$((remainder % 8))
-value_loss_weight_idx=$((remainder / 4))
-remainder=$((remainder % 4))
-value_method_idx=$((remainder / 2))
-epoch_idx=$((remainder % 2))
-
-# Get parameter values
-state_loss_type="${state_loss_types[$state_loss_type_idx]}"
-gumbel_min_temp="${gumbel_min_temps[$gumbel_min_temp_idx]}"
-value_loss_weight="${value_loss_weights[$value_loss_weight_idx]}"
-value_method="${value_methods[$value_method_idx]}"
-epochs="${epoch_values[$epoch_idx]}"
-
-# Set up gumbel parameters
-gumbel_params="--use_gumbel --initial_temp=5.0 --min_temp=$gumbel_min_temp"
-
-# Create descriptive experiment name
-experiment_name="slt_${state_loss_type}_gmt_${gumbel_min_temp}_vlw_${value_loss_weight}_vm_${value_method//\ /_}_ep_${epochs}"
-
-# Set output directory 
-output_dir="${base_output_dir}/${experiment_name}"
-mkdir -p "$output_dir"
-
-# Run the same parameter combination twice sequentially
-for repeat in {1..2}; do
-    echo "Starting run $repeat of 2 for experiment: $experiment_name"
+# Loop through the assigned configurations
+for config_offset in $(seq 0 $((config_count - 1))); do
+    config_idx=$((config_start + config_offset))
     
-    # Generate timestamp for this run
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    run_id="${experiment_name}_rep${repeat}_${timestamp}"
+    # Break down config_idx into parameter indices
+    # First determine database index (config_idx / 32 will be 0 for first 32 configs, 1 for next 32)
+    db_idx=$((config_idx / 32))
+    # Adjust config_idx to be relative within each database's parameter space
+    local_config_idx=$((config_idx % 32))
     
-    echo "Configuration (repetition $repeat):"
-    echo "- Database: $db_path"
-    echo "- State loss type: $state_loss_type"
-    echo "- Gumbel min temp: $gumbel_min_temp"
-    echo "- Value loss weight: $value_loss_weight"
-    echo "- Value method: $value_method"
-    echo "- Epochs: $epochs"
-    echo "- Output directory: $output_dir"
-    echo "- Run ID: $run_id"
+    # Now extract parameter indices from local_config_idx
+    num_states_idx=$((local_config_idx / 16))
+    remainder=$((local_config_idx % 16))
     
-    # Construct the command
-    cmd="python -m neural_networks.train_drm $db_path \
-      --output_dir=$output_dir \
-      --run_id=$run_id \
-      --val_size=$val_size \
-      --test_size=$test_size \
-      --batch_size=$batch_size \
-      --epochs=$epochs \
-      --patience=$patience \
-      --num_states=$num_states \
-      --hidden_dim=$hidden_dim \
-      --state_loss_weight=$state_loss_weight \
-      --value_loss_weight=$value_loss_weight \
-      --predictor_type=$predictor_type \
-      --value_method='$value_method' \
-      --state_loss_type=$state_loss_type \
-      --lr=$lr \
-      $use_lr_scheduler \
-      $use_warmup \
-      $use_target_encoder \
-      $use_entropy \
-      $gumbel_params"
+    gumbel_temp_idx=$((remainder / 8))
+    remainder=$((remainder % 8))
     
-    echo "Running command for repetition $repeat: $cmd"
-    eval $cmd
+    state_loss_weight_idx=$((remainder / 4))
+    remainder=$((remainder % 4))
     
-    echo "Completed run $repeat of 2 at $(date)"
+    state_diversity_idx=$((remainder / 2))
+    predictor_type_idx=$((remainder % 2))
     
-    # Small delay between runs
-    sleep 5
+    # Get actual parameter values
+    DB_PATH=${DB_PATHS[$db_idx]}
+    DB_NAME=${DB_NAMES[$db_idx]}
+    NUM_STATES=${NUM_STATES_VALUES[$num_states_idx]}
+    GUMBEL_TEMP=${GUMBEL_TEMP_VALUES[$gumbel_temp_idx]}
+    STATE_LOSS_WEIGHT=${STATE_LOSS_WEIGHT_VALUES[$state_loss_weight_idx]}
+    STATE_DIVERSITY=${STATE_DIVERSITY_OPTIONS[$state_diversity_idx]}
+    PREDICTOR_TYPE=${PREDICTOR_TYPE_VALUES[$predictor_type_idx]}
+    
+    # Create descriptive directory name (short but readable)
+    STATE_DIV_TAG="sd1"
+    if [ -z "$STATE_DIVERSITY" ]; then
+        STATE_DIV_TAG="sd0"
+    fi
+    
+    CONFIG_NAME="ns${NUM_STATES}_gt${GUMBEL_TEMP}_slw${STATE_LOSS_WEIGHT}_${STATE_DIV_TAG}_${PREDICTOR_TYPE}"
+    OUTPUT_DIR="${BASE_OUTPUT_DIR}/${DB_NAME}/${CONFIG_NAME}"
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Run with each seed
+    for SEED in "${SEEDS[@]}"; do
+        # Create a unique run ID with timestamp
+        RUN_ID="${CONFIG_NAME}_seed${SEED}_$(date +%Y%m%d_%H%M%S)"
+        
+        echo "========================================================"
+        echo "Running configuration: $CONFIG_NAME with seed $SEED"
+        echo "Database: $DB_NAME"
+        echo "Config index: $config_idx (local index: $local_config_idx)"
+        echo "Full run ID: $RUN_ID"
+        echo "Output directory: $OUTPUT_DIR"
+        
+        # Construct the command
+        CMD="python -m neural_networks.train_drm $DB_PATH \
+          --system_type=saddle_system \
+          --epochs=$EPOCHS \
+          --val_size=$VAL_SIZE \
+          --test_size=$TEST_SIZE \
+          --batch_size=$BATCH_SIZE \
+          --patience=$PATIENCE \
+          --hidden_dim=$HIDDEN_DIM \
+          --state_loss_weight=$STATE_LOSS_WEIGHT \
+          $USE_WARMUP \
+          $USE_TARGET_ENCODER \
+          $USE_ENTROPY_REG \
+          --state_loss_type=$STATE_LOSS_TYPE \
+          --use_gumbel \
+          --min_temp=0.5 \
+          --initial_temp=$GUMBEL_TEMP \
+          --value_loss_weight=$VALUE_LOSS_WEIGHT \
+          --value_method=$VALUE_METHOD \
+          --predictor_type=$PREDICTOR_TYPE \
+          $STATE_DIVERSITY \
+          --lr=$LR \
+          --seed=$SEED \
+          --output_dir=$OUTPUT_DIR \
+          --run_id=$RUN_ID"
+        
+        echo "Running command: $CMD"
+        eval $CMD
+        
+        echo "Completed run with seed $SEED at $(date)"
+        echo "------------------------------------------------------"
+        
+        # Small delay between runs
+        sleep 5
+    done
 done
 
-echo "Job finished at $(date)"
+echo "All jobs for task $SLURM_ARRAY_TASK_ID completed at $(date)"
