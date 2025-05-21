@@ -118,16 +118,7 @@ def train_drm_model(db_path,
     # Set default loss types based on system if not specified
     if state_loss_type is None:
         state_loss_type = "kl_div"  # Default for all systems
-    
-    if value_loss_type is None:
-        # System-specific defaults
-        if system_type == 'saddle_system' and value_method == 'angle':
-            value_loss_type = 'angular'
-        elif value_method == '90% market share':
-            value_loss_type = 'binary_cross_entropy'
-        else:
-            value_loss_type = 'mse'
-        print(f"Using default value loss type: {value_loss_type}")
+
 
 
     # Update default value_loss_type to use system registry
@@ -832,6 +823,19 @@ if __name__ == "__main__":
                     choices=['kl_div', 'cross_entropy', 'mse', 'js_div'],
                     help='Type of state loss function to use')
     
+    parser.add_argument('--value_loss_type', type=str, default=None,
+                choices=['mse', 'angular', 'binary_cross_entropy'],
+                help='Type of value loss function to use')
+
+    # System-specific parameters
+    parser.add_argument('--value_method', type=str, default=None, help='Which value function should be used (system-specific)')
+    parser.add_argument('--system_type', type=str, required=True, 
+                choices=['tech_substitution', 'saddle_system'],
+                help='Type of dynamical system to train on')
+
+    # Randomness control
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -888,7 +892,8 @@ if __name__ == "__main__":
         ema_decay=args.ema_decay,
         use_state_diversity=args.use_state_diversity,
         diversity_weight=args.diversity_weight,
-        state_loss_type=args.state_loss_type
+        state_loss_type=args.state_loss_type,
+        value_loss_type=args.value_loss_type
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4
