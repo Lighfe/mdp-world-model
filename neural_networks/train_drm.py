@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import psutil
+import copy
 
 # Define project root at the module level
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -78,7 +79,8 @@ def train_drm_model(db_path,
                     ema_decay=0.996,
                     use_state_diversity=False,
                     diversity_weight=1.0,
-                    state_loss_type="kl_div"
+                    state_loss_type="kl_div",
+                    sort_states=False
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -676,6 +678,40 @@ def train_drm_model(db_path,
         'config': checkpoint_config
     }, final_model_path)
     print(f"Saved final model to {final_model_path}")
+
+    # Sort states if requested and save sorted model separately
+    if sort_states:
+        print("Sorting states by value...")
+        try:
+            # Make a copy for sorting (don't modify the original model)
+            sorted_model = copy.deepcopy(model)
+            sorted_model, sorted_indices = sorted_model.sort_states_by_value(
+                system_type=args.system_type,
+                value_method=args.value_method
+            )
+            
+            # Save sorted model
+            sorted_model_path = os.path.join(output_dir, f"drm_final_sorted_{run_id}.pt")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': sorted_model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'config': checkpoint_config,
+                'sorted_indices': sorted_indices.tolist(),
+                'system_type': args.system_type,
+                'value_method': args.value_method
+            }, sorted_model_path)
+            print(f"Saved sorted model to {sorted_model_path}")
+            
+            # Use sorted model for visualizations
+            model = sorted_model
+            print("State sorting completed successfully. Using sorted model for visualizations.")
+            
+        except Exception as e:
+            print(f"Warning: State sorting failed: {e}")
+            print("Continuing with original model for visualizations...")
     
     # Save training history
     history_path = os.path.join(output_dir, f"drm_history_{run_id}.json")
@@ -835,6 +871,9 @@ if __name__ == "__main__":
 
     # Randomness control
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
+
+    parser.add_argument('--sort_states', action='store_true',
+                    help='Sort states by value after training for consistent visualizations')
     
     args = parser.parse_args()
 
@@ -893,7 +932,8 @@ if __name__ == "__main__":
         use_state_diversity=args.use_state_diversity,
         diversity_weight=args.diversity_weight,
         state_loss_type=args.state_loss_type,
-        value_loss_type=args.value_loss_type
+        value_loss_type=args.value_loss_type,
+        sort_states = args.sort_states
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

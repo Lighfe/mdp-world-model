@@ -1,4 +1,5 @@
 from enum import Enum
+import torch
 from data_generation.simulations.grid import tangent_transformation, logistic_transformation
 
 class SystemType(Enum):
@@ -29,6 +30,10 @@ SYSTEM_CONFIGS = {
         'transformation': {
             'type': 'tangent',
             'params': {'x0': 3.0, 'alpha': 0.5}
+        },
+        'value_sorting_functions': {
+            'market_share': lambda values: values[:, 0],  # Single value, sort directly
+            'identity': lambda values: values[:, 1]  / values[:, 0] # similar to angle / market share sorting
         }
     },
     'saddle_system': {
@@ -51,6 +56,10 @@ SYSTEM_CONFIGS = {
         'transformation': {
             'type': 'logistic',
             'params': {'k': 0.5, 'x_0': 0.0}
+        },
+        'value_sorting_functions': {
+            'angle': lambda values: (torch.atan2(values[:, 0], values[:, 1]) * 180 / torch.pi) % 360,
+            'identity': lambda values: values[:, 0] + values[:, 1]  # Sum of transformed components
         }
     }
 }
@@ -88,3 +97,23 @@ def get_transformation(system_type: SystemType):
         return logistic_transformation(params)
     else:
         raise ValueError(f"Unknown transformation type: {trans_config['type']}")
+    
+def get_value_sorting_function(system_type: SystemType, value_method: str):
+    """
+    Get the value sorting function for a given system and value method
+    
+    Args:
+        system_type: Type of system from SystemType enum
+        value_method: Value method name
+        
+    Returns:
+        Function that takes values tensor and returns sorting keys
+    """
+    config = SYSTEM_CONFIGS[system_type.value]
+    if 'value_sorting_functions' not in config:
+        raise ValueError(f"No value sorting functions defined for {system_type.value}")
+    
+    if value_method not in config['value_sorting_functions']:
+        raise ValueError(f"No sorting function for value method '{value_method}' in {system_type.value}")
+    
+    return config['value_sorting_functions'][value_method]

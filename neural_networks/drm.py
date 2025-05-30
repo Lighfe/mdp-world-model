@@ -1,5 +1,6 @@
-import sys
 import os
+import sys
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -10,6 +11,13 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from sqlalchemy import create_engine, select, Table, MetaData
 from sqlalchemy.orm import Session
+
+# Import here to avoid circular imports
+# Define project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from neural_networks.system_registry import SystemType, get_value_sorting_function
 
 
 
@@ -242,6 +250,130 @@ class DiscreteRepresentationsModel(nn.Module):
         one_hot_states = torch.eye(self.num_states, device=next(self.parameters()).device)
         return self.compute_value(one_hot_states)
     
+    # State sorting
+    def sort_states_by_value(self, system_type=None, value_method=None, sorted_indices=None, descending=True):
+        """
+        Sort model states based on their values to make visualizations more consistent.
+        
+        Args:
+            system_type: Type of system (e.g., 'saddle_system'). Not needed if sorted_indices provided.
+            value_method: Value method used (e.g., 'angle'). Not needed if sorted_indices provided.
+            sorted_indices: Pre-computed sorting indices. If None, will compute from values.
+            
+        Returns:
+            tuple: (model, sorted_indices) where model is modified in-place
+        """
+        if sorted_indices is None:
+            if system_type is None or value_method is None:
+                raise ValueError("Must provide either sorted_indices or both system_type and value_method")
+            
+            
+            # Compute values for each one-hot encoded state
+            one_hot_states = torch.eye(self.num_states, device=next(self.parameters()).device)
+            with torch.no_grad():
+                values = self.compute_value(one_hot_states)  # Shape: (num_states, value_dim)
+            
+            # Get sorting function and compute sort keys
+            sorting_func = get_value_sorting_function(SystemType[system_type.upper()], value_method)
+            sort_keys = sorting_func(values)
+            
+            # Create sorted indices
+            sorted_indices = torch.argsort(sort_keys, descending=True).cpu()
+            
+            print(f"Computed state sorting based on {value_method} values:")
+            for i, orig_idx in enumerate(sorted_indices):
+                print(f"  New state {i} <- Original state {orig_idx.item()} (value: {sort_keys[orig_idx].item():.2f})")
+        
+        else:
+            sorted_indices = torch.tensor(sorted_indices) if not isinstance(sorted_indices, torch.Tensor) else sorted_indices
+            print(f"Using provided sorted indices: {sorted_indices.tolist()}")
+        
+        # Apply the reordering to model parameters
+        self._reorder_state_parameters(sorted_indices)
+        
+        return self, sorted_indices
+
+    def _reorder_state_parameters(self, sorted_indices):
+        """
+        Reorder model parameters according to sorted_indices.
+        
+        Args:
+            sorted_indices: Tensor of shape (num_states,) with new->old state mapping
+        """
+        device = next(self.parameters()).device
+        sorted_indices = sorted_indices.to(device)
+        
+        with torch.no_grad():
+            # 1. Reorder encoder output layer (last layer)
+            encoder_output_layer = self.encoder[-1]
+            encoder_output_layer.weight.data = encoder_output_layer.weight.data[sorted_indices]
+            if encoder_output_layer.bias is not None:
+                encoder_output_layer.bias.data = encoder_output_layer.bias.data[sorted_indices]
+            
+            # 2. Reorder target encoder if it exists
+            if hasattr(self, 'target_encoder') and self.target_encoder is not None:
+                target_output_layer = self.target_encoder[-1]
+                target_output_layer.weight.data = target_output_layer.weight.data[sorted_indices]
+                if target_output_layer.bias is not None:
+                    target_output_layer.bias.data = target_output_layer.bias.data[sorted_indices]
+            
+            # 3. Reorder predictor (type-dependent)
+            if hasattr(self.predictor, '__class__'):
+                predictor_class_name = self.predictor.__class__.__name__
+                
+                if predictor_class_name == 'StandardPredictor':
+                    self._reorder_standard_predictor(sorted_indices)
+                elif predictor_class_name == 'BilinearPredictor':
+                    self._reorder_bilinear_predictor(sorted_indices)
+                else:
+                    print(f"Warning: Reordering not implemented for {predictor_class_name}")
+            
+            # 4. Reorder value network input layer
+            value_input_layer = self.value_net[0]  # First layer takes state probabilities
+            # Reorder columns (input dimensions) corresponding to state probabilities
+            value_input_layer.weight.data = value_input_layer.weight.data[:, sorted_indices]
+
+    def _reorder_standard_predictor(self, sorted_indices):
+        """Reorder StandardPredictor parameters"""
+        # Input layer: concatenates [state_probs, encoded_control]
+        # Only reorder the first num_states columns (state part)
+        predictor_input_layer = self.predictor.predictor[0]  # First layer of sequential predictor
+        old_weight = predictor_input_layer.weight.data.clone()
+        
+        # Split weight matrix: [state_part, control_part]
+        state_weight = old_weight[:, :self.num_states]  # First num_states columns
+        control_weight = old_weight[:, self.num_states:]  # Remaining columns
+        
+        # Reorder state part, keep control part unchanged
+        reordered_state_weight = state_weight[:, sorted_indices]
+        predictor_input_layer.weight.data = torch.cat([reordered_state_weight, control_weight], dim=1)
+        
+        # Output layer: produces next state probabilities - reorder rows
+        predictor_output_layer = self.predictor.predictor[-1]  # Last layer
+        predictor_output_layer.weight.data = predictor_output_layer.weight.data[sorted_indices]
+        if predictor_output_layer.bias is not None:
+            predictor_output_layer.bias.data = predictor_output_layer.bias.data[sorted_indices]
+
+    def _reorder_bilinear_predictor(self, sorted_indices):
+        """Reorder BilinearPredictor parameters"""
+        # Bilinear layer: interaction(state_probs, control_features)
+        # Need to reorder the state input dimension of the bilinear layer
+        bilinear_layer = self.predictor.interaction
+        
+        # Bilinear layer weight shape: (output_dim, input1_dim, input2_dim)
+        # input1_dim = num_states (state probabilities)
+        # input2_dim = hidden_dim (control features)
+        old_weight = bilinear_layer.weight.data.clone()
+        
+        # Reorder along the state input dimension (dim=1)
+        bilinear_layer.weight.data = old_weight[:, sorted_indices, :]
+        
+        # Output layer: produces next state probabilities - reorder rows
+        output_layer = self.predictor.output
+        output_layer.weight.data = output_layer.weight.data[sorted_indices]
+        if output_layer.bias is not None:
+            output_layer.bias.data = output_layer.bias.data[sorted_indices]
+    
 class BasePredictor(nn.Module):
     """Base class for predictor implementations"""
     def __init__(self, num_states, control_dim, hidden_dim, control_format="continuous"):
@@ -377,3 +509,60 @@ class ControlGate(nn.Module):
         
         return modulated_features
 
+
+# NOTE: This function might need some tweaking for future use
+
+def sort_existing_model(model_path, output_path=None, system_type=None, value_method=None, sorted_indices=None):
+    """
+    Sort states in an already trained model and save the result.
+    
+    Args:
+        model_path: Path to saved model checkpoint
+        output_path: Path to save sorted model. If None, adds '_sorted' to original name
+        system_type: Type of system. Not needed if sorted_indices provided
+        value_method: Value method. Not needed if sorted_indices provided  
+        sorted_indices: Pre-computed sorting indices. If None, will compute from values
+        
+    Returns:
+        tuple: (sorted_model, sorted_indices, output_path)
+    """
+    # Load the model
+    checkpoint = torch.load(model_path, map_location='cpu')
+    config = checkpoint['config']
+    
+    # Recreate model
+    model = DiscreteRepresentationsModel(
+        obs_dim=config['obs_dim'],
+        control_dim=config['control_dim'],
+        value_dim=config['value_dim'],
+        num_states=config['num_states'],
+        hidden_dim=config['hidden_dim'],
+        # Add other necessary config parameters as needed
+    )
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Sort the states
+    model, sorted_indices = model.sort_states_by_value(
+        system_type=system_type,
+        value_method=value_method, 
+        sorted_indices=sorted_indices
+    )
+    
+    # Determine output path
+    if output_path is None:
+        path_parts = model_path.split('.')
+        output_path = '.'.join(path_parts[:-1]) + '_sorted.' + path_parts[-1]
+    
+    # Save sorted model
+    sorted_checkpoint = checkpoint.copy()
+    sorted_checkpoint['model_state_dict'] = model.state_dict()
+    sorted_checkpoint['sorted_indices'] = sorted_indices.tolist()
+    if system_type:
+        sorted_checkpoint['system_type'] = system_type
+    if value_method:
+        sorted_checkpoint['value_method'] = value_method
+    
+    torch.save(sorted_checkpoint, output_path)
+    print(f"Saved sorted model to: {output_path}")
+    
+    return model, sorted_indices, output_path
