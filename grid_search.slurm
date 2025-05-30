@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=drm_grid
+#SBATCH --job-name=drm_grid_fixed
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=2:00:00
@@ -10,7 +10,7 @@
 #SBATCH --mem=4G
 #SBATCH --output=log/drm_grid_%A_%a.out
 #SBATCH --error=log/drm_grid_%A_%a.err
-#SBATCH --array=1-32
+#SBATCH --array=1-8
 
 # Print job info
 echo "Job started at $(date)"
@@ -24,7 +24,7 @@ mkdir -p log
 
 # Load modules and activate environment
 module load anaconda
-source activate mdp-world-model  # Replace with your actual environment name
+source activate mdp-world-model
 
 # Check GPU
 echo "Checking GPU availability..."
@@ -36,10 +36,10 @@ export OMP_PROC_BIND=true
 
 # Define databases
 DB_PATHS=("datasets/results/single_saddle_system.db" "datasets/results/single_saddle_system_horizontal.db")
-DB_NAMES=("regular" "horizontal")
+DB_NAMES=("vertical" "horizontal")
 
 # Fixed parameters for all runs
-BASE_OUTPUT_DIR="neural_networks/output/saddle_grid_search"
+BASE_OUTPUT_DIR="neural_networks/output/saddle_num_states"
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
@@ -47,116 +47,115 @@ BATCH_SIZE=64
 PATIENCE=100
 HIDDEN_DIM=64
 LR=1e-5
-ENTROPY_WEIGHT=1.0
 USE_WARMUP="--use_warmup --warmup_epochs=10"
 USE_TARGET_ENCODER="--use_target_encoder --ema_decay=0.9"
-USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=$ENTROPY_WEIGHT"
+USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=1.0"
 STATE_LOSS_TYPE="kl_div"
 VALUE_METHOD="angle"
-VALUE_LOSS_WEIGHT=2.0
+STATE_LOSS_WEIGHT=1.0
+
+# FIXED PARAMETERS as requested
+GUMBEL_TEMP=3.0
+PREDICTOR_TYPE="standard"
+# No state diversity (removed from command)
+SORT_STATES="--sort_states"
 
 # Define parameter values for grid search
-NUM_STATES_VALUES=(2 4)
-GUMBEL_TEMP_VALUES=(2.0 5.0)
-STATE_LOSS_WEIGHT_VALUES=(0.5 1.0)
-STATE_DIVERSITY_OPTIONS=("--use_state_diversity --diversity_weight=0.01" "")
-PREDICTOR_TYPE_VALUES=("bilinear" "standard")
+NUM_STATES_VALUES=(2 3 4 8)
+VALUE_LOSS_WEIGHT_VALUES=(1.0 2.0)
 SEEDS=(42 11)
 
-# Each array task will handle 4 runs (2 configurations x 2 seeds)
-# Calculate the base configurations for this array task
-config_start=$((2 * (SLURM_ARRAY_TASK_ID - 1)))
-config_count=2  # Run 2 configurations per array task
+# Total combinations: 4 num_states × 2 value_loss_weight × 2 datasets × 2 seeds = 32
+# Running 4 combinations per array job = 8 array jobs total
 
-# Loop through the assigned configurations
-for config_offset in $(seq 0 $((config_count - 1))); do
-    config_idx=$((config_start + config_offset))
+# Calculate which 4 runs this array task should handle
+runs_per_task=4
+start_run=$(((SLURM_ARRAY_TASK_ID - 1) * runs_per_task))
+
+echo "Array task $SLURM_ARRAY_TASK_ID will handle runs $start_run to $((start_run + runs_per_task - 1))"
+
+# Loop through the 4 runs assigned to this array task
+for run_offset in $(seq 0 $((runs_per_task - 1))); do
+    global_run_idx=$((start_run + run_offset))
     
-    # Break down config_idx into parameter indices
-    # First determine database index (config_idx / 32 will be 0 for first 32 configs, 1 for next 32)
-    db_idx=$((config_idx / 32))
-    # Adjust config_idx to be relative within each database's parameter space
-    local_config_idx=$((config_idx % 32))
+    # Break down global_run_idx into parameter indices
+    # Order: num_states (4) × value_loss_weight (2) × dataset (2) × seed (2)
     
-    # Now extract parameter indices from local_config_idx
-    num_states_idx=$((local_config_idx / 16))
-    remainder=$((local_config_idx % 16))
+    # Extract indices using modular arithmetic
+    seed_idx=$((global_run_idx % 2))
+    temp1=$((global_run_idx / 2))
     
-    gumbel_temp_idx=$((remainder / 8))
-    remainder=$((remainder % 8))
+    db_idx=$((temp1 % 2))
+    temp2=$((temp1 / 2))
     
-    state_loss_weight_idx=$((remainder / 4))
-    remainder=$((remainder % 4))
-    
-    state_diversity_idx=$((remainder / 2))
-    predictor_type_idx=$((remainder % 2))
+    value_loss_weight_idx=$((temp2 % 2))
+    num_states_idx=$((temp2 / 2))
     
     # Get actual parameter values
+    NUM_STATES=${NUM_STATES_VALUES[$num_states_idx]}
+    VALUE_LOSS_WEIGHT=${VALUE_LOSS_WEIGHT_VALUES[$value_loss_weight_idx]}
     DB_PATH=${DB_PATHS[$db_idx]}
     DB_NAME=${DB_NAMES[$db_idx]}
-    NUM_STATES=${NUM_STATES_VALUES[$num_states_idx]}
-    GUMBEL_TEMP=${GUMBEL_TEMP_VALUES[$gumbel_temp_idx]}
-    STATE_LOSS_WEIGHT=${STATE_LOSS_WEIGHT_VALUES[$state_loss_weight_idx]}
-    STATE_DIVERSITY=${STATE_DIVERSITY_OPTIONS[$state_diversity_idx]}
-    PREDICTOR_TYPE=${PREDICTOR_TYPE_VALUES[$predictor_type_idx]}
+    SEED=${SEEDS[$seed_idx]}
     
-    # Create descriptive directory name (short but readable)
-    STATE_DIV_TAG="sd1"
-    if [ -z "$STATE_DIVERSITY" ]; then
-        STATE_DIV_TAG="sd0"
-    fi
+    # Create descriptive run name
+    CONFIG_NAME="ns${NUM_STATES}_vlw${VALUE_LOSS_WEIGHT}_${DB_NAME}_seed${SEED}"
     
-    CONFIG_NAME="ns${NUM_STATES}_gt${GUMBEL_TEMP}_slw${STATE_LOSS_WEIGHT}_${STATE_DIV_TAG}_${PREDICTOR_TYPE}"
-    OUTPUT_DIR="${BASE_OUTPUT_DIR}/${DB_NAME}/${CONFIG_NAME}"
+    # All runs go in the same base directory (no separate dataset folders)
+    OUTPUT_DIR="${BASE_OUTPUT_DIR}"
     mkdir -p "$OUTPUT_DIR"
     
-    # Run with each seed
-    for SEED in "${SEEDS[@]}"; do
-        # Create a unique run ID with timestamp
-        RUN_ID="${CONFIG_NAME}_seed${SEED}_$(date +%Y%m%d_%H%M%S)"
-        
-        echo "========================================================"
-        echo "Running configuration: $CONFIG_NAME with seed $SEED"
-        echo "Database: $DB_NAME"
-        echo "Config index: $config_idx (local index: $local_config_idx)"
-        echo "Full run ID: $RUN_ID"
-        echo "Output directory: $OUTPUT_DIR"
-        
-        # Construct the command
-        CMD="python -m neural_networks.train_drm $DB_PATH \
-          --system_type=saddle_system \
-          --epochs=$EPOCHS \
-          --val_size=$VAL_SIZE \
-          --test_size=$TEST_SIZE \
-          --batch_size=$BATCH_SIZE \
-          --patience=$PATIENCE \
-          --hidden_dim=$HIDDEN_DIM \
-          --state_loss_weight=$STATE_LOSS_WEIGHT \
-          $USE_WARMUP \
-          $USE_TARGET_ENCODER \
-          $USE_ENTROPY_REG \
-          --state_loss_type=$STATE_LOSS_TYPE \
-          --use_gumbel \
-          --min_temp=0.5 \
-          --initial_temp=$GUMBEL_TEMP \
-          --value_loss_weight=$VALUE_LOSS_WEIGHT \
-          --value_method=$VALUE_METHOD \
-          --predictor_type=$PREDICTOR_TYPE \
-          $STATE_DIVERSITY \
-          --lr=$LR \
-          --seed=$SEED \
-          --output_dir=$OUTPUT_DIR \
-          --run_id=$RUN_ID"
-        
-        echo "Running command: $CMD"
-        eval $CMD
-        
-        echo "Completed run with seed $SEED at $(date)"
-        echo "------------------------------------------------------"
-        
-        # Small delay between runs
-        sleep 5
-    done
+    # Create unique run ID
+    RUN_ID="${CONFIG_NAME}_$(date +%Y%m%d_%H%M%S)_${global_run_idx}"
+    
+    echo "========================================================"
+    echo "Running global run $global_run_idx:"
+    echo "  num_states: $NUM_STATES"
+    echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
+    echo "  database: $DB_NAME ($DB_PATH)"
+    echo "  seed: $SEED"
+    echo "  run_id: $RUN_ID"
+    echo "  output_dir: $OUTPUT_DIR"
+    
+    # Construct and run the command
+    CMD="python -m neural_networks.train_drm $DB_PATH \
+      --system_type=saddle_system \
+      --epochs=$EPOCHS \
+      --val_size=$VAL_SIZE \
+      --test_size=$TEST_SIZE \
+      --batch_size=$BATCH_SIZE \
+      --patience=$PATIENCE \
+      --hidden_dim=$HIDDEN_DIM \
+      --state_loss_weight=$STATE_LOSS_WEIGHT \
+      --value_loss_weight=$VALUE_LOSS_WEIGHT \
+      --num_states=$NUM_STATES \
+      $USE_WARMUP \
+      $USE_TARGET_ENCODER \
+      $USE_ENTROPY_REG \
+      --state_loss_type=$STATE_LOSS_TYPE \
+      --use_gumbel \
+      --min_temp=0.5 \
+      --initial_temp=$GUMBEL_TEMP \
+      --value_method=$VALUE_METHOD \
+      --predictor_type=$PREDICTOR_TYPE \
+      $SORT_STATES \
+      --lr=$LR \
+      --seed=$SEED \
+      --output_dir=$OUTPUT_DIR \
+      --run_id=$RUN_ID"
+    
+    echo "Running command: $CMD"
+    eval $CMD
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ Successfully completed run $global_run_idx at $(date)"
+    else
+        echo "✗ Failed run $global_run_idx at $(date)"
+    fi
+    echo "------------------------------------------------------"
+    
+    # Small delay between runs
+    sleep 2
 done
 
-echo "All jobs for task $SLURM_ARRAY_TASK_ID completed at $(date)"
+echo "All runs for array task $SLURM_ARRAY_TASK_ID completed at $(date)"
