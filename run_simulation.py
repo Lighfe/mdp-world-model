@@ -155,11 +155,11 @@ def initialize_simulation(config, config_path):
         config = determine_delta_t(config, simulator, config_path)
     
     # Log simulation start
-    logging.info(f"Initialized simulation of {config["model"]} with the following parameters:")
-    logging.info(f"Bounds: {config["bounds"]}")
+    logging.info(f"Initialized simulation of {config['model']} with the following parameters:")
+    logging.info(f"Bounds: {config['bounds']}")
     logging.info(f"Transformations: {None if transformations == None else [tf[0].__name__ for tf in transformations]}")
     logging.info(f"Transformation Parameters: {config['trafo_params']}")
-    logging.info(f"Resolution: {config["resolution"]}")
+    logging.info(f"Resolution: {config['resolution']}")
     logging.info(f"Number of samples per cell: {config['num_samples_per_cell']}")
     logging.info(f"Delta t: {config['delta_t']}")
 
