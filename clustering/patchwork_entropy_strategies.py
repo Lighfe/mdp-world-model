@@ -8,13 +8,15 @@ from scipy.stats import entropy
 import numpy as np
 parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 sys.path.append(parent_dir)
+from clustering.patchwork_entropy_measures import shannon_entropy
 
 
 # Define an interface (abstract class) for entropy computation strategies
 class EntropyStrategy(ABC):
 
-    def __init__(self):
+    def __init__(self, entropy_measure = shannon_entropy):
         self.overall_entropy = 0
+        self.entropy_measure = entropy_measure
     
     
     def _init_entropy_dict(self, patchwork):
@@ -29,7 +31,7 @@ class EntropyStrategy(ABC):
         for s in patchwork.current_patches:
             for a in patchwork.trans_probs[s]:
                 # Calculate entropy for each action and save it in entropy_dict[s][a]
-                entropy_dict.setdefault(s, {})[a] = entropy(list(patchwork.trans_probs[s][a].values()), base=2)
+                entropy_dict.setdefault(s, {})[a] = self.entropy_measure(patchwork.trans_probs[s][a], s) #entropy(list(patchwork.trans_probs[s][a].values()), base=2)
             entropy_dict[s]['avg'] = sum(entropy_dict[s].values()) / len(entropy_dict[s].values())
             self.overall_entropy += patchwork.patch_relevances[s] * entropy_dict[s]['avg']
         
@@ -65,7 +67,7 @@ class EntropyStrategy(ABC):
                     else:
                         merged_probs[a][newpatch] = merged_probs[a].get(newpatch,0) + (patchwork.patch_relevances[s] / total_patch_relevance) *prob
             # For each action, calculate the entropy 
-            merged_entropy_dict[a] = entropy(list(merged_probs[a].values()), base = 2)
+            merged_entropy_dict[a] = self.entropy_measure(merged_probs[a], newpatch) #entropy(list(merged_probs[a].values()), base = 2)
         
         # Calculate the average of the action entropies
         merged_entropy_dict['avg'] = sum(merged_entropy_dict.values()) / len(merged_entropy_dict)
@@ -184,10 +186,10 @@ class ShannonEntropyAll(EntropyStrategy):
         return new_trans_probs
 
 
-    def _compute_entropy_dict_from_trans_probs(self, trans_probs):
+    def _compute_entropy_dict_from_trans_probs(self, trans_probs, source_patch):
         entropy_dict = dict()
         for a in trans_probs:
-            entropy_dict[a] = entropy(list(trans_probs[a].values()), base=2)
+            entropy_dict[a] = self.entropy_measure(trans_probs[a], source_patch) #entropy(list(trans_probs[a].values()), base=2)
         entropy_dict['avg'] = sum(entropy_dict.values()) / len(entropy_dict.values())
         return entropy_dict
 
@@ -217,7 +219,7 @@ class ShannonEntropyAll(EntropyStrategy):
         for pred in predecessors:
             current_entropy = patchwork.entropy_dict[pred]['avg']
             new_trans_probs = self._compute_trans_probs_of_newpatch_predecessors(patchwork, pred, patch1, patch2, 'new')
-            new_entropy_dict = self._compute_entropy_dict_from_trans_probs(new_trans_probs)
+            new_entropy_dict = self._compute_entropy_dict_from_trans_probs(new_trans_probs, pred)
             predecessor_entropy_losses.append((patchwork.patch_relevances[pred] * (new_entropy_dict['avg'] - current_entropy)))
 
         entropy_loss_total = entropy_loss_direct + sum(predecessor_entropy_losses)    
@@ -242,7 +244,7 @@ class ShannonEntropyAll(EntropyStrategy):
         predecessors = self._get_common_predecessors_of_2_patches(patchwork, patch1, patch2)
         for pred in predecessors:
             self.overall_entropy -= patchwork.patch_relevances[pred] * patchwork.entropy_dict[pred]['avg']
-            patchwork.entropy_dict[pred] = self._compute_entropy_dict_from_trans_probs(patchwork.trans_probs[pred])
+            patchwork.entropy_dict[pred] = self._compute_entropy_dict_from_trans_probs(patchwork.trans_probs[pred], pred)
             self.overall_entropy += patchwork.patch_relevances[pred] * patchwork.entropy_dict[pred]['avg']
             patchwork.patch_to_history_of_avg_entropy[pred].append((step, merged_entropy_dict['avg']))
 
@@ -281,6 +283,7 @@ class ShannonEntropyAll(EntropyStrategy):
 
 
         #Consider couples of cells of which newpatch is a common predecessor
+        #This is necessary because we consider the entropy loss of the common predecessors in the entropy loss calculation
         newpatch_targets = set().union([targetpatch 
                                          for actiondict in patchwork.trans_probs[newpatch].values() 
                                          for targetpatch in actiondict.keys()

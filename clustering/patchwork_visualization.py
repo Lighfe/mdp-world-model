@@ -128,14 +128,14 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     def generate_streamplot(count, U, V):
         """Generate a streamplot for a given control."""
 
-        fig, ax = plt.subplots(figsize = (20,20))
+        fig, ax = plt.subplots(figsize = (20,20), dpi=150)
         #TODO improve this color choice
-        color = ['#ff7f00',  # orange
+        color = ['#3a3d3d', # dark gray
+                 '#fe6100', #'#e35605',  # (dark) orange
                  '#0248fa', #'#0293fa', #'#02b8fa', #'#1d16f0',  # blue
-                 '#4e5252',  # gray
                 '#f52f98'  # pink – good light contrast, use sparingly
                 ][count % 4] #[ '#1D58F3', '#DC267F', '#FFB000']
-        ax.streamplot(X1, X2, U, V, color=color, linewidth=4, density = 0.7, arrowsize=4, broken_streamlines=False)
+        ax.streamplot(X1, X2, U, V, color=color, linewidth=3, density = 0.7, arrowsize=4, broken_streamlines=False)
 
         # Convert the Matplotlib plot to a NumPy array
         ax.axis('off')  # Turn off the axis
@@ -149,7 +149,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         alpha = np.where(np.all(image >= threshold, axis=-1), 0, 255).astype(np.uint8)
         image = np.dstack((image, alpha))
         plt.close(fig)  # Close the figure to prevent it from displaying immediately
-        image[..., 3] = (image[..., 3].astype(float) * 0.7).astype(np.uint8)
+        image[..., 3] = (image[..., 3].astype(float) * 0.6).astype(np.uint8)
         im = hv.RGB(image, bounds=(0, 0, 1, 1)) 
         return im
     
@@ -158,13 +158,13 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                
         fig, ax = plt.subplots(figsize = (20,20))
         #TODO improve this color choice
-        nullcline_colors = ['#ad0202',  # dark red
+        nullcline_colors = ['#161717',  # almost black
+                '#ad0202',  # dark red
                  '#13239c',  # dark blue
-                 '#161717',  # almost black
                  '#750641'  # dark pink
                 ][count % 4] #[ '#1D58F3', '#DC267F', '#FFB000']
-        ax.contour(X1, X2, U, levels=[0], colors=[nullcline_colors], linewidths=11)
-        ax.contour(X1, X2, V, levels=[0], colors=[nullcline_colors], linewidths=11)
+        ax.contour(X1, X2, U, levels=[0], colors=[nullcline_colors], linewidths=14)
+        ax.contour(X1, X2, V, levels=[0], colors=[nullcline_colors], linewidths=14)
 
         # Convert the Matplotlib plot to a NumPy array
         ax.axis('off')  # Turn off the axis
@@ -178,7 +178,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         alpha = np.where(np.all(image >= threshold, axis=-1), 0, 255).astype(np.uint8)
         image = np.dstack((image, alpha))
         plt.close(fig)  # Close the figure to prevent it from displaying immediately
-        image[..., 3] = (image[..., 3].astype(float) * 0.5).astype(np.uint8)
+        image[..., 3] = (image[..., 3].astype(float) * 0.45).astype(np.uint8)
         im = hv.RGB(image, bounds=(0, 0, 1, 1))
         return im
 
@@ -215,66 +215,6 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
         return fig
    
-    def create_initial_loss_function_plot(patchwork):
-        """
-        Create a initial plot of the loss function value over time (with an initial vertical line).
-        """
-        sns.set_theme(style="whitegrid", font_scale=1.1)
-        fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
-
-        # Colorblind-friendly palette
-        color_cycle = plt.get_cmap('tab10').colors
-
-        # Plot each loss function
-        for idx, (loss_type, values) in enumerate(patchwork.loss_function.history_of_loss_function_values.items()):
-            ax.plot(
-                values,
-                label=loss_type,
-                color=color_cycle[idx % len(color_cycle)],
-                marker='o',
-                markersize=4,
-                linewidth=3
-            )
-
-        # Axes labels and title
-        ax.set_xlabel('Time Step', fontsize=18)
-        ax.set_ylabel('Loss Function Value', fontsize=18)
-        ax.set_title('Loss Function Value Over Time', fontsize=25, pad=20)
-        ax.xaxis.labelpad = 15
-        ax.yaxis.labelpad = 15
-
-        # Grid and background
-        ax.grid(True, linestyle='--', alpha=0.6)
-        ax.set_facecolor('#ffffff')
-
-        # Spine and tick aesthetics
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1.2)
-        ax.spines['bottom'].set_linewidth(1.2)
-        ax.tick_params(axis='both', which='major', labelsize=14)
-
-        # Legend styling
-        ax.legend(
-            loc='upper center',
-            bbox_to_anchor=(0.5, -0.05),
-            fontsize=16,
-            frameon=True,
-            borderaxespad=0,
-            borderpad=1,
-            bbox_transform=fig.transFigure,
-            ncol=len(patchwork.loss_function.history_of_loss_function_values.keys()) + 1
-        )
-        # Vertical line (initially hidden)
-        vline = ax.axvline(x=0, color='red', linestyle='--', linewidth=2)
-
-        return fig, ax, vline
-    
-    def update_vertical_line(vline, current_timestep):
-        vline.set_xdata([current_timestep])
-        vline.set_visible(True)
-
-
     def create_loss_function_plot_hv(step=0):
         """
         Create a HoloViews plot of the loss function values over time with a vertical line.
@@ -301,7 +241,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             height = 370,
             legend_position='bottom',
             legend_offset=(-50, 10),
-            fontsize={'title': 13, 'labels': 10, 'ticks': 8, 'legend': 8},
+            fontsize={'title': 12, 'labels': 10, 'ticks': 8, 'legend': 8},
             show_grid=True
         )
 
@@ -356,12 +296,12 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 patch_borders.append((cx - dx, cy + dx, cx + dx, cy + dx))  # Top border
 
         # Create border segments
-        if selected_color == 'White':
-            linewidth = 3 / (1 + 0.3 * grid_resolution[0]**1.1)
-            borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
-        else:
-            linewidth = 3 / (1 + 0.1 * grid_resolution[0]**1.1) #smaller lines for higher resolutions
-            borders = hv.Segments(patch_borders).opts(color='white', line_width=linewidth) 
+        #if selected_color == 'White':
+        #    linewidth = 3 / (1 + 0.3 * grid_resolution[0]**1.1)
+        #    borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
+        
+        linewidth = 4 / (1 + 0.1 * grid_resolution[0]**1.1) #smaller lines for higher resolutions
+        borders = hv.Segments(patch_borders).opts(color='white', line_width=linewidth) 
 
         #Overlay 
         layers = [heatmap *borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
@@ -386,7 +326,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         vector_selector_nullclines = pn.widgets.MultiChoice(name="Select Controls for Nullclines", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
         color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches', 'White'])
         
-        # Bind the function to the slider
+        # Bind the functions to the slider
         interactive_plot = pn.bind(get_current_patchwork, 
                                    step=slider, 
                                    selected_controls = vector_selector_streamplots, 
@@ -407,16 +347,6 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                                            height=110   # Adjust height as needed
                                             )
 
-        # Loss Function Value Plot ##########################
-        # Generate the static plot once
-        fig, ax, vline = create_initial_loss_function_plot(patchwork)
-        loss_function_plot_pane = pn.pane.Matplotlib(fig, tight=True, height = 300)
-
-        def on_slider_update(timestep):
-            update_vertical_line(vline, timestep)
-            loss_function_plot_pane.param.trigger('object')  # Trigger refresh without recreating figure
-        slider.param.watch(lambda event: on_slider_update(event.new), 'value')
-        
         #### Layout ###########################################
         # Title Column
         loss_fct_explanation = pn.pane.Markdown("    ### " + patchwork.loss_function.loss_function_strg)
@@ -425,7 +355,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                         loss_fct_explanation,
                         pn.Spacer(height=30),
                         pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, vector_selector_nullclines, color_selector),
-                        )
+                        width = 400)
         
         # Wrap the interactive plot in a fixed-height column to help with alignment
         interactive_column = pn.Column(interactive_plot, sizing_mode='fixed', height=500)
@@ -436,7 +366,6 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             pn.Spacer(height=50), 
             colorbar_pane,
             pn.Spacer(height=50), 
-            #loss_function_plot_pane,
             interactive_loss_function_plot,
             sizing_mode='fixed',
             height=500  # Match height with interactive_column
@@ -459,6 +388,7 @@ def create_plot_and_save_patchwork(db_name,
                                    title_interactive = "", 
                                    show_interactive = False, 
                                    entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
+                                   entropy_measure = 'shannon_entropy',
                                    loss_function_strg = 'TransitionEntropyLoss',
                                    loss_function_coeff = None):
     """
@@ -486,13 +416,13 @@ def create_plot_and_save_patchwork(db_name,
                                                    table_name, 
                                                    run_ids,  
                                                    entropy_strategy_strg, 
+                                                   entropy_measure,
                                                    loss_function_strg,
                                                    loss_function_coeff)
-    
-    fig, ax = plt.subplots(figsize=(7, 6))
-    plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)
-    plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5)
     if path_to_save != None:
+        fig, ax = plt.subplots(figsize=(7, 6))
+        plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)
+        plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5)
         fig.savefig(path_id + "/StartEntropy.png")
     
     patchwork.run()

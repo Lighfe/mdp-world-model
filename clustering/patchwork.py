@@ -11,6 +11,7 @@ from datastructures import SortedValueDict
 from datasets.data_reconstruction import get_and_reconstruct_data, reconstruct_solver_and_grid
 from patchwork_entropy_strategies import *
 from patchwork_loss_functions import *
+from patchwork_entropy_measures import *
 
 class Patchwork:
     #TODO: Add docstring for the class
@@ -531,10 +532,11 @@ def create_patchwork(db_name,
                      table_name, 
                      run_ids, 
                      entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
+                     entropy_measure = 'shannon_entropy',
                      loss_function_strg='TransitionEntropyLoss',
                      loss_function_coeff = None):    
     
-    entropy_strategy = globals()[entropy_strategy_strg]()
+    entropy_strategy = globals()[entropy_strategy_strg](globals()[entropy_measure]) #create the entropy strategy object
     loss_function = globals()[loss_function_strg]()
     if loss_function_coeff is not None:
         loss_function.coeff = loss_function_coeff #set the coeffecient of the loss function
