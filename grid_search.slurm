@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=drm_grid_fixed
+#SBATCH --job-name=drm_grid_predictor
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=2:00:00
@@ -10,7 +10,7 @@
 #SBATCH --mem=4G
 #SBATCH --output=log/drm_grid_%A_%a.out
 #SBATCH --error=log/drm_grid_%A_%a.err
-#SBATCH --array=1-8
+#SBATCH --array=1-4
 
 # Print job info
 echo "Job started at $(date)"
@@ -36,10 +36,10 @@ export OMP_PROC_BIND=true
 
 # Define databases
 DB_PATHS=("datasets/results/single_saddle_system.db" "datasets/results/single_saddle_system_horizontal.db")
-DB_NAMES=("vertical" "horizontal")
+DB_NAMES=("regular" "horizontal")
 
 # Fixed parameters for all runs
-BASE_OUTPUT_DIR="neural_networks/output/saddle_num_states"
+BASE_OUTPUT_DIR="neural_networks/output/saddle_grid_search_predictor"
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
@@ -55,18 +55,19 @@ VALUE_METHOD="angle"
 STATE_LOSS_WEIGHT=1.0
 
 # FIXED PARAMETERS as requested
+NUM_STATES=4
 GUMBEL_TEMP=3.0
-PREDICTOR_TYPE="standard"
+GUMBEL_MIN=0.5
 # No state diversity (removed from command)
 SORT_STATES="--sort_states"
 
 # Define parameter values for grid search
-NUM_STATES_VALUES=(2 3 4 8)
+PREDICTOR_TYPE_VALUES=("bilinear" "standard")
 VALUE_LOSS_WEIGHT_VALUES=(1.0 2.0)
 SEEDS=(42 11)
 
-# Total combinations: 4 num_states × 2 value_loss_weight × 2 datasets × 2 seeds = 32
-# Running 4 combinations per array job = 8 array jobs total
+# Total combinations: 2 predictors × 2 value_loss_weight × 2 datasets × 2 seeds = 16
+# Running 4 combinations per array job = 4 array jobs total
 
 # Calculate which 4 runs this array task should handle
 runs_per_task=4
@@ -79,7 +80,7 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     global_run_idx=$((start_run + run_offset))
     
     # Break down global_run_idx into parameter indices
-    # Order: num_states (4) × value_loss_weight (2) × dataset (2) × seed (2)
+    # Order: predictor (2) × value_loss_weight (2) × dataset (2) × seed (2)
     
     # Extract indices using modular arithmetic
     seed_idx=$((global_run_idx % 2))
@@ -89,17 +90,17 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     temp2=$((temp1 / 2))
     
     value_loss_weight_idx=$((temp2 % 2))
-    num_states_idx=$((temp2 / 2))
+    predictor_idx=$((temp2 / 2))
     
     # Get actual parameter values
-    NUM_STATES=${NUM_STATES_VALUES[$num_states_idx]}
+    PREDICTOR_TYPE=${PREDICTOR_TYPE_VALUES[$predictor_idx]}
     VALUE_LOSS_WEIGHT=${VALUE_LOSS_WEIGHT_VALUES[$value_loss_weight_idx]}
     DB_PATH=${DB_PATHS[$db_idx]}
     DB_NAME=${DB_NAMES[$db_idx]}
     SEED=${SEEDS[$seed_idx]}
     
     # Create descriptive run name
-    CONFIG_NAME="ns${NUM_STATES}_vlw${VALUE_LOSS_WEIGHT}_${DB_NAME}_seed${SEED}"
+    CONFIG_NAME="ns${NUM_STATES}_${PREDICTOR_TYPE}_vlw${VALUE_LOSS_WEIGHT}_${DB_NAME}_seed${SEED}"
     
     # All runs go in the same base directory (no separate dataset folders)
     OUTPUT_DIR="${BASE_OUTPUT_DIR}"
@@ -111,6 +112,7 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     echo "========================================================"
     echo "Running global run $global_run_idx:"
     echo "  num_states: $NUM_STATES"
+    echo "  predictor_type: $PREDICTOR_TYPE"
     echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
     echo "  database: $DB_NAME ($DB_PATH)"
     echo "  seed: $SEED"
@@ -134,7 +136,7 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
       $USE_ENTROPY_REG \
       --state_loss_type=$STATE_LOSS_TYPE \
       --use_gumbel \
-      --min_temp=0.5 \
+      --min_temp=$GUMBEL_MIN \
       --initial_temp=$GUMBEL_TEMP \
       --value_method=$VALUE_METHOD \
       --predictor_type=$PREDICTOR_TYPE \
