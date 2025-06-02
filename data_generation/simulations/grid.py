@@ -2,8 +2,9 @@ import numpy as np
 import random
 import copy
 from itertools import product
+from scipy.spatial import Voronoi, Delaunay, KDTree
 import sys
-
+from matplotlib import path
 
 class Grid:
 
@@ -43,6 +44,7 @@ class Grid:
         
         if grid_transformations is not None:
             self._init_transformations(grid_transformations)
+            self._init_transformed_grid_lines()
         else:
             self.grid_lines = [np.linspace(start, end, num+1) for (start, end), num in zip(self.bounds, self.resolution)]
             self.tf_grid_lines = copy.deepcopy(self.grid_lines)
@@ -72,12 +74,20 @@ class Grid:
         for i, bound in enumerate(self.bounds):
             self.tf_bounds[i] = (self.transformations[i](bound[0]), self.transformations[i](bound[1]))
 
+        self.transformed_bool = True
+
+
+    def _init_transformed_grid_lines(self):
+        """
+        Initializes the grid lines in the transformed space based on the bounds and resolution.
+        This is called after the transformations are initialized.
+        """
         # creates gridlines in Z-space based on bounds and resolution
         self.tf_grid_lines = [np.linspace(start, end, num+1) for (start, end), num in zip(self.tf_bounds, self.resolution)]
         # gridlines in X-space
         self.grid_lines = [np.vectorize(self.inverse_transformations[dim])(self.tf_grid_lines[dim]) for dim in range(self.dimension)]
 
-        self.transformed_bool = True
+
 
     def get_config(self):
         config = {
@@ -293,6 +303,242 @@ class Grid:
             rnd_point = tuple(random.uniform(self.grid_lines[dim][i], self.grid_lines[dim][i+1]) for dim, i in enumerate(idx))
         
         return rnd_point
+
+
+
+def dirichlet_random_point(vertices):
+    """
+    Sample uniformly from the simplex defined by `vertices`.
+    `vertices` is an m x d array of simplex vertices.
+    """
+    m, d = vertices.shape
+    # sample exponential(1) variates
+    y = -np.log(np.random.rand(m))
+    bary = y / np.sum(y)
+    return bary @ vertices
+
+class VoronoiGrid(Grid):
+    """
+    VoronoiGrid Class implementation for finite and infinite spaces, with the possibility of transformations.
+    This class inherits from the Grid class.
+    It is used to generate a Voronoi grid based on the initial conditions.
+    """
+
+    def __init__(self, bounds: list[list[float]], numbercells: int = 10, seed: int = None, grid_transformations=None, cell_centers: np.ndarray = None):
+        """
+        Initializes the Voronoi tesselation grid based on the bounds of the space and the number of cells.
+
+        Args:
+            bounds (list of tuples): [(x_min, x_max), (y_min, y_max), ...] with np.inf for unboundedness.
+            numbercells (int): number of Voronoi cells
+            grid_transformations (list of 3tuples functions): (transformation function, 
+                                                    inverse transformation function,
+                                                    transformation function derivative)
+            cell_centers (np.ndarray of dim(numbercenters, self.dimension)): Optional, if given, the Voronoi cells are generated based on these centers.
+        """
+
+        self.bounds = np.array(copy.deepcopy(bounds))
+        self.dimension = self.bounds.shape[0]
+        
+        if cell_centers is not None:
+            if cell_centers.shape[1] != self.dimension:
+                raise ValueError("Cell centers dimensionality does not match space intervals.")
+            else:
+                self.cell_centers = np.array(cell_centers)
+                self.numbercells = self.cell_centers.shape[0]
+
+        else:
+            self.numbercells = numbercells
+
+            if seed is None:
+                seed = np.random.SeedSequence().generate_state(1)[0]
+            self.seed = seed
+
+            rng = np.random.default_rng(self.seed)
+            # Sample points uniformly in the bounded space
+            self.cell_centers = rng.uniform(
+                low=self.bounds[:, 0],
+                high=self.bounds[:, 1],
+                size=(self.numbercells, self.dimension))
+
+        self._generate_voronoi_cells(self.cell_centers)
+
+        self.transformations = None
+        self.inverse_transformations = None
+        self.transformation_derivatives = None
+        self.transformed_bool = False
+        self.transformation_params = dict()
+        self.tf_bounds = copy.deepcopy(self.bounds)
+
+        if grid_transformations is not None:
+            self._init_transformations(grid_transformations) 
+        
+
+    def _generate_voronoi_cells(self, cell_centers: np.ndarray = None):
+        self.indices = list(range(self.numbercells)) #correspond to the cell centers in the order of the cell centers
+
+        self.voronoi = Voronoi(self.cell_centers)
+        self.delaunay = Delaunay(self.cell_centers)
+        self.kdtree = KDTree(self.cell_centers)
+        self._cell_data = {} #storage for per-cell ridge data 
+
+
+    def get_config(self):
+        config = {
+            'grid_type': 'Voronoi',
+            'bounds': self.bounds,
+            'dimension': self.dimension,
+            'transformations': None if self.transformations == None else [tf.__name__ for tf in self.transformations] ,
+            'transformation_params': self.transformation_params if self.transformation_params != None else None, # list of dicts
+            'cell_centers': self.cell_centers.tolist(),
+            'seed': self.seed if hasattr(self, 'seed') else None,
+        }
+        return config
+
+
+    def get_cell_index(self, coord:np.ndarray, in_transformed_space = False):
+        """
+        Finds the Voronoi grid cell for a given coordinate.
+        Returns the index of the closest Voronoi center (cell index).
+
+        Args:   coord (tuple): Real-world coordinate (e.g., (x, y)).
+                in_transformed_space (bool): If True, the coordinate is given in the transformed space, otherwise in the original space.
+
+        Returns: idx (int): The Voronoi grid cell index.
+        """
+        if len(coord) != self.dimension:
+            raise ValueError("Coordinate dimensionality does not match space intervals.")
+        
+        if not in_transformed_space:
+            coord = self.transform(coord)
+
+        bounds = self.tf_bounds #search always in transformed space to avoid errors with np.inf
+                    
+        for dim in range(self.dimension):
+            if (coord[dim] < bounds[dim][0]) or (coord[dim] > bounds[dim][1]):
+                raise ValueError("Coordinate is out of bounds.")
+
+        return self.kdtree.query(coord)[1]
+    
+
+    def get_cell_coordinates(self, idx: int, transformed_space = False):
+        """
+        Returns the vertices of the corresponding Voronoi cell.
+
+        Args: idx (int): The grid cell index .
+
+        Returns: coords (list of tuples): The coordinates of the vertices.
+        """
+        # TODO: Intersect this with the bounds of the space so we always return a bounded cell.
+        region_index = self.voronoi.point_region[idx]
+        region = self.voronoi.regions[region_index]
+        if -1 in region or len(region) == 0:
+            raise ValueError("Voronoi cell is unbounded.")
+        return self.voronoi.vertices[region]
+
+
+    def get_cell_centers(self, transformed_space=False):
+        """
+        Returns the set of all Voronoi cell centers in the transformed or the original space.
+
+        Args:
+            transformed_space (bool): If True, computes centers in the transformed space; otherwise, in the original space.
+
+        Returns:
+            centers (np.array of dim (n_cells, n_dim)): A list of the center coordinates of each Voronoi cell.
+        """
+        if transformed_space:
+            return self.cell_centers
+        else:
+            return self.inverse_transform(self.cell_centers)
+        
+
+    def get_neighbors(self) -> dict[int, list[int]]:
+        """
+        Returns a dictionary mapping each Voronoi cell to its neighbors in the bounded region.
+
+        Some Voronoi cells may be neighbors in the outer space, but we only consider neighbors within the bounded region defined by the Voronoi cells.
+            Therefore: If a ridge vertex between cells i and j lies inside the box, their Voronoi cells will touch within the box — so they are true neighbors in the bounded region.
+        Thus, two cells are considered neighbors if any of their Voronoi ridge vertices lie inside the bounds or else only if their midpoint lies on the ridge.
+        """
+
+        neighbors = {i: set() for i in range(self.numbercells)}
+
+        def vertex_in_bounds(vertex_id):
+            """Check if a vertex lies within the bounds of the Voronoi grid."""
+            vertex = self.voronoi.vertices[vertex_id]
+            return  np.all((vertex >= self.tf_bounds[:, 0]) & (vertex <= self.tf_bounds[:, 1]))
+        
+        
+
+        for (i, j), ridge_vertex_ids in zip(self.voronoi.ridge_points, self.voronoi.ridge_vertices):
+
+            ridge_in_space = False
+
+            # Check if any vertex is inside the bounded box
+            for v_id in ridge_vertex_ids:
+                if v_id != -1 and vertex_in_bounds(v_id):
+                    ridge_in_space = True
+                    break
+
+            # If no ridge vertex is in bounds, check if the midpoints (always inside the convex space) of the cells lies on the ridge     
+            if not ridge_in_space:
+                midpoint = (self.cell_centers[i] + self.cell_centers[j]) / 2
+                cell_of_midpoint = self.get_cell_index(midpoint, in_transformed_space=True)
+                # Check if the midpoint lies on the ridge
+                if cell_of_midpoint in [i,j]: 
+                    # now this part, to be absolutely sure, but probably not needed
+                    other_cell = i if cell_of_midpoint == j else j
+                    other_center = self.cell_centers[other_cell]
+                    # Move a tiny step from the midpoint toward the other center and check which cell it belongs to
+                    direction = other_center - midpoint
+                    tiny_step = 1e-10 * direction / (np.linalg.norm(direction) + 1e-14)
+                    probe_point = midpoint + tiny_step
+                    probe_cell = self.get_cell_index(probe_point, in_transformed_space=True)
+                    if probe_cell == other_cell:
+                        ridge_in_space = True
+                 # If the midpoint is not on the ridge, we do not consider the cells as neighbors (is this true?)
+            if ridge_in_space:
+                # If any ridge vertex is in bounds, consider the cells as neighbors
+                neighbors[i].add(int(j))
+                neighbors[j].add(int(i))
+        
+        return {k: list(v) for k, v in neighbors.items()}
+    
+
+    def choose_random_point_from_cell(self, idx: int) -> np.ndarray:
+        """
+        Sample a single random point from a Voronoi cell corresponding to the transformed space (because of unboundedness).
+       
+        Args: idx (int): The grid cell index.
+
+        Returns: point (tuple): The random point in original coordinates.
+        """
+        #TODO
+
+        return
+    
+    def get_initial_conditions(self, num_points_per_cell: int) -> np.ndarray:
+        """
+        Efficiently generates initial conditions for the Voronoi grid.
+        Returns a set of num_points_per_cell times numbercells initial conditions for the grid.
+        Args: num_points_per_cell (int): Number of initial conditions per Voronoi cell.
+        Returns: points (np.array of dim(numbercells, num_points_per_cell)): The initial conditions, each row is a point.
+        """
+        points = []
+        for idx in range(self.numbercells):
+            for _ in range(num_points_per_cell):
+                pt = self.choose_random_point_from_cell(idx)
+                points.append(pt)
+        #TODO check dimensions, this is just a proposal
+        return np.array(points).reshape(self.numbercells, num_points_per_cell, -1)
+
+
+
+
+
+
+
 
 # TODO the transformation functions should be named exactly as the generating function
 def fractional_transformation(x0):
