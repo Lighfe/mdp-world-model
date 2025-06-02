@@ -412,7 +412,12 @@ class StandardPredictor(BasePredictor):
         super().__init__(num_states, control_dim, hidden_dim, control_format)
         
         # If control is categorical, control_dim is number of categories (saddle points)
-        self.control_encoder = nn.Linear(control_dim, num_states)
+        # self.control_encoder = nn.Linear(control_dim, num_states) #old
+        self.control_encoder = nn.Sequential(
+            nn.Linear(control_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_states)
+            )
 
         self.predictor = nn.Sequential(
             nn.Linear(2*num_states, hidden_dim),
@@ -444,7 +449,12 @@ class BilinearPredictor(BasePredictor):
         super().__init__(num_states, control_dim, hidden_dim, control_format)
         
         # Only encode control - use state representation directly
-        self.control_encoder = nn.Linear(control_dim, hidden_dim)
+        self.control_encoder = nn.Linear(control_dim, num_states)
+        """self.control_encoder = nn.Sequential(
+        nn.Linear(control_dim, hidden_dim),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, num_states)
+        )"""
         
         # Interaction layer - captures how control affects each state dimension
         self.interaction = nn.Bilinear(num_states, hidden_dim, hidden_dim)
