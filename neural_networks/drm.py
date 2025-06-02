@@ -457,7 +457,7 @@ class BilinearPredictor(BasePredictor):
         )"""
         
         # Interaction layer - captures how control affects each state dimension
-        self.interaction = nn.Bilinear(num_states, hidden_dim, hidden_dim)
+        self.interaction = nn.Bilinear(num_states, num_states, hidden_dim)
         
         # Output processing
         self.hidden = nn.Linear(hidden_dim, hidden_dim)
