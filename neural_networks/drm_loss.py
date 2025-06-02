@@ -98,7 +98,7 @@ class StableDRMLoss(nn.Module):
 
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
-        self.initial_entropy_weight = entropy_weight if use_entropy_reg else 0.0
+        self.initial_entropy_weight = entropy_weight if self.use_entropy_reg else 0.0
         self.current_entropy_weight = entropy_weight
         self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
@@ -106,7 +106,7 @@ class StableDRMLoss(nn.Module):
 
         # VICReg parameters
         self.use_vicreg = use_vicreg
-        self.vicreg_weight = vicreg_weight
+        self.vicreg_weight = vicreg_weight if self.use_vicreg else 0.0
         self.vicreg_lambda = vicreg_lambda
         self.vicreg_mu = vicreg_mu
         self.vicreg_nu = vicreg_nu
