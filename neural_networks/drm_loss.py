@@ -60,6 +60,8 @@ class StableDRMLoss(nn.Module):
                  use_state_diversity=False, diversity_weight=0.001,
                  use_entropy_reg=True, entropy_weight=3.0, 
                  use_entropy_decay=True, entropy_decay_proportion=0.2,
+                 use_vicreg=True, vicreg_weight=0.1, vicreg_lambda=25.0, vicreg_mu=25.0, vicreg_nu=1.0,
+                 vicreg_variance_target=0.4, vicreg_invariance_schedule=True,
                  state_loss_type="kl_div", value_loss_type="mse"):
         """
         Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
@@ -76,6 +78,13 @@ class StableDRMLoss(nn.Module):
                                         reaches its minimum value (0.2 = 20% of training)
             state_loss_type: Type of state loss ("kl_div", "cross_entropy", "mse", "js_div")
             value_loss_type: Type of value loss ("mse", "angular", "binary_cross_entropy")
+            use_vicreg: Whether to use VICReg-style regularization
+            vicreg_weight: Weight for variance, invariance, covariance regularization
+            vicreg_lambda: Weight for VICReg invariance term
+            vicreg_mu: Weight for VICReg variance term  
+            vicreg_nu: Weight for VICReg covariance term
+            vicreg_variance_target: Target standard deviation for variance term (0.433 theoretical max with softmax)
+            vicreg_invariance_schedule: Whether to anneal invariance weight over time
         """
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
@@ -85,7 +94,8 @@ class StableDRMLoss(nn.Module):
         self.use_state_diversity = use_state_diversity
         self.diversity_weight = diversity_weight if use_state_diversity else 0.0
         self.state_diversity = StateDiversityLoss()
-        
+        #TODO: Remove State Diversity Loss
+
         # New entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
         self.initial_entropy_weight = entropy_weight if use_entropy_reg else 0.0
@@ -93,6 +103,16 @@ class StableDRMLoss(nn.Module):
         self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
         self.entropy_decay_proportion = entropy_decay_proportion
+
+        # VICReg parameters
+        self.use_vicreg = use_vicreg
+        self.vicreg_weight = vicreg_weight
+        self.vicreg_lambda = vicreg_lambda
+        self.vicreg_mu = vicreg_mu
+        self.vicreg_nu = vicreg_nu
+        self.vicreg_variance_target = vicreg_variance_target
+        self.vicreg_invariance_schedule = vicreg_invariance_schedule
+        self.vicreg_epsilon = 1e-4
 
         # State loss type
         self.state_loss_type = state_loss_type
@@ -194,7 +214,55 @@ class StableDRMLoss(nn.Module):
         v_pred = torch.clamp(v_pred, epsilon, 1.0 - epsilon)
         return F.binary_cross_entropy(v_pred, v_true)
     
-    def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None):
+    def get_vicreg_invariance_weight(self, epoch, max_epochs):
+        """Anneals VICReg invariance weight over time"""
+        if not self.vicreg_invariance_schedule:
+            return self.vicreg_lambda
+            
+        # Reduce invariance weight over time as state boundaries form
+        # TODO: test out if this helps or hurts
+        decay_factor = max(0.1, 1.0 - (epoch / (max_epochs * 0.5)))
+        return self.vicreg_lambda * decay_factor
+    
+    def _vicreg_loss(self, s_x, s_y, epoch, max_epochs):
+        """
+        Compute VICReg loss components
+        
+        Args:
+            s_x: Current state probabilities (batch_size, num_states)
+            s_y: Next state probabilities (batch_size, num_states) 
+            total_epochs: Total training epochs for scheduling
+            
+        Returns:
+            vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance
+        """
+        
+        batch_size, num_states = s_x.shape
+        
+        # Invariance loss - temporal consistency
+        lambda_effective = self.get_vicreg_invariance_weight(epoch, max_epochs)
+        vicreg_invariance = F.mse_loss(s_x, s_y)
+        
+        # Variance loss - prevent state collapse
+        std_per_state = torch.sqrt(s_x.var(dim=0) + self.vicreg_epsilon)
+        vicreg_variance = torch.mean(F.relu(self.vicreg_variance_target - std_per_state))
+        
+        # Covariance loss - push toward one-hot encoding
+        s_x_centered = s_x - s_x.mean(dim=0)
+        cov_matrix = (s_x_centered.T @ s_x_centered) / (batch_size - 1)
+        
+        # Off-diagonal elements
+        off_diag_mask = ~torch.eye(num_states, dtype=torch.bool, device=s_x.device)
+        vicreg_covariance = cov_matrix[off_diag_mask].pow(2).sum() / num_states
+        
+        # Total VICReg loss
+        vicreg_total = (lambda_effective * vicreg_invariance + 
+                       self.vicreg_mu * vicreg_variance + 
+                       self.vicreg_nu * vicreg_covariance)
+        
+        return vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance
+
+    def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None, epoch=0, max_epochs=100):
         """
         Compute the combined loss with optional diversity and entropy regularization.
         
@@ -204,6 +272,8 @@ class StableDRMLoss(nn.Module):
             v_true: True value (computed from environment)
             v_pred_for_all_states: Predicted values for all one-hot encoded states (num_states, value_dim)
             s_x: Current state probabilities (for diversity/entropy regularization)
+            epoch: Current training epoch (for scheduling)
+            max_epochs: Total training epochs (for scheduling)
         """
 
         # dimension checking
@@ -262,18 +332,23 @@ class StableDRMLoss(nn.Module):
             batch_weight = 0.8 # hard coded
             individual_weight = 0.2 # hard coded
             entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
-
+            vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance = self._vicreg_loss(
+                s_x, s_y, epoch, max_epochs
+                )
         
         # Combined loss
         total_loss = (
             self.state_loss_weight * state_loss + 
             self.value_loss_weight * value_loss +
             self.diversity_weight * diversity_loss + # only when enabled
-            self.current_entropy_weight * entropy_loss # only when enabled
+            self.current_entropy_weight * entropy_loss + # only when enabled
+            self.vicreg_weight * vicreg_total # only when enabled
         )
         
-        # Return loss components and entropy metrics
-        return total_loss, state_loss, value_loss, diversity_loss, entropy_loss, batch_entropy, individual_entropy
+        # Return loss components, entropy metrics, vicreg components
+        return (total_loss, state_loss, value_loss, diversity_loss, entropy_loss, 
+                batch_entropy, individual_entropy,
+                vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance)
     
     def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse"):
         """

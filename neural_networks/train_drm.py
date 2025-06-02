@@ -30,7 +30,7 @@ from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
     plot_training_curves, plot_regulization_metrics,
-    analyze_mdp_from_model, visualize_mdp
+    analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics
 )
 
 def set_all_seeds(seed):
@@ -80,7 +80,15 @@ def train_drm_model(db_path,
                     use_state_diversity=False,
                     diversity_weight=1.0,
                     state_loss_type="kl_div",
-                    sort_states=False
+                    sort_states=False,
+                    use_vicreg=True,
+                    #TODO: adjust vicreg params
+                    vicreg_weight=0.1,
+                    vicreg_lambda=25.0,
+                    vicreg_mu=25.0,
+                    vicreg_nu=1.0,
+                    vicreg_variance_target=0.4,
+                    vicreg_invariance_schedule=True
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -227,7 +235,14 @@ def train_drm_model(db_path,
         use_entropy_decay=use_entropy_decay,
         entropy_decay_proportion=entropy_decay_proportion,
         state_loss_type=state_loss_type,
-        value_loss_type=value_loss_type
+        value_loss_type=value_loss_type,
+        use_vicreg=use_vicreg,
+        vicreg_weight=vicreg_weight,
+        vicreg_lambda=vicreg_lambda,
+        vicreg_mu=vicreg_mu,
+        vicreg_nu=vicreg_nu,
+        vicreg_variance_target=vicreg_variance_target,
+        vicreg_invariance_schedule=vicreg_invariance_schedule
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -271,13 +286,21 @@ def train_drm_model(db_path,
         "train_entropy_loss": [],
         "train_batch_entropy": [],
         "train_individual_entropy": [],
+        "train_vicreg_total": [],
+        "train_vicreg_invariance": [],
+        "train_vicreg_variance": [],
+        "train_vicreg_covariance": [],
         "val_loss": [],
         "val_state_loss": [],
         "val_value_loss": [],
         "val_div_loss": [],
         "val_entropy_loss": [],
         "val_batch_entropy": [],
-        "val_individual_entropy": []
+        "val_individual_entropy": [],
+        "val_vicreg_total": [],
+        "val_vicreg_invariance": [],
+        "val_vicreg_variance": [],
+        "val_vicreg_covariance": []
     }
     
     best_val_loss = float("inf")
@@ -310,8 +333,12 @@ def train_drm_model(db_path,
         train_entropy_loss = 0.0
         train_batch_entropy = 0.0 
         train_individual_entropy = 0.0
+        train_vicreg_total = 0.0
+        train_vicreg_invariance = 0.0
+        train_vicreg_variance = 0.0
+        train_vicreg_covariance = 0.0
 
-
+        # TODO: maybe move this to the loss function
         if loss_fn.use_entropy_reg:
             entropy_weight = loss_fn.update_entropy_weight(epoch, epochs)
             decay_status = "decaying" if loss_fn.use_entropy_decay else "constant"
@@ -341,8 +368,9 @@ def train_drm_model(db_path,
                     continue
                 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy = loss_fn(
-                    s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
+                (total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy,
+                vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
+                    s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, epoch=epoch, max_epochs=epochs)
                 
                 # Check if loss is NaN
                 if torch.isnan(total_loss):
@@ -373,6 +401,10 @@ def train_drm_model(db_path,
                 train_entropy_loss += entropy_loss.item()
                 train_batch_entropy += batch_entropy.item()
                 train_individual_entropy += individual_entropy.item()
+                train_vicreg_total += vicreg_total.item()
+                train_vicreg_invariance += vicreg_invariance.item()
+                train_vicreg_variance += vicreg_variance.item()
+                train_vicreg_covariance += vicreg_covariance.item()
                 
             except Exception as e:
                 print(f"Error in batch {batch_idx}: {e}")
@@ -390,6 +422,10 @@ def train_drm_model(db_path,
             train_entropy_loss /= num_batches
             train_batch_entropy /= num_batches
             train_individual_entropy /= num_batches
+            train_vicreg_total /= num_batches
+            train_vicreg_invariance /= num_batches
+            train_vicreg_variance /= num_batches
+            train_vicreg_covariance /= num_batches
         
         # Validation phase
         model.eval()
@@ -400,6 +436,10 @@ def train_drm_model(db_path,
         val_entropy_loss = 0.0
         val_batch_entropy = 0.0
         val_individual_entropy = 0.0
+        val_vicreg_total = 0.0
+        val_vicreg_invariance = 0.0
+        val_vicreg_variance = 0.0
+        val_vicreg_covariance = 0.0
         valid_batches = 0
         
         with torch.no_grad():
@@ -421,8 +461,9 @@ def train_drm_model(db_path,
                         continue
                     
                     # Calculate loss
-                    total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy = loss_fn(
-                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
+                    (total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy,
+                        vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
+                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, epoch=epoch, max_epochs=epochs)
                     
                     # Check if loss is NaN
                     if torch.isnan(total_loss):
@@ -436,6 +477,10 @@ def train_drm_model(db_path,
                     val_entropy_loss += entropy_loss.item()
                     val_batch_entropy += batch_entropy.item()
                     val_individual_entropy += individual_entropy.item()
+                    val_vicreg_total += vicreg_total.item()
+                    val_vicreg_invariance += vicreg_invariance.item()
+                    val_vicreg_variance += vicreg_variance.item()
+                    val_vicreg_covariance += vicreg_covariance.item()
                     valid_batches += 1
                     
                 except Exception as e:
@@ -451,6 +496,10 @@ def train_drm_model(db_path,
             val_entropy_loss /= valid_batches
             val_batch_entropy /= valid_batches
             val_individual_entropy /= valid_batches
+            val_vicreg_total /= valid_batches
+            val_vicreg_invariance /= valid_batches
+            val_vicreg_variance /= valid_batches
+            val_vicreg_covariance /= valid_batches
         
         # Update history
         history["train_loss"].append(train_loss)
@@ -460,6 +509,10 @@ def train_drm_model(db_path,
         history["train_entropy_loss"].append(train_entropy_loss)
         history["train_batch_entropy"].append(train_batch_entropy)
         history["train_individual_entropy"].append(train_individual_entropy)
+        history["train_vicreg_total"].append(train_vicreg_total)
+        history["train_vicreg_invariance"].append(train_vicreg_invariance)
+        history["train_vicreg_variance"].append(train_vicreg_variance)
+        history["train_vicreg_covariance"].append(train_vicreg_covariance)
         history["val_loss"].append(val_loss)
         history["val_state_loss"].append(val_state_loss)
         history["val_value_loss"].append(val_value_loss)
@@ -467,12 +520,18 @@ def train_drm_model(db_path,
         history["val_entropy_loss"].append(val_entropy_loss)
         history["val_batch_entropy"].append(val_batch_entropy)
         history["val_individual_entropy"].append(val_individual_entropy)
+        history["val_vicreg_total"].append(val_vicreg_total)
+        history["val_vicreg_invariance"].append(val_vicreg_invariance)
+        history["val_vicreg_variance"].append(val_vicreg_variance)
+        history["val_vicreg_covariance"].append(val_vicreg_covariance)
         
         # Print progress
         # Print progress with all metrics
         print(f"Epoch {epoch+1}/{epochs} - "
             f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, "
             f"Div: {train_div_loss:.4f}, Entropy: {train_entropy_loss:.4f})")
+        print(f"  VICReg: {train_vicreg_total/num_batches:.4f} (Inv: {train_vicreg_invariance/num_batches:.4f}, "
+            f"Var: {train_vicreg_variance/num_batches:.4f}, Cov: {train_vicreg_covariance/num_batches:.4f})")
         print(f"  Batch Entropy: {train_batch_entropy:.4f}, Individual Entropy: {train_individual_entropy:.4f}")
         print(f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, "
             f"Div: {val_div_loss:.4f}, Entropy: {val_entropy_loss:.4f})")
@@ -556,6 +615,10 @@ def train_drm_model(db_path,
     test_entropy_loss = 0.0
     test_batch_entropy = 0.0
     test_individual_entropy = 0.0
+    test_vicreg_total = 0.0
+    test_vicreg_invariance = 0.0
+    test_vicreg_variance = 0.0
+    test_vicreg_covariance = 0.0
     test_samples = 0
     test_value_predictions = []
     test_value_targets = []
@@ -581,8 +644,9 @@ def train_drm_model(db_path,
                 # TODO: entropy
 
                 # Calculate loss
-                total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy = loss_fn(
-                    s_y, s_y_pred, v_true, v_pred_for_all_states, s_x)
+                (total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy,
+                vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
+                    s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, epoch=epoch, max_epochs=epochs)
                 
                 # Skip if loss is NaN
                 if torch.isnan(total_loss):
@@ -603,6 +667,10 @@ def train_drm_model(db_path,
                 test_entropy_loss += entropy_loss.item() * len(x)
                 test_batch_entropy += batch_entropy.item() * len(x)
                 test_individual_entropy += individual_entropy.item() * len(x)
+                test_vicreg_total += vicreg_total.item() * len(x)
+                test_vicreg_invariance += vicreg_invariance.item() * len(x)
+                test_vicreg_variance += vicreg_variance.item() * len(x)
+                test_vicreg_covariance += vicreg_covariance.item() * len(x)
                 test_samples += len(x)
                 
             except Exception as e:
@@ -618,6 +686,10 @@ def train_drm_model(db_path,
         test_entropy_loss /= test_samples
         test_batch_entropy /= test_samples
         test_individual_entropy /= test_samples
+        test_vicreg_total /= test_samples
+        test_vicreg_invariance /= test_samples
+        test_vicreg_variance /= test_samples
+        test_vicreg_covariance /= test_samples
     
     # Calculate additional metrics if needed
     test_value_predictions = np.concatenate(test_value_predictions) if test_value_predictions else np.array([])
@@ -638,6 +710,10 @@ def train_drm_model(db_path,
         "test_entropy_loss": float(test_entropy_loss),
         "test_batch_entropy": float(test_batch_entropy),
         "test_individual_entropy": float(test_individual_entropy),
+        "test_vicreg_total": float(test_vicreg_total),
+        "test_vicreg_invariance": float(test_vicreg_invariance),
+        "test_vicreg_variance": float(test_vicreg_variance),
+        "test_vicreg_covariance": float(test_vicreg_covariance),
         "test_r2_score": float(r2_score),
         "test_samples": test_samples,
     }
@@ -724,7 +800,13 @@ def train_drm_model(db_path,
                          state_loss_type=loss_fn.state_loss_type)
     # Plot regulization metrics
     plot_regulization_metrics(history, test_metrics, os.path.join(output_dir, f"entropy_metrics_{run_id}.png"))
-
+    # Plot VICReg metrics
+    vicreg_weights = {
+        'lambda': vicreg_lambda, 
+        'mu': vicreg_mu, 
+        'nu': vicreg_nu
+    }
+    plot_vicreg_metrics(history, test_metrics, vicreg_weights, os.path.join(output_dir, f"vicreg_metrics_{run_id}.png"))
 
     # Visualize Modl Architecture
     #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
@@ -875,6 +957,23 @@ if __name__ == "__main__":
     parser.add_argument('--sort_states', action='store_true',
                     help='Sort states by value after training for consistent visualizations')
     
+    # VICReg arguments
+    # TODO: adjust default
+    parser.add_argument('--use_vicreg', action='store_true', 
+                    help='Use VICReg-style state regularization')
+    parser.add_argument('--vicreg_weight', type=float, default=0.1,
+                help='Overall weight for VICReg loss components')
+    parser.add_argument('--vicreg_lambda', type=float, default=25.0,
+                    help='Weight for VICReg invariance term')
+    parser.add_argument('--vicreg_mu', type=float, default=25.0,
+                    help='Weight for VICReg variance term')
+    parser.add_argument('--vicreg_nu', type=float, default=1.0,
+                    help='Weight for VICReg covariance term')
+    parser.add_argument('--vicreg_variance_target', type=float, default=0.4,
+                    help='Target standard deviation for VICReg variance term')
+    parser.add_argument('--vicreg_invariance_schedule', action='store_true',
+                    help='Gradually reduce VICReg invariance weight over training')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -933,7 +1032,14 @@ if __name__ == "__main__":
         diversity_weight=args.diversity_weight,
         state_loss_type=args.state_loss_type,
         value_loss_type=args.value_loss_type,
-        sort_states = args.sort_states
+        sort_states = args.sort_states,
+        use_vicreg=args.use_vicreg,
+        vicreg_weight=args.vicreg_weight,
+        vicreg_lambda=args.vicreg_lambda,
+        vicreg_mu=args.vicreg_mu,
+        vicreg_nu=args.vicreg_nu,
+        vicreg_variance_target=args.vicreg_variance_target,
+        vicreg_invariance_schedule=args.vicreg_invariance_schedule
     )
 
 # python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4
