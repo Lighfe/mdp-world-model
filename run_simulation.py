@@ -12,7 +12,7 @@ from math import floor, log10
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.models.general_ode_solver import FitzHughNagumoModel, GeneralODENumericalSolver
 from data_generation.models.simple_test_models import *
-from data_generation.simulations.grid import Grid, fractional_transformation, logistic_transformation
+from data_generation.simulations.grid import Grid, VoronoiGrid, fractional_transformation, logistic_transformation
 from data_generation.simulations.simulator import Simulator
 from datasets.database import clear_data_by_run_id
 
@@ -113,7 +113,8 @@ def update_run_dict(config):
     model_run_dict = run_dict[config['model']]   
     model_run_dict[next_key] = dict()
     model_run_dict[next_key]['run_ids'] = list()
-    model_run_dict[next_key]['resolution'] = config["resolution"]
+    model_run_dict[next_key]['resolution'] = config["resolution"] if 'resolution' in config else None
+    model_run_dict[next_key]['numbercells'] = config["numbercells"] if 'numbercells' in config else None
     model_run_dict[next_key]['num_samples_per_cell'] = config['num_samples_per_cell']
     model_run_dict[next_key]['controls'] = list(config['controls'])
     model_run_dict[next_key]['delta_t'] = config['delta_t']
@@ -139,7 +140,17 @@ def initialize_simulation(config, config_path):
     
     config["bounds"] = replace_inf(config["bounds"])
 
-    grid = Grid(bounds=config["bounds"], resolution=config["resolution"], grid_transformations=transformations)
+    if "grid_type" in config and config["grid_type"] == "Voronoi":
+        logging.info("Voronoi grid type detected.")
+        grid = VoronoiGrid(bounds=config["bounds"], 
+                           numbercells=config.get("numbercells", 10), 
+                           grid_transformations = config.get("transformations", None), 
+                           seed=config.get("grid_seed", None),
+                           cell_centers=config.get("cell_centers", None),
+                           padding_margin= config.get("padding_margin", 'auto')
+                           )
+    else:
+        grid = Grid(bounds=config["bounds"], resolution=config["resolution"], grid_transformations=transformations)
 
 
     if 'control_params' in config.keys():
@@ -159,7 +170,12 @@ def initialize_simulation(config, config_path):
     logging.info(f"Bounds: {config['bounds']}")
     logging.info(f"Transformations: {None if transformations == None else [tf[0].__name__ for tf in transformations]}")
     logging.info(f"Transformation Parameters: {config['trafo_params']}")
-    logging.info(f"Resolution: {config['resolution']}")
+
+    logging.info(f"Resolution: {config['resolution']}") if 'resolution' in config else None
+    logging.info(f"Grid Type: {config.get('grid_type', 'Regular')}")  # Default to 'Regular' if not specified
+    logging.info(f"Numbercells: {config['numbercells']}") if 'numbercells' in config else None
+    logging.info(f"Padding Margin: {config['padding_margin']}") if 'padding_margin' in config else None
+
     logging.info(f"Number of samples per cell: {config['num_samples_per_cell']}")
     logging.info(f"Delta t: {config['delta_t']}")
 
@@ -183,7 +199,8 @@ def run_and_store_simulations(config, config_path):
                 num_samples_per_cell=config['num_samples_per_cell'],
                 num_steps=config['num_steps'],
                 save_result=True )
-                     
+
+            logging.info(f"Simulation completed for control: {control}")         
             # Store results
             db_path = config['output_path'] / config['db-name']
             simulator.store_results_to_sqlite(db_path)

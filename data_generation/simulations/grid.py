@@ -2,7 +2,7 @@ import numpy as np
 import random
 import copy
 from itertools import product
-from scipy.spatial import Voronoi, Delaunay, KDTree
+from scipy.spatial import Voronoi, Delaunay, KDTree, ConvexHull
 import sys
 from matplotlib import path
 
@@ -324,44 +324,29 @@ class VoronoiGrid(Grid):
     It is used to generate a Voronoi grid based on the initial conditions.
     """
 
-    def __init__(self, bounds: list[list[float]], numbercells: int = 10, seed: int = None, grid_transformations=None, cell_centers: np.ndarray = None):
+    def __init__(self, 
+                 bounds: list[list[float]], 
+                 numbercells: int = 10, 
+                 seed: int = None, 
+                 grid_transformations=None, 
+                 cell_centers: np.ndarray = None, 
+                 padding_margin = 'auto'):
         """
         Initializes the Voronoi tesselation grid based on the bounds of the space and the number of cells.
+        The Voronoi tesselation is generated within th transformed space, if transformations are defined.
 
         Args:
             bounds (list of tuples): [(x_min, x_max), (y_min, y_max), ...] with np.inf for unboundedness.
-            numbercells (int): number of Voronoi cells
+            numbercells (int): number of Voronoi cells in the bounded space
             grid_transformations (list of 3tuples functions): (transformation function, 
                                                     inverse transformation function,
                                                     transformation function derivative)
-            cell_centers (np.ndarray of dim(numbercenters, self.dimension)): Optional, if given, the Voronoi cells are generated based on these centers.
+            cell_centers (np.ndarray of dim(numbercenters, self.dimension)): 
+                    Optional, if given, the Voronoi cells are generated based on these centers.
         """
 
         self.bounds = np.array(copy.deepcopy(bounds))
         self.dimension = self.bounds.shape[0]
-        
-        if cell_centers is not None:
-            if cell_centers.shape[1] != self.dimension:
-                raise ValueError("Cell centers dimensionality does not match space intervals.")
-            else:
-                self.cell_centers = np.array(cell_centers)
-                self.numbercells = self.cell_centers.shape[0]
-
-        else:
-            self.numbercells = numbercells
-
-            if seed is None:
-                seed = np.random.SeedSequence().generate_state(1)[0]
-            self.seed = seed
-
-            rng = np.random.default_rng(self.seed)
-            # Sample points uniformly in the bounded space
-            self.cell_centers = rng.uniform(
-                low=self.bounds[:, 0],
-                high=self.bounds[:, 1],
-                size=(self.numbercells, self.dimension))
-
-        self._generate_voronoi_cells(self.cell_centers)
 
         self.transformations = None
         self.inverse_transformations = None
@@ -369,29 +354,134 @@ class VoronoiGrid(Grid):
         self.transformed_bool = False
         self.transformation_params = dict()
         self.tf_bounds = copy.deepcopy(self.bounds)
-
         if grid_transformations is not None:
-            self._init_transformations(grid_transformations) 
+            self._init_transformations(grid_transformations)
+
+        if cell_centers is not None:
+            if cell_centers.shape[1] != self.dimension:
+                raise ValueError("Cell centers dimensionality does not match space intervals.")
+            elif not np.all((cell_centers >= self.tf_bounds[:, 0]) & (cell_centers <= self.tf_bounds[:, 1])):
+                raise ValueError("Some cell centers are out of the transformed bounds.")
+            else:
+                self.original_sites = np.array(cell_centers)
+                self.numbercells = self.original_sites.shape[0]
+
+        else:
+            self.numbercells = numbercells
+            if seed is None:
+                seed = np.random.SeedSequence().generate_state(1)[0]
+            self.seed = seed
+            rng = np.random.default_rng(self.seed)
+            # Sample points uniformly in the (transformed) bounded space
+            self.original_sites = rng.uniform(
+                low=self.tf_bounds[:, 0],
+                high=self.tf_bounds[:, 1],
+                size=(self.numbercells, self.dimension))
+
+        self.kdtree = KDTree(self.original_sites)
+        self._generate_voronoi_tesselation(padding_margin)    
+        self._generate_padding_sites(margin=padding_margin) #Add padding sites to avoid unbounded Voronoi cells
         
-
-    def _generate_voronoi_cells(self, cell_centers: np.ndarray = None):
         self.indices = list(range(self.numbercells)) #correspond to the cell centers in the order of the cell centers
-
-        self.voronoi = Voronoi(self.cell_centers)
-        self.delaunay = Delaunay(self.cell_centers)
-        self.kdtree = KDTree(self.cell_centers)
+        self.delaunay = Delaunay(self.padded_sites)
+        
         self._cell_data = {} #storage for per-cell ridge data 
+
+
+    def _generate_voronoi_tesselation(self, padding_margin = 'auto'):
+        """
+        Generates the Voronoi tesselation based on the cell centers.
+        Using padding_margin, it reflects the sites near the boundaries of the bounding box to avoid unbounded Voronoi cells.
+
+        Parameters:
+        - padding_margin: float or 'auto' — margin threshold for reflecting sites near boundaries
+
+        Used attributes:
+        - original_sites: (n, d) array of original site coordinates
+        - tf_bounds: list of (min, max) tuples for each dimension
+        """
+        used_margin = self._generate_padding_sites(margin=padding_margin)
+        
+        # Generate Voronoi tesselation in the transformed space
+        self.voronoi = Voronoi(self.padded_sites)
+
+        # Check if the Voronoi tesselation is bounded for the original sites
+        orig_regions_bounded = False
+        while not orig_regions_bounded:
+        # Check if the Voronoi regions are bounded
+        # If not, re-generate padding sites with a larger margin
+        # This is done to ensure that the Voronoi cells are bounded in the original space
+            orig_regions_indices = self.voronoi.point_region[:self.numbercells]
+            orig_regions = [self.voronoi.regions[i] for i in orig_regions_indices]
+            orig_regions_bounded = not any(-1 in region for region in orig_regions)
+            
+            if not orig_regions_bounded:
+                print(f"Warning: Original Voronoi cells are unbounded. Re-generating padding sites with larger margin: {2*used_margin}")
+                used_margin = self._generate_padding_sites(margin=2*used_margin)  # Re-generate padding sites if original sites are unbounded
+                self.voronoi = Voronoi(self.padded_sites)  # Recompute Voronoi tesselation with new padding sites
+        
+        self.voronoi.sorted_ridge_vertices = [sorted(ridge) for ridge in self.voronoi.ridge_vertices]
+
+
+    def _generate_padding_sites(self, margin='auto'):
+        """
+        Generate padding sites (cell centers) by reflecting those sites near the boundaries of the bounding box.
+        For margin = 'auto', it estimates the margin based on the nearest-neighbor distances of the original sites.
+
+        Parameters:
+        - margin: float or 'auto' — margin threshold for reflecting sites near boundaries
+
+        Used attributes:
+        - original_sites: (n, d) array of original site coordinates
+        - tf_bounds: list of (min, max) tuples for each dimension
+
+        Returns:
+        - padded_sites: (m, d) array including original and mirrored padding sites
+        - is_original: (m,) boolean array indicating which are original sites
+        """
+        sites = np.asarray(self.original_sites)
+
+        if margin == 'auto':
+            # Estimate nearest-neighbor distances using KDTree
+            distances, _ = self.kdtree.query(sites, k=2)  # first is the point itself
+            margin = np.max(distances[:, 1])*1.5  # maximum nearest-neighbor distance with some security factor of 1.5
+
+        padded_sites = [sites]
+        is_original = [np.ones(self.numbercells, dtype=bool)]
+
+        for axis in range(self.dimension):
+            min_b, max_b = self.tf_bounds[axis]
+
+            # Reflect near min boundary
+            near_min_mask = sites[:, axis] - min_b <= margin
+            near_min_sites = sites[near_min_mask].copy()
+            if near_min_sites.size > 0:
+                near_min_sites[:, axis] = 2 * min_b - near_min_sites[:, axis]
+                padded_sites.append(near_min_sites)
+                is_original.append(np.zeros(len(near_min_sites), dtype=bool))
+
+            # Reflect near max boundary
+            near_max_mask = max_b - sites[:, axis] <= margin
+            near_max_sites = sites[near_max_mask].copy()
+            if near_max_sites.size > 0:
+                near_max_sites[:, axis] = 2 * max_b - near_max_sites[:, axis]
+                padded_sites.append(near_max_sites)
+                is_original.append(np.zeros(len(near_max_sites), dtype=bool))
+
+        self.padded_sites = np.vstack(padded_sites)
+        self.site_is_original = np.concatenate(is_original)
+        return margin
 
 
     def get_config(self):
         config = {
             'grid_type': 'Voronoi',
-            'bounds': self.bounds,
+            'bounds': [[int(x) for x in bound] for bound in self.bounds.tolist()],
             'dimension': self.dimension,
-            'transformations': None if self.transformations == None else [tf.__name__ for tf in self.transformations] ,
-            'transformation_params': self.transformation_params if self.transformation_params != None else None, # list of dicts
-            'cell_centers': self.cell_centers.tolist(),
-            'seed': self.seed if hasattr(self, 'seed') else None,
+            'transformations': None if self.transformations is None else [tf.__name__ for tf in self.transformations],
+            'transformation_params': self.transformation_params if self.transformation_params is not None else None,  # list of dicts
+            'grid_seed': int(self.seed) if hasattr(self, 'seed') else None,
+            'cell_centers': self.original_sites.tolist(),
         }
         return config
 
@@ -429,12 +519,17 @@ class VoronoiGrid(Grid):
 
         Returns: coords (list of tuples): The coordinates of the vertices.
         """
-        # TODO: Intersect this with the bounds of the space so we always return a bounded cell.
+ 
         region_index = self.voronoi.point_region[idx]
         region = self.voronoi.regions[region_index]
         if -1 in region or len(region) == 0:
-            raise ValueError("Voronoi cell is unbounded.")
-        return self.voronoi.vertices[region]
+            raise ValueError("Voronoi cell is unbounded or degenerate.")
+        simplex = self.voronoi.vertices[region]
+        if transformed_space:
+            return simplex
+        else:
+            # Transform the vertices back to the original space
+            return self.inverse_transform(simplex)
 
 
     def get_cell_centers(self, transformed_space=False):
@@ -448,94 +543,162 @@ class VoronoiGrid(Grid):
             centers (np.array of dim (n_cells, n_dim)): A list of the center coordinates of each Voronoi cell.
         """
         if transformed_space:
-            return self.cell_centers
+            return self.original_sites
         else:
-            return self.inverse_transform(self.cell_centers)
+            return self.inverse_transform(self.original_sites)
         
 
     def get_neighbors(self) -> dict[int, list[int]]:
         """
         Returns a dictionary mapping each Voronoi cell to its neighbors in the bounded region.
-
-        Some Voronoi cells may be neighbors in the outer space, but we only consider neighbors within the bounded region defined by the Voronoi cells.
-            Therefore: If a ridge vertex between cells i and j lies inside the box, their Voronoi cells will touch within the box — so they are true neighbors in the bounded region.
-        Thus, two cells are considered neighbors if any of their Voronoi ridge vertices lie inside the bounds or else only if their midpoint lies on the ridge.
+        The neighbors are determined by the Delaunay triangulation of the Voronoi cells.
+        The keys are the cell indices, and the values are lists of neighboring cell indices.
         """
 
         neighbors = {i: set() for i in range(self.numbercells)}
 
-        def vertex_in_bounds(vertex_id):
-            """Check if a vertex lies within the bounds of the Voronoi grid."""
-            vertex = self.voronoi.vertices[vertex_id]
-            return  np.all((vertex >= self.tf_bounds[:, 0]) & (vertex <= self.tf_bounds[:, 1]))
-        
-        
+        for simplex in self.delaunay.simplices:
+            orig_sites_in_simplex = simplex[simplex < self.numbercells]
+            if len(orig_sites_in_simplex) > 1:
+                for i, site in enumerate(orig_sites_in_simplex):
+                    for neighb in range(i + 1, len(orig_sites_in_simplex)):
+                        neighbors[site].add(int(orig_sites_in_simplex[neighb]))
+                        neighbors[orig_sites_in_simplex[neighb]].add(int(site))
 
-        for (i, j), ridge_vertex_ids in zip(self.voronoi.ridge_points, self.voronoi.ridge_vertices):
-
-            ridge_in_space = False
-
-            # Check if any vertex is inside the bounded box
-            for v_id in ridge_vertex_ids:
-                if v_id != -1 and vertex_in_bounds(v_id):
-                    ridge_in_space = True
-                    break
-
-            # If no ridge vertex is in bounds, check if the midpoints (always inside the convex space) of the cells lies on the ridge     
-            if not ridge_in_space:
-                midpoint = (self.cell_centers[i] + self.cell_centers[j]) / 2
-                cell_of_midpoint = self.get_cell_index(midpoint, in_transformed_space=True)
-                # Check if the midpoint lies on the ridge
-                if cell_of_midpoint in [i,j]: 
-                    # now this part, to be absolutely sure, but probably not needed
-                    other_cell = i if cell_of_midpoint == j else j
-                    other_center = self.cell_centers[other_cell]
-                    # Move a tiny step from the midpoint toward the other center and check which cell it belongs to
-                    direction = other_center - midpoint
-                    tiny_step = 1e-10 * direction / (np.linalg.norm(direction) + 1e-14)
-                    probe_point = midpoint + tiny_step
-                    probe_cell = self.get_cell_index(probe_point, in_transformed_space=True)
-                    if probe_cell == other_cell:
-                        ridge_in_space = True
-                 # If the midpoint is not on the ridge, we do not consider the cells as neighbors (is this true?)
-            if ridge_in_space:
-                # If any ridge vertex is in bounds, consider the cells as neighbors
-                neighbors[i].add(int(j))
-                neighbors[j].add(int(i))
-        
         return {k: list(v) for k, v in neighbors.items()}
     
+    def _compute_cell_facets(self, i):
+        """
+        Computes the facets of a Voronoi cell based on its index.
+        Args: i (int): The index of the Voronoi cell.
+        Returns: facets (list of dicts): A list of dictionaries containing the vertices, height, cone volume, and simplices of the facets.
+        """
 
-    def choose_random_point_from_cell(self, idx: int) -> np.ndarray:
+        region_index = self.voronoi.point_region[i]
+        region = self.voronoi.regions[region_index]
+        if -1 in region or len(region) < self.dimension:
+            raise ValueError(f"Voronoi cell {i} is unbounded or degenerate.")
+        region_vertices = np.array([self.voronoi.vertices[v] for v in region])
+        facets = []
+        if self.dimension == 2:
+            # In 2D, the region is a polygon; each facet is a line segment
+            n = len(region_vertices)
+            for k in range(n):
+                v1 = region_vertices[k]
+                v2 = region_vertices[(k + 1) % n]
+                edge = np.array([v1, v2])
+                edge_vec = v2 - v1
+                site_vec = self.original_sites[i] - v1
+                # now compute the component of site_vec which is orthogonal to the edge = height of the cone
+                edge_unit = edge_vec / np.linalg.norm(edge_vec)
+                proj = np.dot(site_vec, edge_unit) * edge_unit
+                height_vec = site_vec - proj
+
+                height = np.linalg.norm(height_vec)
+                area = np.linalg.norm(edge_vec)  # edge length
+                cone_volume = area * height / 2
+                facets.append({
+                    'vertices': edge,
+                    'height': height,
+                    'cone_volume': cone_volume,
+                    'simplices': [edge]
+                })
+        else:
+            # Higher dimensions: use convex hull facets
+            # TODO still has some bugs!!  Cannot compute ConvexHull for d-1 simplices ...
+            raise NotImplementedError("Facet computation for dimensions > 2 is not implemented yet.")
+            hull = ConvexHull(region_vertices)
+            for simplex_indices in hull.simplices:
+                facet_vertices = region_vertices[simplex_indices]
+                print(f"Facet vertices of cell {i}: {facet_vertices}")
+                try:
+                    facet_hull = ConvexHull(facet_vertices)
+                    area = facet_hull.volume
+                except:
+                    print(f"Degenerate facet for cell {i} with vertices {facet_vertices}. Skipping.")
+                    continue # skip degenerate facets
+                
+                facet_vertices_indices_vor = [self.voronoi.vertices.index(v) for v in facet_vertices]
+                ridge_index = self.voronoi.sorted_ridge_vertices.index(tuple(sorted(facet_vertices_indices_vor)), None)
+                neighbor_site_index = self.voronoi.ridge_points[ridge_index][0] if self.voronoi.ridge_points[ridge_index][0] != i else self.voronoi.ridge_points[ridge_index][1]
+                neighbor_site = self.original_sites[neighbor_site_index]
+                midpoint = (neighbor_site - self.original_sites[i])/2
+                height = np.linalg.norm(self.original_sites[i] - midpoint)  # height is the distance to the midpoint of the ridge
+                
+                ''' 
+                OR 
+
+                # Compute height from site to affine span of facet
+                x0 = facet_vertices[0]
+                basis = facet_vertices[1:] - x0  # (d-1) x d matrix
+                u = self.original_sites[i] - x0  # vector from facet base to site
+
+                # Use QR decomposition to project u onto orthogonal complement of basis
+                Q, _ = np.linalg.qr(basis.T)  # orthonormal basis of facet span
+                proj = Q @ (Q.T @ u)          # projection of u onto span
+                orthogonal_component = u - proj
+                height = np.linalg.norm(orthogonal_component)
+                '''
+                
+                cone_volume = area * height / self.dimension
+                facets.append({
+                    'vertices': facet_vertices,
+                    'height': height,
+                    'cone_volume': cone_volume,
+                    'simplices': [facet_vertices]
+                })
+        if len(facets) == 0:
+            raise ValueError(f"Could not compute valid facets for cell {i}.")
+        self._cell_data[i] = facets
+        return facets
+
+
+    def choose_random_point_from_cell(self, i: int) -> np.ndarray:
         """
         Sample a single random point from a Voronoi cell corresponding to the transformed space (because of unboundedness).
        
-        Args: idx (int): The grid cell index.
+        Args: i (int): The grid cell index.
 
         Returns: point (tuple): The random point in original coordinates.
         """
-        #TODO
+        if i not in self._cell_data:
+            facets = self._compute_cell_facets(i)
+        else:
+            facets = self._cell_data[i]
+        vols = np.array([f['cone_volume'] for f in facets])
+        total = vols.sum()
+        if total <= 0:
+            raise ValueError(f"Degenerate cell {i} with zero total cone volume.")
+        idx = np.random.choice(len(facets), p=vols / total) #TODO use my own random generator??
+        f = facets[idx]
+        simplex = f['simplices'][0]
+        x_facet = dirichlet_random_point(simplex)
+        u = (x_facet - self.original_sites[i])
+        r = np.random.rand() ** (1.0 / self.dimension)
+        rnd_point = self.original_sites[i] + r * u
 
-        return
+        if self.transformed_bool:
+            return self.inverse_transform(rnd_point)
+        else:
+            return rnd_point
     
+
     def get_initial_conditions(self, num_points_per_cell: int) -> np.ndarray:
         """
         Efficiently generates initial conditions for the Voronoi grid.
         Returns a set of num_points_per_cell times numbercells initial conditions for the grid.
         Args: num_points_per_cell (int): Number of initial conditions per Voronoi cell.
-        Returns: points (np.array of dim(numbercells, num_points_per_cell)): The initial conditions, each row is a point.
+        Returns: points (np.array of dim(numbercells *num_points_per_cell, dimension)): The initial conditions, each row is a point.
         """
         points = []
+        X_ids = []
         for idx in range(self.numbercells):
-            for _ in range(num_points_per_cell):
+            for j in range(num_points_per_cell):
                 pt = self.choose_random_point_from_cell(idx)
                 points.append(pt)
-        #TODO check dimensions, this is just a proposal
-        return np.array(points).reshape(self.numbercells, num_points_per_cell, -1)
+                X_ids.append(f"{idx}_{j}")  # Unique ID for each point in the format "cell_index_point_index"
 
-
-
-
+        return (np.array(points), np.array(X_ids))
 
 
 

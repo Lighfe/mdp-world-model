@@ -99,13 +99,13 @@ class Simulator:
 
         # Possibly store the resulting df in the self.result_df attribute (by adding it to the existing df)
         if save_result == True:
-
+            
             # Initialize empty DataFrame with correct dtypes if needed
             if self.results.empty:
                 self.results = pd.DataFrame(columns=df.columns).astype(df.dtypes)
-
+            
             self.results = pd.concat([self.results, df], ignore_index=True)
-
+            
                 # Collect all metadata in a dictionary
                 # TODO: add name of the classes
             metadata = {
@@ -128,7 +128,6 @@ class Simulator:
                     # 'ram': psutil.virtual_memory().total / (1024**3)
                 }
             }    
-
             # Create config entry with single JSON field
             config_entry = pd.DataFrame({
                 'run_id': [run_id],
