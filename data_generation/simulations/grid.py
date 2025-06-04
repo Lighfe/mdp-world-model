@@ -576,6 +576,16 @@ class VoronoiGrid(Grid):
 
         return {k: list(v) for k, v in neighbors.items()}
     
+    def get_complete_cell_data(self):
+        """
+        Computes the facets of all Voronoi cells and stores them in the _cell_data attribute.
+        This is used to avoid recomputing facets for each cell when sampling points.
+        """
+        for i in range(self.numbercells):
+            if i not in self._cell_data:
+                self._compute_cell_facets(i)
+        return self._cell_data
+
     def _compute_cell_facets(self, i):
         """
         Computes the facets of a Voronoi cell based on its index.

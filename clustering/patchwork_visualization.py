@@ -6,6 +6,8 @@ import seaborn as sns
 import holoviews as hv
 import panel as pn
 import pandas as pd
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
 import colorcet as cc  # Better categorical colormaps
 from data_generation.visualization.create_plots import create_2D_vectorfield, plot_2D_vector_field_over_grid
 from patchwork import create_patchwork
@@ -76,10 +78,13 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True):
 
-    grid_resolution = patchwork.grid.resolution
-    grid_size = grid_resolution[0]
+    grid_class_name = type(patchwork.grid).__name__
     num_cells = len(patchwork.grid.indices)
-    cell_size = 1/grid_resolution[0]
+    if hasattr(patchwork.grid, 'resolution'):
+        grid_resolution = patchwork.grid.resolution
+        grid_size = grid_resolution[0]
+        cell_size = 1/grid_resolution[0]
+    
     number_of_steps = patchwork.current_patches[-1] - (num_cells -1)
     bounds = [patchwork.grid.tf_bounds[0], patchwork.grid.tf_bounds[1]]
     X1lin = np.linspace(bounds[0][0], bounds[0][1], vf_resolution)
@@ -251,14 +256,8 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         
         cells_to_current_patches = patchwork.get_cells_to_current_patches(step)
         patch_to_current_avg_entropy = patchwork.get_patches_to_current_avg_entropy(step)
-
-        # Normalize coordinates (scale x and y from [0, grid_size-1] to [0,1]) #maybe this should be changed if we don't map to (0,1)
-        normalize = lambda v: ((v / grid_size) + 0.5*cell_size)
-
-        cell_infos = [(normalize(x), normalize(y), str(patch), patch_to_current_avg_entropy[patch]) for (x,y), patch in cells_to_current_patches.items()]
-
+        unique_patches = set(cells_to_current_patches.values())
         # Assign colors to patches
-        unique_patches = set(int(patch) for (_, _, patch, _) in cell_infos)
         if selected_color == 'Patches':
             cmap_dict = {str(patch): patch_color_mapping[patch] for patch in unique_patches}
         elif selected_color == 'Entropy':
@@ -266,47 +265,109 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             cmap_dict = {str(patch): mplcol.to_hex(entropy_cmap(entropy_norm(entropy))) for patch, entropy in entropy_values.items()}
         elif selected_color == 'White':
             cmap_dict = {str(patch): '#FFFFFF' for patch in unique_patches}
-        
-        heatmap =  hv.HeatMap(cell_infos, kdims=['x', 'y'], vdims=['patch', 'entropy']).opts(alpha = 0.5,
-            cmap=cmap_dict, 
-            toolbar = 'above',
-            xlim=(0, 1), ylim=(0, 1),
-            width=600, height=600, tools=['hover'],
-            xticks=x_axis_tick_labels,  # Custom x-axis tick labels
-            yticks=y_axis_tick_labels   # Custom y-axis tick labels
 
-            )
-        # Identify patch borders
-        patch_borders = []
-        for (x, y), patch in cells_to_current_patches.items(): #find neighboring patch borders
-            # Normalize coordinates
-            cx, cy = normalize(x), normalize(y)
-            dx = cell_size * 0.5
 
-            if (x-1, y) not in cells_to_current_patches or cells_to_current_patches[(x-1, y)] != patch:
-                patch_borders.append((cx - dx, cy - dx, cx - dx, cy + dx))  # Left border
+        if grid_class_name == 'Grid':
+            # Normalize coordinates (scale x and y from [0, grid_size-1] to [0,1]) #maybe this should be changed if we don't map to (0,1)
+            normalize = lambda v: ((v / grid_size) + 0.5*cell_size)
 
-            if (x+1, y) not in cells_to_current_patches or cells_to_current_patches[(x+1, y)] != patch:
-                patch_borders.append((cx + dx, cy - dx, cx + dx, cy + dx))  # Right border
+            cell_infos = [(normalize(x), normalize(y), str(patch), patch_to_current_avg_entropy[patch]) for (x,y), patch in cells_to_current_patches.items()]
 
-            if (x, y-1) not in cells_to_current_patches or cells_to_current_patches[(x, y-1)] != patch:
-                patch_borders.append((cx - dx, cy - dx, cx + dx, cy - dx))  # Bottom border
+            heatmap =  hv.HeatMap(cell_infos, kdims=['x', 'y'], vdims=['patch', 'entropy']).opts(alpha = 0.5,
+                cmap=cmap_dict, 
+                toolbar = 'above',
+                xlim=(0, 1), ylim=(0, 1),
+                width=600, height=600, tools=['hover'],
+                xticks=x_axis_tick_labels,  # Custom x-axis tick labels
+                yticks=y_axis_tick_labels   # Custom y-axis tick labels
+                )
+            # Identify patch borders
+            patch_borders = []
+            for (x, y), patch in cells_to_current_patches.items(): #find neighboring patch borders
+                # Normalize coordinates
+                cx, cy = normalize(x), normalize(y)
+                dx = cell_size * 0.5
 
-            if (x, y+1) not in cells_to_current_patches or cells_to_current_patches[(x, y+1)] != patch:
-                patch_borders.append((cx - dx, cy + dx, cx + dx, cy + dx))  # Top border
+                if (x-1, y) not in cells_to_current_patches or cells_to_current_patches[(x-1, y)] != patch:
+                    patch_borders.append((cx - dx, cy - dx, cx - dx, cy + dx))  # Left border
 
-        # Create border segments
-        #if selected_color == 'White':
-        #    linewidth = 3 / (1 + 0.3 * grid_resolution[0]**1.1)
-        #    borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
-        
-        linewidth = 4 / (1 + 0.1 * grid_resolution[0]**1.1) #smaller lines for higher resolutions
-        borders = hv.Segments(patch_borders).opts(color='white', line_width=linewidth) 
+                if (x+1, y) not in cells_to_current_patches or cells_to_current_patches[(x+1, y)] != patch:
+                    patch_borders.append((cx + dx, cy - dx, cx + dx, cy + dx))  # Right border
 
-        #Overlay 
-        layers = [heatmap *borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
+                if (x, y-1) not in cells_to_current_patches or cells_to_current_patches[(x, y-1)] != patch:
+                    patch_borders.append((cx - dx, cy - dx, cx + dx, cy - dx))  # Bottom border
+
+                if (x, y+1) not in cells_to_current_patches or cells_to_current_patches[(x, y+1)] != patch:
+                    patch_borders.append((cx - dx, cy + dx, cx + dx, cy + dx))  # Top border
+
+            # Create border segments
+            #if selected_color == 'White':
+            #    linewidth = 3 / (1 + 0.3 * grid_resolution[0]**1.1)
+            #    borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
+            
+            linewidth = 4 / (1 + 0.1 * grid_resolution[0]**1.1) #smaller lines for higher resolutions
+            borders = hv.Segments(patch_borders).opts(color='white', line_width=linewidth) 
+
+            #Overlay 
+            layers = [heatmap *borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
+
+            
+
+        elif grid_class_name == 'VoronoiGrid':
+            
+            space_size = patchwork.grid.tf_bounds[0][1] - patchwork.grid.tf_bounds[0][0]
+            normalize = lambda v: (v - patchwork.grid.tf_bounds[0][0]) / space_size 
+
+            regions_vertices = [patchwork.grid.voronoi.vertices[patchwork.grid.voronoi.regions[patchwork.grid.voronoi.point_region[v]]] for v in range(patchwork.grid.numbercells)]
+            normalized_regions_vertices = [[normalize(x) for x in region_vs] for region_vs in regions_vertices]
+            cell_id_to_polygon = {i: {'x': [v[0] for v in region_vs], 'y': [v[1] for v in region_vs]} for i, region_vs in enumerate(normalized_regions_vertices)}
+
+            patch_polygons = []
+
+            for cell_id, patch_id in cells_to_current_patches.items():
+                poly = cell_id_to_polygon[cell_id]
+                patch_polygons.append({
+                    **poly,
+                    'patch': str(patch_id),
+                    'entropy': patch_to_current_avg_entropy[patch_id]
+                })
+            # Create HoloViews Polygons
+            hv_polys = hv.Polygons(patch_polygons, vdims=['patch', 'entropy']).opts(
+                                    cmap=cmap_dict,  # your predefined patch color map
+                                    xlim=(0, 1), ylim=(0, 1),
+                                    width=600, height=600, tools=['hover'],
+                                    xticks=x_axis_tick_labels,  # Custom x-axis tick labels
+                                    yticks=y_axis_tick_labels,   # Custom y-axis tick labels
+                                    toolbar = 'above',
+                                    line_color= "#4C4C4C",  # keeps cell borders unless overridden
+                                    line_width = 0.5,
+                                    alpha=0.6
+                                ) 
+            
+            # Identify patch borders
+            patch_to_cells = {}  # patch_id -> list of cell_ids
+            for cell_id, patch_id in cells_to_current_patches.items():
+                patch_to_cells.setdefault(patch_id, []).append(cell_id)
+
+            outline_patches = []
+
+            for patch_id, cell_ids in patch_to_cells.items():
+                polygons = [Polygon(normalized_regions_vertices[cid]) for cid in cell_ids]
+                merged = unary_union(polygons)
+                if merged.geom_type == 'Polygon':
+                    merged = [merged]
+                for geom in merged:
+                    x, y = geom.exterior.xy
+                    outline_patches.append({'x': x.tolist(), 'y': y.tolist(), 'patch': str(patch_id)})
+            
+            linewidth = 2 / (1 + 0.3 * num_cells**2) #smaller lines for higher resolutions
+            hv_borders = hv.Polygons(outline_patches).opts(color=None, line_color='white', line_width=linewidth, fill_alpha=0)
+
+            layers = [hv_polys * hv_borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines] + [hv_borders]
 
         return hv.Overlay(layers)
+
+
     
     #Save to .gif
     if save_to_path != None:
