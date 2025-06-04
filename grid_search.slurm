@@ -103,7 +103,7 @@ get_vicreg_settings() {
         local covariance_weight=${COVARIANCE_WEIGHTS[$cov_idx]}
         
         # Return vicreg command and descriptive name
-        local vicreg_cmd="--use_vicreg --vicreg_variance_target=$variance_target --vicreg_loss_weight=$vicreg_weight --vicreg_nu=$covariance_weight"
+        local vicreg_cmd="--use_vicreg --vicreg_variance_target=$variance_target --vicreg_weight=$vicreg_weight --vicreg_nu=$covariance_weight"
         local vicreg_name="vicreg_vt${variance_target}_vw${vicreg_weight}_cw${covariance_weight}"
         
         echo "$vicreg_cmd" "$vicreg_name"
