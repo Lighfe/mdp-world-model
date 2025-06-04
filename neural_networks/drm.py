@@ -59,6 +59,8 @@ class DiscreteRepresentationsModel(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
             nn.Linear(hidden_dim, num_states)  # Logits for state probabilities
         )
 
@@ -66,6 +68,8 @@ class DiscreteRepresentationsModel(nn.Module):
         if use_target_encoder:
             self.target_encoder = nn.Sequential(
                 nn.Linear(obs_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
@@ -119,12 +123,26 @@ class DiscreteRepresentationsModel(nn.Module):
             for src_param, tgt_param in zip(self.encoder.parameters(), self.target_encoder.parameters()):
                 tgt_param.data.mul_(self.ema_decay).add_(src_param.data, alpha=1 - self.ema_decay)
     
+    def get_embeddings_and_logits(self, x, use_target=False):
+        """Get both hidden embeddings and final logits"""
+        encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
+        
+        # Extract embeddings (everything except final layer)
+        embeddings = x
+        for layer in encoder_to_use[:-1]:  # All layers except the last
+            embeddings = layer(embeddings)
+        
+        # Get final logits
+        logits = encoder_to_use[-1](embeddings)
+        
+        return embeddings, logits
+    
     def get_state_probs(self, x, training=True, hard=False, use_target=False, soft=False):
         # Choose encoder
         encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
         
         # Get logits
-        logits = encoder_to_use(x)
+        _, logits = self.get_embeddings_and_logits(x, use_target=use_target)
         
         if hard:
             # Always use hard argmax when requested regardless of other settings
@@ -183,35 +201,38 @@ class DiscreteRepresentationsModel(nn.Module):
         return self.current_temp
     
     def forward(self, x, c, y, v_true, training=True):
-        """
-        Forward pass through the complete architecture.
+        """Forward pass with embedding extraction for VICReg"""
         
-        Args:
-            x: Current observation
-            c: Control input
-            y: Next observation
-            v_true: True value computed from the environment
-            training: Whether the model is in training mode
+        # Get embeddings and state probs for current observation
+        embed_x, logits_x = self.get_embeddings_and_logits(x, use_target=False)
+        s_x = self._logits_to_probs(logits_x, training=training, use_target=False, hard=False, soft=False)
         
-        Returns:
-            s_x: Current state probabilities
-            s_y: Next state probabilities
-            s_y_pred: Predicted next state probabilities
-            v_pred: Predicted value from predicted next state
-        """
-        # Encode current observation with online encoder
-        s_x = self.get_state_probs(x, training=training, use_target=False)
+        # Get embeddings and state probs for next observation  
+        embed_y, logits_y = self.get_embeddings_and_logits(y, use_target=True)
+        s_y = self._logits_to_probs(logits_y, training=training, use_target=True, hard=False, soft=False)
         
-        # Encode next observation with target encoder (if available) or online encoder
-        s_y = self.get_state_probs(y, training=training, use_target=True)
-        
-        # Predict next state probabilities - always use soft predictions
+        # Predict next state probabilities
         s_y_pred = self.predict_next_state(s_x, c)
         
         # Compute values for all possible states
         v_pred_for_all_states = self.compute_values_for_all_states()
         
-        return s_x, s_y, s_y_pred, v_pred_for_all_states
+        return s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y
+
+    def _logits_to_probs(self, logits, training, use_target, hard, soft):
+        """Convert logits to probabilities using existing logic"""
+        if hard:
+            index = torch.argmax(logits, dim=1).unsqueeze(1)
+            return torch.zeros_like(logits).scatter_(1, index, 1.0)
+        elif soft:
+            return F.softmax(logits, dim=1)
+        elif self.use_gumbel and training and not use_target:
+            return F.gumbel_softmax(logits, tau=self.current_temp, hard=False)
+        else:
+            if self.use_gumbel:
+                return F.softmax(logits / self.current_temp, dim=1)
+            else:
+                return F.softmax(logits, dim=1)
     
     def predict_next_state(self, s_x, c):
         """

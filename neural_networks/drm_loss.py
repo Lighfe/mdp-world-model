@@ -224,45 +224,39 @@ class StableDRMLoss(nn.Module):
         decay_factor = max(0.1, 1.0 - (epoch / (max_epochs * 0.5)))
         return self.vicreg_lambda * decay_factor
     
-    def _vicreg_loss(self, s_x, s_y, epoch, max_epochs):
-        """
-        Compute VICReg loss components
+    def _vicreg_loss(self, embed_x, embed_y, epoch, max_epochs):
+        """VICReg loss on embeddings instead of state probabilities"""
         
-        Args:
-            s_x: Current state probabilities (batch_size, num_states)
-            s_y: Next state probabilities (batch_size, num_states) 
-            total_epochs: Total training epochs for scheduling
-            
-        Returns:
-            vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance
-        """
+        batch_size, embed_dim = embed_x.shape
         
-        batch_size, num_states = s_x.shape
-        
-        # Invariance loss - temporal consistency
+        # Invariance loss - temporal consistency of embeddings
         lambda_effective = self.get_vicreg_invariance_weight(epoch, max_epochs)
-        vicreg_invariance = F.mse_loss(s_x, s_y)
+        vicreg_invariance = F.mse_loss(embed_x, embed_y)
         
-        # Variance loss - prevent state collapse
-        std_per_state = torch.sqrt(s_x.var(dim=0) + self.vicreg_epsilon)
-        vicreg_variance = torch.mean(F.relu(self.vicreg_variance_target - std_per_state))
+        # Variance loss - prevent embedding collapse
+        std_x = torch.sqrt(embed_x.var(dim=0) + self.vicreg_epsilon)
+        std_y = torch.sqrt(embed_y.var(dim=0) + self.vicreg_epsilon)
+        vicreg_variance = (torch.mean(F.relu(self.vicreg_variance_target - std_x)) + 
+                        torch.mean(F.relu(self.vicreg_variance_target - std_y)))
         
-        # Covariance loss - push toward one-hot encoding
-        s_x_centered = s_x - s_x.mean(dim=0)
-        cov_matrix = (s_x_centered.T @ s_x_centered) / (batch_size - 1)
+        # Covariance loss - decorrelate embedding dimensions
+        def compute_cov_loss(embeddings):
+            centered = embeddings - embeddings.mean(dim=0)
+            cov_matrix = (centered.T @ centered) / (batch_size - 1)
+            off_diag_mask = ~torch.eye(embed_dim, dtype=torch.bool, device=embeddings.device)
+            return cov_matrix[off_diag_mask].pow(2).sum() / embed_dim
         
-        # Off-diagonal elements
-        off_diag_mask = ~torch.eye(num_states, dtype=torch.bool, device=s_x.device)
-        vicreg_covariance = cov_matrix[off_diag_mask].pow(2).sum() / num_states
+        vicreg_covariance = compute_cov_loss(embed_x) + compute_cov_loss(embed_y)
         
         # Total VICReg loss
         vicreg_total = (lambda_effective * vicreg_invariance + 
-                       self.vicreg_mu * vicreg_variance + 
-                       self.vicreg_nu * vicreg_covariance)
+                    self.vicreg_mu * vicreg_variance + 
+                    self.vicreg_nu * vicreg_covariance)
         
         return vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance
 
-    def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None, epoch=0, max_epochs=100):
+    def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None, 
+                embed_x=None, embed_y=None, epoch=0, max_epochs=100):
         """
         Compute the combined loss with optional diversity and entropy regularization.
         
@@ -332,9 +326,12 @@ class StableDRMLoss(nn.Module):
             batch_weight = 0.8 # hard coded
             individual_weight = 0.2 # hard coded
             entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
+        
+        # VICReg loss (only if embeddings provided)
+        if embed_x is not None and embed_y is not None:
             vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance = self._vicreg_loss(
-                s_x, s_y, epoch, max_epochs
-                )
+                embed_x, embed_y, epoch, max_epochs
+            )
         
         # Combined loss
         total_loss = (
