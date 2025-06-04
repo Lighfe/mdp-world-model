@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=drm_grid_vicreg
+#SBATCH --job-name=drm_vicreg_search
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=2:00:00
+#SBATCH --time=3:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=4G
-#SBATCH --output=log/drm_grid_%A_%a.out
-#SBATCH --error=log/drm_grid_%A_%a.err
-#SBATCH --array=1-4
+#SBATCH --output=log/drm_vicreg_%A_%a.out
+#SBATCH --error=log/drm_vicreg_%A_%a.err
+#SBATCH --array=1-19
 
 # Print job info
 echo "Job started at $(date)"
@@ -40,7 +40,7 @@ VALUE_METHODS=("angle" "market_share")
 DB_PATHS=("datasets/results/single_saddle_system_horizontal.db" "datasets/results/tech_sim.db")
 
 # Fixed parameters for all runs
-BASE_OUTPUT_DIR="neural_networks/output/vicreg_comparison"
+BASE_OUTPUT_DIR="neural_networks/output/vicreg_param_search"
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
@@ -52,8 +52,8 @@ USE_WARMUP="--use_warmup --warmup_epochs=10"
 USE_TARGET_ENCODER="--use_target_encoder --ema_decay=0.9"
 USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=1.0"
 STATE_LOSS_TYPE="kl_div"
-STATE_LOSS_WEIGHT=1.0
-VALUE_LOSS_WEIGHT=1.5  # Fixed as requested
+STATE_LOSS_WEIGHT=1.0  # Fixed as requested
+VALUE_LOSS_WEIGHT=1.0  # Fixed as requested
 
 # FIXED PARAMETERS
 NUM_STATES=4
@@ -63,30 +63,71 @@ SORT_STATES="--sort_states"
 
 # Define parameter values for grid search
 PREDICTOR_TYPE_VALUES=("standard" "bilinear")
-VICREG_SETTINGS=("" "--use_vicreg --vicreg_variance_target=0.4")  # Empty = no vicreg, second = with vicreg
 SEEDS=(11 42)
 
-# Total combinations: 2 systems × 2 predictors × 2 vicreg × 2 seeds = 16
-# Running 4 combinations per array job = 4 array jobs total
+# VICReg parameter search space
+VARIANCE_TARGETS=(0.4 0.3)                    # 2 options
+VICREG_WEIGHTS=(0.1 0.3 1.0)                 # 3 options  
+COVARIANCE_WEIGHTS=(1.0 3.0 10.0)            # 3 options
+# Total vicreg combinations: 1 (no vicreg) + 2×3×3 (vicreg params) = 19
 
-# Calculate which 4 runs this array task should handle
-runs_per_task=4
+# Total combinations: 2 systems × 2 predictors × 2 seeds × 19 vicreg = 152
+# Running 8 combinations per array job = 19 array jobs total
+
+# Calculate which 8 runs this array task should handle
+runs_per_task=8
 start_run=$(((SLURM_ARRAY_TASK_ID - 1) * runs_per_task))
 
 echo "Array task $SLURM_ARRAY_TASK_ID will handle runs $start_run to $((start_run + runs_per_task - 1))"
 
-# Loop through the 4 runs assigned to this array task
+# Function to get vicreg settings for a given vicreg_idx
+get_vicreg_settings() {
+    local vicreg_idx=$1
+    
+    if [ $vicreg_idx -eq 0 ]; then
+        # No VICReg
+        echo "" "novicreg"
+    else
+        # VICReg with parameters (indices 1-18 map to param combinations 0-17)
+        local param_idx=$((vicreg_idx - 1))
+        
+        # Break down param_idx into individual parameter indices
+        local cov_idx=$((param_idx % 3))
+        local temp1=$((param_idx / 3))
+        local weight_idx=$((temp1 % 3))
+        local var_idx=$((temp1 / 3))
+        
+        # Get actual parameter values
+        local variance_target=${VARIANCE_TARGETS[$var_idx]}
+        local vicreg_weight=${VICREG_WEIGHTS[$weight_idx]}
+        local covariance_weight=${COVARIANCE_WEIGHTS[$cov_idx]}
+        
+        # Return vicreg command and descriptive name
+        local vicreg_cmd="--use_vicreg --vicreg_variance_target=$variance_target --vicreg_loss_weight=$vicreg_weight --vicreg_nu=$covariance_weight"
+        local vicreg_name="vicreg_vt${variance_target}_vw${vicreg_weight}_cw${covariance_weight}"
+        
+        echo "$vicreg_cmd" "$vicreg_name"
+    fi
+}
+
+# Loop through the 8 runs assigned to this array task
 for run_offset in $(seq 0 $((runs_per_task - 1))); do
     global_run_idx=$((start_run + run_offset))
     
+    # Check if we've exceeded total runs
+    if [ $global_run_idx -ge 152 ]; then
+        echo "Reached end of parameter space at run $global_run_idx"
+        break
+    fi
+    
     # Break down global_run_idx into parameter indices
-    # Order: system (2) × predictor (2) × vicreg (2) × seed (2)
+    # Order: system (2) × predictor (2) × seed (2) × vicreg (19)
     
     # Extract indices using modular arithmetic
-    seed_idx=$((global_run_idx % 2))
-    temp1=$((global_run_idx / 2))
+    vicreg_idx=$((global_run_idx % 19))
+    temp1=$((global_run_idx / 19))
     
-    vicreg_idx=$((temp1 % 2))
+    seed_idx=$((temp1 % 2))
     temp2=$((temp1 / 2))
     
     predictor_idx=$((temp2 % 2))
@@ -97,11 +138,12 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     VALUE_METHOD=${VALUE_METHODS[$system_idx]}
     DB_PATH=${DB_PATHS[$system_idx]}
     PREDICTOR_TYPE=${PREDICTOR_TYPE_VALUES[$predictor_idx]}
-    VICREG_SETTING=${VICREG_SETTINGS[$vicreg_idx]}
     SEED=${SEEDS[$seed_idx]}
     
+    # Get VICReg settings
+    read VICREG_SETTING VICREG_NAME <<< $(get_vicreg_settings $vicreg_idx)
+    
     # Create descriptive run name
-    VICREG_NAME=$([ "$vicreg_idx" -eq 0 ] && echo "novicreg" || echo "vicreg")
     CONFIG_NAME="${SYSTEM_TYPE}_${PREDICTOR_TYPE}_${VICREG_NAME}_seed${SEED}"
     
     # All runs go in the same base directory
