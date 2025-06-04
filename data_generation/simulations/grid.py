@@ -407,19 +407,27 @@ class VoronoiGrid(Grid):
 
         # Check if the Voronoi tesselation is bounded for the original sites
         orig_regions_bounded = False
-        while not orig_regions_bounded:
+        orig_regions_in_bounds = False
+        while not orig_regions_bounded or not orig_regions_in_bounds:
         # Check if the Voronoi regions are bounded
         # If not, re-generate padding sites with a larger margin
-        # This is done to ensure that the Voronoi cells are bounded in the original space
+        # This is done to ensure that the Voronoi cells are bounded 
             orig_regions_indices = self.voronoi.point_region[:self.numbercells]
             orig_regions = [self.voronoi.regions[i] for i in orig_regions_indices]
             orig_regions_bounded = not any(-1 in region for region in orig_regions)
+            # Test also if any of the original sites are unbounded in the original space
+            if orig_regions_bounded:
+                vertices_of_orig_regions = np.vstack([self.voronoi.vertices[region] for region in orig_regions if len(region) > 0])
+                print(vertices_of_orig_regions.shape)
+                orig_regions_in_bounds = all(np.all((vertex >= self.tf_bounds[:, 0]) & (vertex <= self.tf_bounds[:, 1])) for vertex in vertices_of_orig_regions)
             
-            if not orig_regions_bounded:
-                print(f"Warning: Original Voronoi cells are unbounded. Re-generating padding sites with larger margin: {2*used_margin}")
+            if not orig_regions_bounded or not orig_regions_in_bounds:
+                
+                print(f"Warning: Original Voronoi cells are unbounded in the original space. Re-generating padding sites with larger margin: {2*used_margin}")
                 used_margin = self._generate_padding_sites(margin=2*used_margin)  # Re-generate padding sites if original sites are unbounded
                 self.voronoi = Voronoi(self.padded_sites)  # Recompute Voronoi tesselation with new padding sites
         
+        self.padding_margin = used_margin
         self.voronoi.sorted_ridge_vertices = [sorted(ridge) for ridge in self.voronoi.ridge_vertices]
 
 
@@ -482,6 +490,7 @@ class VoronoiGrid(Grid):
             'transformation_params': self.transformation_params if self.transformation_params is not None else None,  # list of dicts
             'grid_seed': int(self.seed) if hasattr(self, 'seed') else None,
             'cell_centers': self.original_sites.tolist(),
+            'padding_margin': self.padding_margin,
         }
         return config
 
@@ -506,7 +515,7 @@ class VoronoiGrid(Grid):
                     
         for dim in range(self.dimension):
             if (coord[dim] < bounds[dim][0]) or (coord[dim] > bounds[dim][1]):
-                raise ValueError("Coordinate is out of bounds.")
+                raise ValueError(f"Coordinate {coord} is out of bounds.")
 
         return self.kdtree.query(coord)[1]
     

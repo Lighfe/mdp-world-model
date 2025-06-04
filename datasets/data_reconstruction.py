@@ -8,7 +8,7 @@ import pandas as pd
 import json
 import numpy as np
 
-from data_generation.simulations.grid import Grid, logistic_transformation, fractional_transformation
+from data_generation.simulations.grid import Grid, VoronoiGrid, logistic_transformation, fractional_transformation
 from data_generation.models.tech_substitution import TechnologySubstitution, TechSubNumericalSolver
 from data_generation.models.general_ode_solver import FitzHughNagumoModel, GeneralODENumericalSolver
 from data_generation.models.simple_test_models import *
@@ -72,7 +72,6 @@ def reconstruct_solver_and_grid(run_id, configs_dict):
     co_solver = configs_dict[run_id]['solver']
 
     bounds = co_grid['bounds']
-    resolution = co_grid['resolution']
 
     #Work-Around as we take the whole dictionary for FHN but only the param for TechSub Model # TODO fix this
     if co_grid['transformation_params']:
@@ -80,9 +79,21 @@ def reconstruct_solver_and_grid(run_id, configs_dict):
             transformations = [globals()[name](params['param']) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
         else:
             transformations = [globals()[name](params) for name, params in zip(co_grid['transformations'], co_grid['transformation_params'])]
-        grid = Grid(bounds, resolution, transformations)
     else:
-        grid = Grid(bounds,resolution)
+        transformations = None
+    
+    if co_grid.get('grid_type', 'Regular') == 'Voronoi':
+        # Handle Voronoi grid type if needed
+
+        cell_centers = co_grid['cell_centers']
+        grid_seed = co_grid.get('grid_seed', None)
+        cell_centers = np.array(co_grid['cell_centers'])
+        padding_margin = co_grid['padding_margin']
+        grid = VoronoiGrid(bounds, None, grid_seed, transformations, cell_centers, padding_margin) 
+
+    else:
+        resolution = co_grid['resolution'] 
+        grid = Grid(bounds, resolution, transformations)
 
     # Extract class names
     model_class_name = co_solver['model']['model']

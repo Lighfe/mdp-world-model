@@ -410,7 +410,7 @@ def create_plot_and_save_patchwork(db_name,
         path_id = os.path.join(path_to_save, "-".join(run_ids)) 
         if not os.path.exists(path_id):
             os.makedirs(path_id)
-        path_to_save = path_id + f"/firstPatchwork_{str(gif_steps)}stepsPerTime"
+        path_to_save = path_id + f"/Patchwork_{str(gif_steps)}stepsPerTime"
 
     patchwork, controls, solver = create_patchwork(db_name, 
                                                    table_name, 
