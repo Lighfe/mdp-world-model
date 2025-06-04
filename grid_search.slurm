@@ -86,7 +86,7 @@ get_vicreg_settings() {
     
     if [ $vicreg_idx -eq 0 ]; then
         # No VICReg
-        echo "" "novicreg"
+        echo "NONE" "novicreg"
     else
         # VICReg with parameters (indices 1-18 map to param combinations 0-17)
         local param_idx=$((vicreg_idx - 1))
@@ -142,6 +142,13 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     
     # Get VICReg settings
     read VICREG_SETTING VICREG_NAME <<< $(get_vicreg_settings $vicreg_idx)
+
+    # Handle the NONE case for VICReg
+    if [ "$VICREG_SETTING" != "NONE" ]; then
+        VICREG_CMD="$VICREG_SETTING"
+    else
+        VICREG_CMD=""
+    fi
     
     # Create descriptive run name
     CONFIG_NAME="${SYSTEM_TYPE}_${PREDICTOR_TYPE}_${VICREG_NAME}_seed${SEED}"
@@ -185,7 +192,7 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
       --min_temp=$GUMBEL_MIN \
       --initial_temp=$GUMBEL_TEMP \
       --predictor_type=$PREDICTOR_TYPE \
-      $VICREG_SETTING \
+      $VICREG_CMD \
       $SORT_STATES \
       --lr=$LR \
       --seed=$SEED \
