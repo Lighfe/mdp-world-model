@@ -22,7 +22,7 @@ from neural_networks.system_registry import SystemType, get_value_sorting_functi
 
 
 class DiscreteRepresentationsModel(nn.Module):
-    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, 
+    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, input_transform='none', num_states=4, hidden_dim=64, 
                  predictor_type='bilinear', use_gumbel=False, initial_temp=5.0, min_temp=0.5,
                  use_target_encoder=False, ema_decay=0.9, value_activation="sigmoid"):
         """
@@ -44,6 +44,8 @@ class DiscreteRepresentationsModel(nn.Module):
         """
         super(DiscreteRepresentationsModel, self).__init__()
         
+        self.input_transform = input_transform
+
         # Store Gumbel softmax parameters
         self.use_gumbel = use_gumbel
         self.current_temp = initial_temp
@@ -127,8 +129,11 @@ class DiscreteRepresentationsModel(nn.Module):
         """Get both hidden embeddings and final logits"""
         encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
         
+        # Transform raw inputs first
+        x_transformed = self.transform_inputs(x)
+
         # Extract embeddings (everything except final layer)
-        embeddings = x
+        embeddings = x_transformed
         for layer in encoder_to_use[:-1]:  # All layers except the last
             embeddings = layer(embeddings)
         
@@ -136,6 +141,14 @@ class DiscreteRepresentationsModel(nn.Module):
         logits = encoder_to_use[-1](embeddings)
         
         return embeddings, logits
+    
+    def transform_inputs(self, x):
+        if self.input_transform == 'log':
+            return torch.log(x + 1e-10)
+        elif self.input_transform == 'asinh':
+            return torch.asinh(x)
+        else:
+            return x  # No transformation
     
     def get_state_probs(self, x, training=True, hard=False, use_target=False, soft=False):
         # Choose encoder
