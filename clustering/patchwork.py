@@ -2,6 +2,8 @@ import os
 import sys
 import bisect
 from scipy.stats import entropy
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
 import numpy as np
 import time
 parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
@@ -49,10 +51,35 @@ class Patchwork:
         self.predecessors = self._init_predecessors()                                           #Dict
         self.entropy_dict = self._init_entropy_dict()                                           #Dict
         self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
+        if type(self.grid).__name__ == 'VoronoiGrid':
+            self._init_patch_to_vertices_dict()
         self.adjacent_cells_losses = self._init_adjacent_cells_losses()  #SortedValueDict
         
         # Use the patchwork to calculate the initial value(s) of the loss function
         self.loss_function._reset(self)
+
+
+    def _init_patch_to_vertices_dict(self):
+        """
+        Initializes a dictionary mapping each patch index to its corresponding vertices in the Voronoi diagram.
+        This is necessary for Voronoi grids to visualize the patches correctly.s
+        """
+        
+        def sort_vertices_counterclockwise(points):
+            """
+            Sorts 2D convex polygon vertices counterclockwise.
+            Parameters: points: list of (x, y) tuples or Nx2 NumPy array
+            Returns: sorted_points: list of points in counterclockwise order
+            """
+            points = np.array(points)
+            centroid = points.mean(axis=0)
+            def angle(p):
+                return np.arctan2(p[1] - centroid[1], p[0] - centroid[0])
+            sorted_indices = np.argsort([angle(p) for p in points])
+            return points[sorted_indices]
+
+        self.patch_to_vertices = {idx: self.grid.voronoi.vertices[self.grid.voronoi.regions[self.grid.voronoi.point_region[idx]]] for idx in self.grid.indices}  #Dict
+        self.patch_to_vertices = {idx: [sort_vertices_counterclockwise(vertices)] for idx, vertices in self.patch_to_vertices.items()} 
 
 
     def _init_patch_nb(self):
@@ -243,6 +270,8 @@ class Patchwork:
 
         self._update_children_and_parents(patch1, patch2, newpatch)
         self._update_cell_to_patch_history(patch1, patch2, newpatch)
+        if type(self.grid).__name__ == 'VoronoiGrid':
+            self._update_patch_to_vertices(patch1, patch2, newpatch)
 
         return 
            
@@ -385,6 +414,32 @@ class Patchwork:
         for cell in self.grid.indices:
             if self.cell_to_history_of_patches[cell][-1] in {patch1, patch2}:
                 self.cell_to_history_of_patches[cell].append(newpatch)
+
+
+    def _update_patch_to_vertices(self, patch1, patch2, newpatch):
+        """
+        Updates the patch_to_vertices dictionary for merging patches.
+        This is necessary for Voronoi grids to visualize the patches correctly.
+        """
+
+        poly1 = Polygon(self.patch_to_vertices[patch1][0], list(self.patch_to_vertices[patch1][1:]))
+        poly2 = Polygon(self.patch_to_vertices[patch2][0], list(self.patch_to_vertices[patch2][1:]))
+
+        merged = unary_union([poly1, poly2])
+
+        if merged.geom_type == 'Polygon':
+            outer = list(merged.exterior.coords)
+            holes = [list(hole.coords) for hole in merged.interiors]
+            boundaries = [outer] + holes
+        else:
+            # Multiple disconnected shapes (e.g. disjoint inputs)
+            raise ValueError("Merged geometry is not a single polygon.")
+
+
+        self.patch_to_vertices[newpatch] = boundaries
+        
+        return        
+
     
     def _update_patch_neighbors(self, patch1, patch2, newpatch):
         """
@@ -531,10 +586,10 @@ class Patchwork:
 def create_patchwork(db_name, 
                      table_name, 
                      run_ids, 
-                     entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
-                     entropy_measure = 'shannon_entropy',
-                     loss_function_strg='TransitionEntropyLoss',
-                     loss_function_coeff = None):    
+                     entropy_strategy_strg= 'ShannonEntropyAll',
+                     entropy_measure = 'conditional_shannon_entropy',
+                     loss_function_strg='TransitionAndSizeEntropyLoss',
+                     loss_function_coeff = 0.1):    
     
     entropy_strategy = globals()[entropy_strategy_strg](globals()[entropy_measure]) #create the entropy strategy object
     loss_function = globals()[loss_function_strg]()

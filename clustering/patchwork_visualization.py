@@ -252,6 +252,12 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
         return overlay
 
+    if grid_class_name == 'VoronoiGrid':
+        space_size = patchwork.grid.tf_bounds[0][1] - patchwork.grid.tf_bounds[0][0]
+        normalize_vor = lambda v: (v - patchwork.grid.tf_bounds[0][0]) / space_size 
+        regions_vertices = [patchwork.grid.voronoi.vertices[patchwork.grid.voronoi.regions[patchwork.grid.voronoi.point_region[v]]] for v in range(patchwork.grid.numbercells)]
+        normalized_regions_vertices = [[normalize_vor(x) for x in region_vs] for region_vs in regions_vertices]
+
     def get_current_patchwork(step, selected_controls, selected_nullcline_controls, selected_color):
         
         cells_to_current_patches = patchwork.get_cells_to_current_patches(step)
@@ -315,13 +321,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
         elif grid_class_name == 'VoronoiGrid':
             
-            space_size = patchwork.grid.tf_bounds[0][1] - patchwork.grid.tf_bounds[0][0]
-            normalize = lambda v: (v - patchwork.grid.tf_bounds[0][0]) / space_size 
-
-            regions_vertices = [patchwork.grid.voronoi.vertices[patchwork.grid.voronoi.regions[patchwork.grid.voronoi.point_region[v]]] for v in range(patchwork.grid.numbercells)]
-            normalized_regions_vertices = [[normalize(x) for x in region_vs] for region_vs in regions_vertices]
             cell_id_to_polygon = {i: {'x': [v[0] for v in region_vs], 'y': [v[1] for v in region_vs]} for i, region_vs in enumerate(normalized_regions_vertices)}
-
             patch_polygons = []
 
             for cell_id, patch_id in cells_to_current_patches.items():
@@ -345,6 +345,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                                 ) 
             
             # Identify patch borders
+            '''
             patch_to_cells = {}  # patch_id -> list of cell_ids
             for cell_id, patch_id in cells_to_current_patches.items():
                 patch_to_cells.setdefault(patch_id, []).append(cell_id)
@@ -360,10 +361,23 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                     x, y = geom.exterior.xy
                     outline_patches.append({'x': x.tolist(), 'y': y.tolist(), 'patch': str(patch_id)})
             
-            linewidth = 2 / (1 + 0.3 * num_cells**2) #smaller lines for higher resolutions
-            hv_borders = hv.Polygons(outline_patches).opts(color=None, line_color='white', line_width=linewidth, fill_alpha=0)
+            #linewidth = 2 / (1 + 0.3 * num_cells**2) #smaller lines for higher resolutions
+            hv_borders = hv.Polygons(outline_patches).opts(color=None, line_color='white', line_width=3, fill_alpha=0)
+            '''
 
-            layers = [hv_polys * hv_borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines] + [hv_borders]
+            # Other borders strategy using Segments and patchwork.patch_to_vertices
+            patch_borders = []
+            for patch_id in unique_patches:
+                boundaries = patchwork.patch_to_vertices[patch_id]
+                for vertices in boundaries:
+                    for i in range(len(vertices)):
+                        start = normalize_vor(vertices[i])
+                        end = normalize_vor(vertices[(i + 1) % len(vertices)])
+                        patch_borders.append((start[0], start[1], end[0], end[1]))  # (x1, y1, x2, y2)
+            p_borders = hv.Segments(patch_borders).opts(color='white', line_width=1) 
+
+
+            layers = [hv_polys * p_borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
 
         return hv.Overlay(layers)
 
