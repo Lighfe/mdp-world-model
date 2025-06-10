@@ -3,6 +3,7 @@ import random
 import copy
 from itertools import product
 from scipy.spatial import Voronoi, Delaunay, KDTree, ConvexHull
+from scipy.stats import qmc
 import sys
 from matplotlib import path
 
@@ -322,6 +323,7 @@ class VoronoiGrid(Grid):
     VoronoiGrid Class implementation for finite and infinite spaces, with the possibility of transformations.
     This class inherits from the Grid class.
     It is used to generate a Voronoi grid based on the initial conditions.
+    ATTENTION: Takes a uniform side length of the bounding box as granted for Poisson Disk sampling.
     """
 
     def __init__(self, 
@@ -336,7 +338,8 @@ class VoronoiGrid(Grid):
         The Voronoi tesselation is generated within th transformed space, if transformations are defined.
 
         Args:
-            bounds (list of tuples): [(x_min, x_max), (y_min, y_max), ...] with np.inf for unboundedness.
+            bounds (list of tuples): [(x_min, x_max), (y_min, y_max), ...] with np.inf for unboundedness. 
+                ATTENTION: Takes a uniform side length of the bounding box as granted for Poisson Disk sampling.
             numbercells (int): number of Voronoi cells in the bounded space
             grid_transformations (list of 3tuples functions): (transformation function, 
                                                     inverse transformation function,
@@ -367,16 +370,7 @@ class VoronoiGrid(Grid):
                 self.numbercells = self.original_sites.shape[0]
 
         else:
-            self.numbercells = numbercells
-            if seed is None:
-                seed = np.random.SeedSequence().generate_state(1)[0]
-            self.seed = seed
-            rng = np.random.default_rng(self.seed)
-            # Sample points uniformly in the (transformed) bounded space
-            self.original_sites = rng.uniform(
-                low=self.tf_bounds[:, 0],
-                high=self.tf_bounds[:, 1],
-                size=(self.numbercells, self.dimension))
+            self._generate_cell_centers(numbercells, seed=seed)
 
         self.kdtree = KDTree(self.original_sites)
         self._generate_voronoi_tesselation(padding_margin)    
@@ -386,6 +380,49 @@ class VoronoiGrid(Grid):
         self.delaunay = Delaunay(self.padded_sites)
         
         self._cell_data = {} #storage for per-cell ridge data 
+
+    def _generate_cell_centers(self, numbercells, type: str = 'Poisson_Disk', seed=None):
+        """
+        Generates the cell centers for the Voronoi grid.
+        This is done by sampling points from the original sites.
+        ATTENTION: Takes a uniform side length of the bounding box as granted for Poisson Disk sampling.
+
+        Parameters:
+        - number_cells: int — number of cell centers to generate approximately 
+        - type: str — type of sampling, either 'uniform' or 'Poisson_Disk'
+        - seed: int or None — random seed for reproducibility, if None, a random seed is generated
+        """
+        
+        if seed is None:
+            seed = np.random.SeedSequence().generate_state(1)[0]
+        self.seed = seed
+        rng = np.random.default_rng(self.seed)
+
+        if type == 'uniform':
+        # Sample points uniformly in the (transformed) bounded space
+            self.original_sites = rng.uniform(
+                low=self.tf_bounds[:, 0],
+                high=self.tf_bounds[:, 1],
+                size=(numbercells, self.dimension))
+            
+        elif type == 'Poisson_Disk':
+            def estimate_poisson_radius(n_points, efficiency=0.75, side_length = 1, dim=2):
+                return efficiency * side_length / (np.round(n_points ** (1/dim)) - 1)
+            
+            sidelengths = [self.tf_bounds[dim][1] - self.tf_bounds[dim][0] for dim in range(self.dimension)]
+            if not all(np.isclose(sidelengths[0], s) for s in sidelengths):
+                raise ValueError("All entries in sidelengths must be equal for the implemented version of Poisson Disk sampling.")
+            sidelength = sidelengths[0]
+
+            r = estimate_poisson_radius(numbercells, side_length = self.tf_bounds[0][1] - self.tf_bounds[0][0], dim=self.dimension)
+
+            engine = qmc.PoissonDisk(self.dimension, radius=r, l_bounds=[0 for _ in range(self.dimension)], u_bounds=[sidelength for _ in range(self.dimension)], rng=rng)
+            samples = engine.fill_space()
+
+            # Move samples to the transformed space
+            self.original_sites = samples + np.array(self.tf_bounds[:, 0])
+        
+        self.numbercells = self.original_sites.shape[0]
 
 
     def _generate_voronoi_tesselation(self, padding_margin = 'auto'):
@@ -426,6 +463,8 @@ class VoronoiGrid(Grid):
                 print(f"Warning: Original Voronoi cells are unbounded in the original space. Re-generating padding sites with larger margin: {2*used_margin}")
                 used_margin = self._generate_padding_sites(margin=2*used_margin)  # Re-generate padding sites if original sites are unbounded
                 self.voronoi = Voronoi(self.padded_sites)  # Recompute Voronoi tesselation with new padding sites
+            if used_margin > self.tf_bounds[0][1] - self.tf_bounds[0][0]:
+                break
         
         self.padding_margin = used_margin
         self.voronoi.sorted_ridge_vertices = [sorted(ridge) for ridge in self.voronoi.ridge_vertices]

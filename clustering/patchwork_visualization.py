@@ -251,12 +251,39 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         )
 
         return overlay
+    
 
+    #Preparation for VoronoiGrid
     if grid_class_name == 'VoronoiGrid':
         space_size = patchwork.grid.tf_bounds[0][1] - patchwork.grid.tf_bounds[0][0]
         normalize_vor = lambda v: (v - patchwork.grid.tf_bounds[0][0]) / space_size 
         regions_vertices = [patchwork.grid.voronoi.vertices[patchwork.grid.voronoi.regions[patchwork.grid.voronoi.point_region[v]]] for v in range(patchwork.grid.numbercells)]
         normalized_regions_vertices = [[normalize_vor(x) for x in region_vs] for region_vs in regions_vertices]
+        cell_id_to_polygon = {i: {'x': [v[0] for v in region_vs], 'y': [v[1] for v in region_vs]} for i, region_vs in enumerate(normalized_regions_vertices)}
+
+        patch_polygons = []
+
+        for cell_id in patchwork.grid.indices:
+            poly = cell_id_to_polygon[cell_id]
+            patch_polygons.append({
+                **poly,
+                'patch': str(cell_id),
+                'entropy': patchwork.get_patches_to_current_avg_entropy(0)[cell_id]
+            })
+        # Create HoloViews Polygons
+        entropy_values = {patch: patchwork.get_patches_to_current_avg_entropy(0)[patch] for patch in patchwork.grid.indices}
+        cmap_dict = {str(patch): mplcol.to_hex(entropy_cmap(entropy_norm(entropy))) for patch, entropy in entropy_values.items()}
+        hv_polys = hv.Polygons(patch_polygons, vdims=['patch', 'entropy']).opts(
+                                cmap=cmap_dict,  # your predefined patch color map
+                                xlim=(0, 1), ylim=(0, 1),
+                                width=600, height=600, tools=['hover'],
+                                xticks=x_axis_tick_labels,  # Custom x-axis tick labels
+                                yticks=y_axis_tick_labels,   # Custom y-axis tick labels
+                                toolbar = 'above',
+                                line_color= "#4C4C4C",  # keeps cell borders unless overridden
+                                line_width = 0.5,
+                                alpha=0.6
+                            ) 
 
     def get_current_patchwork(step, selected_controls, selected_nullcline_controls, selected_color):
         
@@ -307,10 +334,6 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                     patch_borders.append((cx - dx, cy + dx, cx + dx, cy + dx))  # Top border
 
             # Create border segments
-            #if selected_color == 'White':
-            #    linewidth = 3 / (1 + 0.3 * grid_resolution[0]**1.1)
-            #    borders = hv.Segments(patch_borders).opts(color='black', line_width=linewidth) 
-            
             linewidth = 4 / (1 + 0.1 * grid_resolution[0]**1.1) #smaller lines for higher resolutions
             borders = hv.Segments(patch_borders).opts(color='white', line_width=linewidth) 
 
@@ -320,8 +343,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             
 
         elif grid_class_name == 'VoronoiGrid':
-            
-            cell_id_to_polygon = {i: {'x': [v[0] for v in region_vs], 'y': [v[1] for v in region_vs]} for i, region_vs in enumerate(normalized_regions_vertices)}
+
             patch_polygons = []
 
             for cell_id, patch_id in cells_to_current_patches.items():
@@ -331,41 +353,11 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                     'patch': str(patch_id),
                     'entropy': patch_to_current_avg_entropy[patch_id]
                 })
-            # Create HoloViews Polygons
-            hv_polys = hv.Polygons(patch_polygons, vdims=['patch', 'entropy']).opts(
-                                    cmap=cmap_dict,  # your predefined patch color map
-                                    xlim=(0, 1), ylim=(0, 1),
-                                    width=600, height=600, tools=['hover'],
-                                    xticks=x_axis_tick_labels,  # Custom x-axis tick labels
-                                    yticks=y_axis_tick_labels,   # Custom y-axis tick labels
-                                    toolbar = 'above',
-                                    line_color= "#4C4C4C",  # keeps cell borders unless overridden
-                                    line_width = 0.5,
-                                    alpha=0.6
-                                ) 
-            
+            # Update HoloViews Polygons
+            hv_polys.data = patch_polygons  # Update the data in the existing hv_polys object
+            hv_polys.opts(cmap=cmap_dict)  # your predefined patch color map
+
             # Identify patch borders
-            '''
-            patch_to_cells = {}  # patch_id -> list of cell_ids
-            for cell_id, patch_id in cells_to_current_patches.items():
-                patch_to_cells.setdefault(patch_id, []).append(cell_id)
-
-            outline_patches = []
-
-            for patch_id, cell_ids in patch_to_cells.items():
-                polygons = [Polygon(normalized_regions_vertices[cid]) for cid in cell_ids]
-                merged = unary_union(polygons)
-                if merged.geom_type == 'Polygon':
-                    merged = [merged]
-                for geom in merged:
-                    x, y = geom.exterior.xy
-                    outline_patches.append({'x': x.tolist(), 'y': y.tolist(), 'patch': str(patch_id)})
-            
-            #linewidth = 2 / (1 + 0.3 * num_cells**2) #smaller lines for higher resolutions
-            hv_borders = hv.Polygons(outline_patches).opts(color=None, line_color='white', line_width=3, fill_alpha=0)
-            '''
-
-            # Other borders strategy using Segments and patchwork.patch_to_vertices
             patch_borders = []
             for patch_id in unique_patches:
                 boundaries = patchwork.patch_to_vertices[patch_id]
@@ -375,7 +367,6 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                         end = normalize_vor(vertices[(i + 1) % len(vertices)])
                         patch_borders.append((start[0], start[1], end[0], end[1]))  # (x1, y1, x2, y2)
             p_borders = hv.Segments(patch_borders).opts(color='white', line_width=1) 
-
 
             layers = [hv_polys * p_borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
 
