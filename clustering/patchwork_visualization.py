@@ -10,7 +10,7 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 import colorcet as cc  # Better categorical colormaps
 from data_generation.visualization.create_plots import create_2D_vectorfield, plot_2D_vector_field_over_grid
-from patchwork import create_patchwork
+from clustering.patchwork import create_patchwork
 
 hv.extension('bokeh')
 

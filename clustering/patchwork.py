@@ -6,14 +6,14 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 import numpy as np
 import time
-parent_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
+parent_dir = os.path.abspath(os.path.join(os.getcwd(), "../.."))
 sys.path.append(parent_dir)
 
-from datastructures import SortedValueDict
+from clustering.datastructures import SortedValueDict
 from datasets.data_reconstruction import get_and_reconstruct_data, reconstruct_solver_and_grid
-from patchwork_entropy_strategies import *
-from patchwork_loss_functions import *
-from patchwork_entropy_measures import *
+from clustering.patchwork_entropy_strategies import *
+from clustering.patchwork_loss_functions import *
+from clustering.patchwork_entropy_measures import *
 
 class Patchwork:
     #TODO: Add docstring for the class

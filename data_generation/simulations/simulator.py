@@ -347,10 +347,10 @@ class Simulator:
 
         transformed_centers = grid.get_cell_centers(transformed_space=True)
         centers = grid.get_cell_centers()
-        num_centers = np.prod(grid.resolution)
+        num_centers = len(grid.indices)
         derivatives = np.zeros((controls.shape[0], num_centers, grid.dimension))
         transformed_derivates = np.zeros((controls.shape[0], num_centers, grid.dimension))
-        print('got here')
+
         for k, c in enumerate(controls):
             derivatives[k] = solver.get_derivative(centers, controls[k])
             if grid.transformed_bool:
@@ -379,24 +379,41 @@ class Simulator:
         """
         _ , _, _, transformed_derivatives = self.get_gridcell_centers_and_derivatives(controls)
         
-        if not all(res == self.grid.resolution[0] for res in self.grid.resolution):
-            raise ValueError("All entries of self.grid.resolution must be equal, otherwise the implementation has to be changed.")
-        gridcellwidth = 1/self.grid.resolution[0]
+        if self.grid.__class__.__name__ == 'Grid':
+            if not all(res == self.grid.resolution[0] for res in self.grid.resolution):
+                raise ValueError("All entries of self.grid.resolution must be equal, otherwise the implementation has to be changed.")
+            gridcellwidth = 1/self.grid.resolution[0]
 
-        td_2d = transformed_derivatives.reshape(-1, transformed_derivatives.shape[-1])
-        td_abs = np.abs(td_2d) 
+            td_2d = transformed_derivatives.reshape(-1, transformed_derivatives.shape[-1])
+            td_abs = np.abs(td_2d) 
 
-        def neighbor_transition_fraction(t):
-            if t <= 0:
-                return 0  # Avoid division by zero or negative t
-            stretched_td =  t * td_abs
-            stretched_td_minus_w = stretched_td - gridcellwidth/2
+            def neighbor_transition_fraction(t):
+                if t <= 0:
+                    return 0  # Avoid division by zero or negative t
+                stretched_td =  t * td_abs
+                stretched_td_minus_w = stretched_td - gridcellwidth/2
 
-            stretched_td_to_neighbor = stretched_td_minus_w[~np.all(stretched_td_minus_w < 0, axis=1)] - 2*gridcellwidth/2
-            negative_rows_count_neighbor = np.sum(np.all(stretched_td_to_neighbor < 0, axis=1))
+                stretched_td_to_neighbor = stretched_td_minus_w[~np.all(stretched_td_minus_w < 0, axis=1)] - 2*gridcellwidth/2
+                negative_rows_count_neighbor = np.sum(np.all(stretched_td_to_neighbor < 0, axis=1))
 
-            return -negative_rows_count_neighbor/len(td_abs)
+                return -negative_rows_count_neighbor/len(td_abs)
+        elif self.grid.__class__.__name__ == 'VoronoiGrid':
+            tf_derivatives_lengths = np.linalg.norm(transformed_derivatives, axis=-1)
+            avg_cell_heights = np.zeros(self.grid.numbercells)
+            cell_data = self.grid.get_complete_cell_data()
+            for cell_idx, facet_list in cell_data.items():
+                heights = [facet['height'] for facet in facet_list]
+                avg_cell_heights[cell_idx] = np.mean(heights)
+            
+            neighbor_range = np.column_stack([avg_cell_heights, 3 * avg_cell_heights]) #approx range from cell center to neighbor cell (min to max)
 
+            def neighbor_transition_fraction(t):
+                if t <= 0:
+                    return 0
+                stretched_tf_derivatives_lengths = t * tf_derivatives_lengths
+                # Calculate the fraction of cells that are within the neighbor range
+                neighbor_fraction = np.sum((neighbor_range[:, 0] <= stretched_tf_derivatives_lengths) & (stretched_tf_derivatives_lengths <= neighbor_range[:, 1])) / self.grid.numbercells
+                return -neighbor_fraction
 
         # Step 1: Global search
         global_result = differential_evolution(lambda t: neighbor_transition_fraction(t), bounds=[search_space]) 
