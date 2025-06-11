@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=drm_vicreg_search
+#SBATCH --job-name=drm_vicreg_small
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=3:30:00
+#SBATCH --time=3:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -10,7 +10,7 @@
 #SBATCH --mem=4G
 #SBATCH --output=log/drm_vicreg_%A_%a.out
 #SBATCH --error=log/drm_vicreg_%A_%a.err
-#SBATCH --array=1-19
+#SBATCH --array=1-4
 
 # Print job info
 echo "Job started at $(date)"
@@ -40,7 +40,7 @@ VALUE_METHODS=("angle" "market_share")
 DB_PATHS=("datasets/results/single_saddle_system_horizontal.db" "datasets/results/tech_sim.db")
 
 # Fixed parameters for all runs
-BASE_OUTPUT_DIR="neural_networks/output/vicreg_param_search"
+BASE_OUTPUT_DIR="neural_networks/output/vicreg_transformed_input"
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
@@ -52,8 +52,7 @@ USE_WARMUP="--use_warmup --warmup_epochs=10"
 USE_TARGET_ENCODER="--use_target_encoder --ema_decay=0.9"
 USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=1.0"
 STATE_LOSS_TYPE="kl_div"
-STATE_LOSS_WEIGHT=1.0  # Fixed as requested
-VALUE_LOSS_WEIGHT=1.0  # Fixed as requested
+PREDICTOR_TYPE="standard"  # Fixed to standard only
 
 # FIXED PARAMETERS
 NUM_STATES=4
@@ -62,17 +61,18 @@ GUMBEL_MIN=0.5
 SORT_STATES="--sort_states"
 
 # Define parameter values for grid search
-PREDICTOR_TYPE_VALUES=("standard" "bilinear")
 SEEDS=(11 42)
+STATE_LOSS_WEIGHTS=(0.5 1.0)                  # 2 options
+VALUE_LOSS_WEIGHTS=(1.0 1.5)                  # 2 options
 
-# VICReg parameter search space
-VARIANCE_TARGETS=(0.4 0.3)                    # 2 options
-VICREG_WEIGHTS=(0.1 0.3 1.0)                 # 3 options  
-COVARIANCE_WEIGHTS=(1.0 3.0 10.0)            # 3 options
-# Total vicreg combinations: 1 (no vicreg) + 2×3×3 (vicreg params) = 19
+# VICReg configurations
+VICREG_CONFIGS=(
+    "NONE|novicreg"
+    "--use_vicreg --vicreg_variance_target=0.5 --vicreg_weight=0.001 --vicreg_lambda=5 --vicreg_nu=2 --vicreg_invariance_schedule|vicreg_vt0.5_vw0.001_vl5_vn2"
+)
 
-# Total combinations: 2 systems × 2 predictors × 2 seeds × 19 vicreg = 152
-# Running 8 combinations per array job = 19 array jobs total
+# Total combinations: 2 systems × 2 seeds × 2 state_loss × 2 value_loss × 2 vicreg = 32
+# Running 8 combinations per array job = 4 array jobs total
 
 # Calculate which 8 runs this array task should handle
 runs_per_task=8
@@ -80,68 +80,42 @@ start_run=$(((SLURM_ARRAY_TASK_ID - 1) * runs_per_task))
 
 echo "Array task $SLURM_ARRAY_TASK_ID will handle runs $start_run to $((start_run + runs_per_task - 1))"
 
-# Function to get vicreg settings for a given vicreg_idx
-get_vicreg_settings() {
-    local vicreg_idx=$1
-    
-    if [ $vicreg_idx -eq 0 ]; then
-        # No VICReg
-        echo "NONE|novicreg"
-    else
-        # VICReg with parameters (indices 1-18 map to param combinations 0-17)
-        local param_idx=$((vicreg_idx - 1))
-        
-        # Break down param_idx into individual parameter indices
-        local cov_idx=$((param_idx % 3))
-        local temp1=$((param_idx / 3))
-        local weight_idx=$((temp1 % 3))
-        local var_idx=$((temp1 / 3))
-        
-        # Get actual parameter values
-        local variance_target=${VARIANCE_TARGETS[$var_idx]}
-        local vicreg_weight=${VICREG_WEIGHTS[$weight_idx]}
-        local covariance_weight=${COVARIANCE_WEIGHTS[$cov_idx]}
-        
-        # Return vicreg command and descriptive name
-        local vicreg_cmd="--use_vicreg --vicreg_variance_target=$variance_target --vicreg_weight=$vicreg_weight --vicreg_nu=$covariance_weight"
-        local vicreg_name="vicreg_vt${variance_target}_vw${vicreg_weight}_cw${covariance_weight}"
-        
-        echo "$vicreg_cmd|$vicreg_name"
-    fi
-}
-
 # Loop through the 8 runs assigned to this array task
 for run_offset in $(seq 0 $((runs_per_task - 1))); do
     global_run_idx=$((start_run + run_offset))
     
     # Check if we've exceeded total runs
-    if [ $global_run_idx -ge 152 ]; then
+    if [ $global_run_idx -ge 32 ]; then
         echo "Reached end of parameter space at run $global_run_idx"
         break
     fi
     
     # Break down global_run_idx into parameter indices
-    # Order: system (2) × predictor (2) × seed (2) × vicreg (19)
+    # Order: system (2) × seed (2) × state_loss (2) × value_loss (2) × vicreg (2)
     
     # Extract indices using modular arithmetic
-    vicreg_idx=$((global_run_idx % 19))
-    temp1=$((global_run_idx / 19))
+    vicreg_idx=$((global_run_idx % 2))
+    temp1=$((global_run_idx / 2))
     
-    seed_idx=$((temp1 % 2))
+    value_loss_idx=$((temp1 % 2))
     temp2=$((temp1 / 2))
     
-    predictor_idx=$((temp2 % 2))
-    system_idx=$((temp2 / 2))
+    state_loss_idx=$((temp2 % 2))
+    temp3=$((temp2 / 2))
+    
+    seed_idx=$((temp3 % 2))
+    system_idx=$((temp3 / 2))
     
     # Get actual parameter values
     SYSTEM_TYPE=${SYSTEMS[$system_idx]}
     VALUE_METHOD=${VALUE_METHODS[$system_idx]}
     DB_PATH=${DB_PATHS[$system_idx]}
-    PREDICTOR_TYPE=${PREDICTOR_TYPE_VALUES[$predictor_idx]}
     SEED=${SEEDS[$seed_idx]}
+    STATE_LOSS_WEIGHT=${STATE_LOSS_WEIGHTS[$state_loss_idx]}
+    VALUE_LOSS_WEIGHT=${VALUE_LOSS_WEIGHTS[$value_loss_idx]}
     
     # Get VICReg settings using pipe delimiter
-    IFS='|' read VICREG_SETTING VICREG_NAME <<< $(get_vicreg_settings $vicreg_idx)
+    IFS='|' read VICREG_SETTING VICREG_NAME <<< "${VICREG_CONFIGS[$vicreg_idx]}"
 
     # Handle the NONE case for VICReg
     if [ "$VICREG_SETTING" != "NONE" ]; then
@@ -151,7 +125,7 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     fi
     
     # Create descriptive run name
-    CONFIG_NAME="${SYSTEM_TYPE}_${PREDICTOR_TYPE}_${VICREG_NAME}_seed${SEED}"
+    CONFIG_NAME="${SYSTEM_TYPE}_${PREDICTOR_TYPE}_sl${STATE_LOSS_WEIGHT}_vl${VALUE_LOSS_WEIGHT}_${VICREG_NAME}_seed${SEED}"
     
     # All runs go in the same base directory
     OUTPUT_DIR="${BASE_OUTPUT_DIR}"
@@ -165,6 +139,8 @@ for run_offset in $(seq 0 $((runs_per_task - 1))); do
     echo "  system: $SYSTEM_TYPE"
     echo "  value_method: $VALUE_METHOD"
     echo "  predictor_type: $PREDICTOR_TYPE"
+    echo "  state_loss_weight: $STATE_LOSS_WEIGHT"
+    echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
     echo "  vicreg: $VICREG_NAME"
     echo "  database: $DB_PATH"
     echo "  seed: $SEED"

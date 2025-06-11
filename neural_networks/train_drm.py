@@ -116,7 +116,8 @@ def train_drm_model(db_path,
     system_config = get_system_config(SystemType[system_type.upper()])
     # Get system-specific transformation
     transformation = get_transformation(SystemType[system_type.upper()])
-    
+    input_transform= system_config.get('input_transform', 'none')
+
     # Validate/set value_method
     if value_method is None:
         value_method = system_config['default_value_type']
@@ -200,6 +201,7 @@ def train_drm_model(db_path,
         obs_dim=obs_dim,
         control_dim=control_dim,
         value_dim=value_dim,
+        input_transform=input_transform,
         num_states=num_states,
         hidden_dim=hidden_dim,
         predictor_type=predictor_type,
