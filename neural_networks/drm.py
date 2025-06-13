@@ -61,6 +61,8 @@ class DiscreteRepresentationsModel(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
             nn.Linear(hidden_dim, num_states)  # Logits for state probabilities
         )
 
@@ -68,6 +70,8 @@ class DiscreteRepresentationsModel(nn.Module):
         if use_target_encoder:
             self.target_encoder = nn.Sequential(
                 nn.Linear(obs_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
