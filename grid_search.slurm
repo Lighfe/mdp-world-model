@@ -65,7 +65,7 @@ VALUE_LOSS_WEIGHT=1.0
 SEEDS=(7 11 42)
 
 # Get database path for this array task
-DB_PATH="single_saddle_${SLURM_ARRAY_TASK_ID}.db"
+DB_PATH="datasets/results/single_saddle_${SLURM_ARRAY_TASK_ID}.db"
 
 echo "========================================================"
 echo "Array task $SLURM_ARRAY_TASK_ID processing database: $DB_PATH"
