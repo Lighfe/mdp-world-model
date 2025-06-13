@@ -8,7 +8,6 @@ class SystemType(Enum):
 
 SYSTEM_CONFIGS = {
     'tech_substitution': {
-        'input_transform': 'log',
         'control_format': 'continuous',
         'control_dim': 1,
         'value_types': ['market_share', '90% market share', 'identity'],
@@ -38,7 +37,6 @@ SYSTEM_CONFIGS = {
         }
     },
     'saddle_system': {
-        'input_transform': 'asinh',  # Handles -inf to inf
         'control_format': 'categorical',
         'control_dim': None,
         'value_types': ['angle', 'identity'],

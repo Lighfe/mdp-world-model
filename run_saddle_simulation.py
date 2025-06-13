@@ -23,7 +23,7 @@ def main():
                         help='Time step size')
     parser.add_argument('--num-steps', type=int, default=1,
                         help='Number of simulation steps')
-    parser.add_argument('--resolution', type=int, nargs=2, default=[20, 20],
+    parser.add_argument('--resolution', type=int, nargs=2, default=[25, 25],
                         help='Grid resolution as two integers, e.g., 20 20')
     parser.add_argument('--avg-samples-per-cell', type=int, default=50,
                         help='Average number of samples per cell')
@@ -35,7 +35,7 @@ def main():
                         help='Logistic transformation x0 parameter')
     
     # Saddle system parameters
-    parser.add_argument('--saddle-points', type=str, default='[[1.0, 0.0]]',
+    parser.add_argument('--saddle-points', type=str, default='[[0.0, 0.0]]',
                         help='JSON array of saddle points, e.g., [[1.0, 0.0], [2.0, 3.0]]')
     parser.add_argument('--angles', type=str, default='[90]',
                         help='JSON array of angles in degrees, e.g., [90, 180]')

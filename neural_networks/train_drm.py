@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # NOTE: absolute imports from project root
 # Import application-specific modules
 from neural_networks.system_registry import SystemType, get_system_config, get_transformation
-from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset
+from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset, get_saddle_configuration
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel
 from neural_networks.drm_viz import (
@@ -116,8 +116,7 @@ def train_drm_model(db_path,
     system_config = get_system_config(SystemType[system_type.upper()])
     # Get system-specific transformation
     transformation = get_transformation(SystemType[system_type.upper()])
-    input_transform= system_config.get('input_transform', 'none')
-
+    
     # Validate/set value_method
     if value_method is None:
         value_method = system_config['default_value_type']
@@ -201,7 +200,6 @@ def train_drm_model(db_path,
         obs_dim=obs_dim,
         control_dim=control_dim,
         value_dim=value_dim,
-        input_transform=input_transform,
         num_states=num_states,
         hidden_dim=hidden_dim,
         predictor_type=predictor_type,
@@ -817,6 +815,15 @@ def train_drm_model(db_path,
     #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
     #visualize_model_architecture(model, arch_vis_path)
 
+    points_config = None
+    if system_type == 'saddle_system':
+        saddle_config = get_saddle_configuration(db_path)
+        if saddle_config:
+            points_config = {
+                'points': saddle_config['saddle_points'],
+                'angles_degrees': saddle_config['angles_degrees']
+            }
+
     # Visualize the state space
     state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
     visualize_state_space(
@@ -828,7 +835,9 @@ def train_drm_model(db_path,
         ],
         device=device,
         num_states=num_states,
-        system_type=system_type
+        system_type=system_type,
+        points=points_config['points'] if points_config else None,
+        angles_degrees=points_config['angles_degrees'] if points_config else None
     )
 
     state_soft_vis_path = os.path.join(output_dir, f"states_soft_{run_id}.png")
@@ -842,7 +851,9 @@ def train_drm_model(db_path,
         device=device,
         num_states=num_states,
         soft=True,
-        system_type=system_type
+        system_type=system_type,
+        points=points_config['points'] if points_config else None,
+        angles_degrees=points_config['angles_degrees'] if points_config else None
     )
 
     # Analyze and visualize state transitions with argmax assignment
@@ -1046,5 +1057,3 @@ if __name__ == "__main__":
         vicreg_variance_target=args.vicreg_variance_target,
         vicreg_invariance_schedule=args.vicreg_invariance_schedule
     )
-
-# python -m neural_networks.train_drm datasets/results/tech_toy.db --num_states 4

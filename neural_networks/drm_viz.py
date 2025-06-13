@@ -7,6 +7,7 @@ from matplotlib.ticker import FuncFormatter
 import math
 import pandas as pd
 import seaborn as sns
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import torch
 import graphviz
@@ -109,7 +110,8 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
         print(f"Saved loss curves to {save_path}")
 
 def visualize_state_space(model, output_path=None, transformations=None, device='cpu',
-                          num_points=1000, num_states=None, soft=False, system_type=None):
+                          num_points=1000, num_states=None, soft=False, system_type=None,
+                          points=None, angles_degrees=None):
     """
     Visualize the state probabilities in z-space (transformed space) with x-space coordinate labels.
     
@@ -120,6 +122,10 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         device: Device to run the model on.
         num_points: Number of points in each dimension of the mesh.
         num_states: Number of states in the model (if None, will be inferred).
+        soft: Whether to use soft assignment for state probabilities.
+        system_type: Type of system (for default transformations).
+        points: List of point coordinates in x-space (e.g., [[1.0, 0.0], [2.0, 1.0]])
+        angles_degrees: List of angles in degrees corresponding to points (e.g., [90, 45])
     """
     if transformations is None:
         if system_type is None:
@@ -129,7 +135,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         transformations = [transformation, transformation]  # Same for both dimensions
     
     # Unpack the transformation functions
-    _, inverse_transforms, _ = zip(*transformations)
+    forward_transforms, inverse_transforms, _ = zip(*transformations)
     
     # Z-space bounds (transformed space)
     z_bounds = [(0, 1), (0, 1)]
@@ -158,37 +164,25 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     if num_states is None:
         num_states = state_probs.shape[1]
     
-    # Define grid layout for the plots
-    cols_per_row = min(2, num_states)
-    rows = math.ceil(num_states / cols_per_row)
+    # Transform points from x-space to z-space for plotting
+    points_z = None
+    if points is not None:
+        points_z = []
+        for point in points:
+            z1 = forward_transforms[0](point[0])
+            z2 = forward_transforms[1](point[1])
+            points_z.append([z1, z2])
     
-    # Create figure
-    figsize = (12, 5 * rows)
-    fig, axes = plt.subplots(rows, cols_per_row, figsize=figsize, squeeze=False)
+    # Define grid layout for the plot
+    cols_per_row = min(4, num_states)
+    rows = (num_states + cols_per_row - 1) // cols_per_row
     
-    # Generate tick positions for z-space
-    num_ticks = 6
-    z1_ticks = np.linspace(z_bounds[0][0], z_bounds[0][1], num_ticks)
-    z2_ticks = np.linspace(z_bounds[1][0], z_bounds[1][1], num_ticks)
-    
-    # Format functions for ticks (z to x transformation)
-    def format_x1_ticks(z, pos):
-        x = inverse_transforms[0](z)
-        if np.isinf(x) or x > 10000:
-            return "∞"
-        elif x < 0.1:
-            return f"{x:.2e}"
-        else:
-            return f"{x:.1f}"
-    
-    def format_x2_ticks(z, pos):
-        x = inverse_transforms[1](z)
-        if np.isinf(x) or x > 10000:
-            return "∞"
-        elif x < 0.1:
-            return f"{x:.2e}"
-        else:
-            return f"{x:.1f}"
+    # Create subplots
+    fig, axes = plt.subplots(rows, cols_per_row, figsize=(cols_per_row * 5, rows * 4))
+    if rows == 1 and cols_per_row == 1:
+        axes = np.array([[axes]])
+    elif rows == 1 or cols_per_row == 1:
+        axes = axes.reshape(rows, cols_per_row)
     
     # Plot each state
     for state in range(num_states):
@@ -196,15 +190,54 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         col_idx = state % cols_per_row
         ax = axes[row_idx, col_idx]
         
-        probs = state_probs[:, state].cpu().detach().numpy().reshape(z1_grid.shape)
-        im = ax.pcolormesh(z1_grid, z2_grid, probs, vmin=0, vmax=1, cmap='viridis')
-        ax.set_title(f'State {state+1} Assignment Strength')
+        # Reshape probabilities for this state
+        state_prob_grid = state_probs[:, state].cpu().numpy().reshape(num_points, num_points)
         
-        # Set ticks
-        ax.set_xticks(z1_ticks)
-        ax.set_yticks(z2_ticks)
+        # Create the plot (using extent to set coordinate system)
+        im = ax.imshow(state_prob_grid, 
+                      extent=[z_bounds[0][0], z_bounds[0][1], z_bounds[1][0], z_bounds[1][1]],
+                      origin='lower', 
+                      cmap='viridis', 
+                      vmin=0, vmax=1)
         
-        # Set custom tick formatters
+        # Overlay points and angles if provided
+        if points_z is not None and angles_degrees is not None:
+            for i, (point_z, angle_deg) in enumerate(zip(points_z, angles_degrees)):
+                # Draw white point
+                ax.plot(point_z[0], point_z[1], 'wo', markersize=8, markeredgecolor='black', markeredgewidth=1)
+                
+                # Draw angle line
+                angle_rad = np.radians(angle_deg)
+                line_length = 0.1  # Length of the line in z-space
+                
+                # Calculate line endpoints
+                dx = line_length * np.cos(angle_rad)
+                dy = line_length * np.sin(angle_rad)
+                
+                x_start = point_z[0] - dx/2
+                x_end = point_z[0] + dx/2
+                y_start = point_z[1] - dy/2
+                y_end = point_z[1] + dy/2
+                
+                ax.plot([x_start, x_end], [y_start, y_end], 'w-', linewidth=2)
+        
+        # Set title
+        ax.set_title(f'State {state + 1}', fontsize=14, fontweight='bold')
+        
+        # Create custom tick formatter functions for x-space labels
+        def format_x1_ticks(z_val, pos):
+            if z_val < 0 or z_val > 1:
+                return ''
+            x_val = inverse_transforms[0](z_val)
+            return f'{x_val:.1f}'
+        
+        def format_x2_ticks(z_val, pos):
+            if z_val < 0 or z_val > 1:
+                return ''
+            x_val = inverse_transforms[1](z_val)
+            return f'{x_val:.1f}'
+        
+        # Apply formatters
         ax.xaxis.set_major_formatter(FuncFormatter(format_x1_ticks))
         ax.yaxis.set_major_formatter(FuncFormatter(format_x2_ticks))
         
@@ -216,7 +249,6 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         ax.grid(True, linestyle='--', alpha=0.6)
         
         # Add colorbar
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
         cbar = fig.colorbar(im, cax=cax)
@@ -240,7 +272,6 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     
     plt.close(fig)
     return fig, axes
-
 
 def analyze_state_transitions(model, 
                               transformations,

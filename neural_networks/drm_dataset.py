@@ -5,8 +5,10 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 import numpy as np
-from sqlalchemy import create_engine, select, MetaData
+from sqlalchemy import create_engine, select, text, MetaData
 from sqlalchemy.orm import Session
+
+import json
 
 # Define project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -181,8 +183,8 @@ class SaddleSystemDataset(BaseDataset):
         required_columns = ['x0', 'x1', 'c0', 'y0', 'y1']
         for col in required_columns:
             if not hasattr(self.table.c, col):
-                raise ValueError(f"Required column '{col}' not found in table")
                     
+                raise ValueError(f"Required column '{col}' not found in table")
         # SQLAlchemy query for this index
         with Session(self.engine) as session:
             query = select(
@@ -400,3 +402,56 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     )
     
     return train_loader, val_loader, test_loader
+
+
+def get_saddle_configuration(db_path):
+    """
+    Extract saddle points and angles from the database configuration.
+    
+    Args:
+        db_path: Path to the SQLite database
+        
+    Returns:
+        dict: Dictionary containing saddle_points and angles_degrees
+              Returns None if not a saddle system or no config found
+    """
+    
+    engine = create_engine(f"sqlite:///{db_path}")
+    
+    try:
+        with engine.connect() as conn:
+            # Query the configs table
+            result = conn.execute(text("SELECT configurations FROM configs LIMIT 1"))
+            config_row = result.fetchone()
+            
+            if config_row is None:
+                print("No configuration found in configs table")
+                return None
+                
+            # Parse the JSON configuration
+            config = json.loads(config_row[0])
+            
+            # Extract model configuration
+            solver_config = config.get('solver', {})
+            model_config = solver_config.get('model', {})
+            
+            # Check if this is a saddle system
+            if model_config.get('model') != 'MultiSaddleSystem':
+                print(f"Not a saddle system: {model_config.get('model')}")
+                return None
+                
+            # Extract saddle points and angles
+            saddle_points = model_config.get('saddle_points', [])
+            angles_degrees = model_config.get('angles_degrees', [])
+            
+            print(f"Found {len(saddle_points)} saddle points: {saddle_points}")
+            print(f"Found {len(angles_degrees)} angles: {angles_degrees}")
+            
+            return {
+                'saddle_points': saddle_points,
+                'angles_degrees': angles_degrees
+            }
+            
+    except Exception as e:
+        print(f"Error extracting saddle configuration: {e}")
+        return None
