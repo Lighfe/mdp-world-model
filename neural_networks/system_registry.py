@@ -10,8 +10,8 @@ SYSTEM_CONFIGS = {
     'tech_substitution': {
         'control_format': 'continuous',
         'control_dim': 1,
-        'value_types': ['market_share', '90% market share', 'identity'],
-        'default_value_type': 'market_share',
+        'value_methods': ['market_share', '90% market share', 'identity'],
+        'default_value_method': 'market_share',
         'value_activation': {
             'market_share': 'sigmoid',  # [0,1] range for probabilities
             '90% market share': 'sigmoid',  # binary output
@@ -39,8 +39,8 @@ SYSTEM_CONFIGS = {
     'saddle_system': {
         'control_format': 'categorical',
         'control_dim': None,
-        'value_types': ['angle', 'identity'],
-        'default_value_type': 'angle',
+        'value_methods': ['angle', 'identity'],
+        'default_value_method': 'angle',
         'value_activation': {
             'angle': 'tanh',  # [-1,1] range for sin/cos
             'identity': None  # No activation for identity

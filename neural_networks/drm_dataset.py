@@ -346,11 +346,11 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     
     # Validate/set value_method
     if value_method is None:
-        value_method = system_config['default_value_type']
+        value_method = system_config['default_value_method']
         print(f"Using default value method for {system_type}: {value_method}")
-    elif value_method not in system_config['value_types']:
+    elif value_method not in system_config['value_methods']:
         raise ValueError(f"Invalid value method '{value_method}' for {system_type}. "
-                        f"Available: {system_config['value_types']}")
+                        f"Available: {system_config['value_methods']}")
     
     
     # Create the appropriate dataset

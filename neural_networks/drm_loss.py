@@ -286,7 +286,7 @@ class StableDRMLoss(nn.Module):
         # Value loss calculation based on type
         value_loss = self._calculate_expected_value_loss(
             s_y_pred, v_pred_for_all_states, v_true, 
-            loss_type=self.value_loss_type, value_type=self.value_method
+            loss_type=self.value_loss_type, value_method=self.value_method
         )
         
         # Correlation-based diversity
