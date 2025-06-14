@@ -175,6 +175,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
     
     # Define grid layout for the plot
     cols_per_row = min(4, num_states)
+    #cols_per_row = 2 if num_states == 4 else min(4, num_states)
     rows = (num_states + cols_per_row - 1) // cols_per_row
     
     # Create subplots
@@ -204,11 +205,11 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
         if points_z is not None and angles_degrees is not None:
             for i, (point_z, angle_deg) in enumerate(zip(points_z, angles_degrees)):
                 # Draw white point
-                ax.plot(point_z[0], point_z[1], 'wo', markersize=8, markeredgecolor='black', markeredgewidth=1)
+                ax.plot(point_z[0], point_z[1], 'wx', markersize=5, markeredgecolor='black', markeredgewidth=0.1)
                 
                 # Draw angle line
                 angle_rad = np.radians(angle_deg)
-                line_length = 0.1  # Length of the line in z-space
+                line_length = 2.0  # Length of the line in z-space
                 
                 # Calculate line endpoints
                 dx = line_length * np.cos(angle_rad)
@@ -219,7 +220,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
                 y_start = point_z[1] - dy/2
                 y_end = point_z[1] + dy/2
                 
-                ax.plot([x_start, x_end], [y_start, y_end], 'w-', linewidth=2)
+                ax.plot([x_start, x_end], [y_start, y_end], 'w-', linewidth=0.5)
         
         # Set title
         ax.set_title(f'State {state + 1}', fontsize=14, fontweight='bold')

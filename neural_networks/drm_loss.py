@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -62,7 +63,7 @@ class StableDRMLoss(nn.Module):
                  use_entropy_decay=True, entropy_decay_proportion=0.2,
                  use_vicreg=True, vicreg_weight=0.1, vicreg_lambda=25.0, vicreg_mu=25.0, vicreg_nu=1.0,
                  vicreg_variance_target=0.4, vicreg_invariance_schedule=True,
-                 state_loss_type="kl_div", value_loss_type="mse"):
+                 state_loss_type="kl_div", value_loss_type="mse", value_method=None):
         """
         Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
         
@@ -123,6 +124,8 @@ class StableDRMLoss(nn.Module):
         self.value_loss_type = value_loss_type
         if value_loss_type not in ["mse", "angular", "binary_cross_entropy"]:
             raise ValueError(f"Unsupported value loss type: {value_loss_type}. Must be one of 'mse', 'angular', or 'binary_cross_entropy'")
+        
+        self.value_method = value_method
     
     def _kl_div_loss(self, s_y, s_y_pred):
         """KL divergence loss (original implementation)"""
@@ -161,43 +164,17 @@ class StableDRMLoss(nn.Module):
         return 0.5 * (kl_p_m + kl_q_m)
     # TODO: KS divergence turned around
     
-    def _angular_loss(self, v_pred, v_true):
-        """
-        Angular loss for angle predictions represented as (sin(θ), cos(θ))
+    def _circular_mse_loss(self, v_pred, v_true):
+        # Convert to angles, ignores magnitude
+        angle_pred = torch.atan2(v_pred[:, 0], v_pred[:, 1])
+        angle_true = torch.atan2(v_true[:, 0], v_true[:, 1])
         
-        Args:
-            v_pred: Predicted values (batch_size, 2) - [sin(θ), cos(θ)]
-            v_true: True values (batch_size, 2) - [sin(θ), cos(θ)]
-            
-        Returns:
-            Angular loss value
-        """
-        # Ensure inputs are normalized (they should be if using tanh activation)
-        # Compute dot product between predicted and true unit vectors
-        dot_product = torch.sum(v_pred * v_true, dim=1)
+        # Circular difference (handles 1°↔359° correctly)
+        diff = angle_pred - angle_true
+        circular_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
         
-        # Clamp to avoid numerical issues with arccos
-        dot_product = torch.clamp(dot_product, -1.0, 1.0)
-        
-        # Angular distance in radians
-        angular_distance = torch.acos(dot_product)
-        
-        # You can also square it for smoother gradients
-        return torch.mean(angular_distance)
-    
-    def _angular_mse_loss(self, v_pred, v_true):
-        """
-        MSE loss on the sine-cosine representation
-        This is simpler and often works well for angle prediction
-        
-        Args:
-            v_pred: Predicted values (batch_size, 2) - [sin(θ), cos(θ)]
-            v_true: True values (batch_size, 2) - [sin(θ), cos(θ)]
-            
-        Returns:
-            MSE loss on sine-cosine components
-        """
-        return torch.mean((v_pred - v_true) ** 2)
+        return torch.mean(circular_diff ** 2) / (np.pi ** 2) # scaling
+
     
     def _binary_cross_entropy_loss(self, v_pred, v_true):
         """
@@ -308,7 +285,8 @@ class StableDRMLoss(nn.Module):
         
         # Value loss calculation based on type
         value_loss = self._calculate_expected_value_loss(
-            s_y_pred, v_pred_for_all_states, v_true, loss_type=self.value_loss_type
+            s_y_pred, v_pred_for_all_states, v_true, 
+            loss_type=self.value_loss_type, value_type=self.value_method
         )
         
         # Correlation-based diversity
@@ -347,7 +325,7 @@ class StableDRMLoss(nn.Module):
                 batch_entropy, individual_entropy,
                 vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance)
     
-    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse"):
+    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse", value_method='none'):
         """
         Calculate expected value loss under the predicted state distribution.
         
@@ -367,11 +345,15 @@ class StableDRMLoss(nn.Module):
         
         # Now calculate the loss based on type
         if loss_type == "mse":
-            # Standard MSE loss
-            value_loss = torch.mean((expected_v_pred - v_true) ** 2)
+            raw_mse = torch.mean((expected_v_pred - v_true) ** 2)
+            # Apply scaling based on value type
+            if value_method == "identity":
+                return raw_mse / v_true.shape[-1]  # Scale by number of dimensions
+            else:
+                return raw_mse  # No scaling for market_share, etc.
         elif loss_type == "angular":
             # Use angular MSE loss for stability
-            value_loss = self._angular_mse_loss(expected_v_pred, v_true)
+            value_loss = self._circular_mse_loss(expected_v_pred, v_true)
         elif loss_type == "binary_cross_entropy":
             # Binary cross entropy for binary predictions
             value_loss = self._binary_cross_entropy_loss(expected_v_pred, v_true)

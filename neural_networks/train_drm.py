@@ -236,6 +236,7 @@ def train_drm_model(db_path,
         entropy_decay_proportion=entropy_decay_proportion,
         state_loss_type=state_loss_type,
         value_loss_type=value_loss_type,
+        value_method=value_method,
         use_vicreg=use_vicreg,
         vicreg_weight=vicreg_weight,
         vicreg_lambda=vicreg_lambda,
@@ -540,7 +541,7 @@ def train_drm_model(db_path,
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
 
         #TODO: put back to 5 and 25
-        if epoch == 2 or epoch == 5 or epoch == 10 or epoch == 25:
+        if epoch == 5 or epoch == 10 or epoch == 25:
 
             # Visualize the state space
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
