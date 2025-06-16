@@ -201,26 +201,40 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
                       cmap='viridis', 
                       vmin=0, vmax=1)
         
+        ax.set_xticks(np.linspace(0, 1, 6))
+        ax.set_yticks(np.linspace(0, 1, 6))
+        
         # Overlay points and angles if provided
         if points_z is not None and angles_degrees is not None:
             for i, (point_z, angle_deg) in enumerate(zip(points_z, angles_degrees)):
                 # Draw white point
-                ax.plot(point_z[0], point_z[1], 'wx', markersize=5, markeredgecolor='black', markeredgewidth=0.1)
+                ax.plot(point_z[0], point_z[1], 'wx', markersize=6, markeredgecolor='black', markeredgewidth=0.5)
                 
-                # Draw angle line
+                # Draw angle line from edge to edge
                 angle_rad = np.radians(angle_deg)
-                line_length = 2.0  # Length of the line in z-space
-                
-                # Calculate line endpoints
-                dx = line_length * np.cos(angle_rad)
-                dy = line_length * np.sin(angle_rad)
-                
-                x_start = point_z[0] - dx/2
-                x_end = point_z[0] + dx/2
-                y_start = point_z[1] - dy/2
-                y_end = point_z[1] + dy/2
-                
-                ax.plot([x_start, x_end], [y_start, y_end], 'w-', linewidth=0.5)
+                px, py = point_z[0], point_z[1]
+
+                # Line equation: x = px + t*cos(θ), y = py + t*sin(θ)
+                # Find t values where line hits boundaries
+                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+
+                t_values = []
+                # Left/right boundaries (x = 0, x = 1)
+                if abs(cos_a) > 1e-10:  # Avoid division by zero
+                    t_values.extend([(-px) / cos_a, (1-px) / cos_a])
+                # Top/bottom boundaries (y = 0, y = 1)  
+                if abs(sin_a) > 1e-10:  # Avoid division by zero
+                    t_values.extend([(-py) / sin_a, (1-py) / sin_a])
+
+                # Get min/max t to find intersection points
+                t_min, t_max = min(t_values), max(t_values)
+
+                x_start = px + t_min * cos_a
+                x_end = px + t_max * cos_a
+                y_start = py + t_min * sin_a
+                y_end = py + t_max * sin_a
+
+                ax.plot([x_start, x_end], [y_start, y_end], 'w--', linewidth=0.5)
         
         # Set title
         ax.set_title(f'State {state + 1}', fontsize=14, fontweight='bold')
