@@ -11,6 +11,7 @@ from data_generation.models.saddle_system import MultiSaddleSystem
 from data_generation.simulations.grid import Grid, logistic_transformation
 from data_generation.simulations.simulator import Simulator
 from data_generation.models.general_ode_solver import GeneralODENumericalSolver
+from data_generation.visualization.create_plots import create_saddle_streamplot_visualization
 
 def main():
     # Parse command-line arguments
@@ -45,6 +46,17 @@ def main():
                         help='Negative Lyapunov exponent')
     parser.add_argument('--control', type=int, default=0,
                         help='Control value for selecting saddle dynamics')
+    
+    # visualization
+    parser.add_argument('--create-streamplot', action='store_true',
+                    help='Create streamplot visualization after simulation')
+    parser.add_argument('--streamplot-transformed', action='store_true', default=True,
+                    help='Plot streamlines in transformed [0,1]x[0,1] space (default: True)')
+    parser.add_argument('--streamplot-original', dest='streamplot_transformed', action='store_false',
+                        help='Plot streamlines in original coordinate space')
+    parser.add_argument('--streamplot-range', type=float, nargs=2, default=[-5.0, 5.0],
+                        metavar=('MIN', 'MAX'),
+                        help='Range for x and y axes when using original space (default: -5 5)')
     
     args = parser.parse_args()
     
@@ -127,6 +139,26 @@ def main():
         # Display summary of results
         num_trajectories = len(results['trajectory_id'].unique())
         print(f"Generated {len(results)} data points across {num_trajectories} trajectories.")
+
+        if args.create_streamplot:
+            print("Creating streamplot visualization...")
+            
+            # Use the same range for both x and y
+            x_range = tuple(args.streamplot_range)
+            y_range = tuple(args.streamplot_range)
+            
+            streamplot_path = create_saddle_streamplot_visualization(
+                grid=grid,
+                solver=solver, 
+                model=model,
+                saddle_points=saddle_points,
+                angles_degrees=angles,
+                output_dir="data_generation/figs",
+                filename=f"{args.db_name.replace('.db', '')}_streamplot.png",
+                use_transformed_space=args.streamplot_transformed,
+                x_range=x_range,
+                y_range=y_range
+    )
         
     except Exception as e:
         print(f"Error during simulation: {e}")
