@@ -357,6 +357,9 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             hv_polys.data = patch_polygons  # Update the data in the existing hv_polys object
             hv_polys.opts(cmap=cmap_dict)  # your predefined patch color map
 
+            if selected_color == 'White':
+                hv_polys.opts(line_color='white', fill_color='white')
+
             # Identify patch borders
             patch_borders = []
             for patch_id in unique_patches:

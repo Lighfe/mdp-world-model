@@ -43,14 +43,15 @@ def determine_delta_t(config, simulator, config_path, significant_figures=3):
     
     search_space = config['delta_t']
     delta_t_optimization_plot_path = config_path.replace(".json", "") + "_delta_t_optimization_plot.png" #TODO maybe improve this
-    optimal_delta_t = simulator.get_optimal_delta_t(np.array(config['controls']), search_space, path_to_save_plot = delta_t_optimization_plot_path)
     
+
+    optimal_delta_t = simulator.get_optimal_delta_t(np.array(config['controls']), search_space, path_to_save_plot = delta_t_optimization_plot_path)
     
     while True:
         #Show the plot and ask the user for confirmation
         print(f"Plot of optimal delta_t search saved at {delta_t_optimization_plot_path}.")
 
-        user_input = input(f"Optimal delta_t found at {round(optimal_delta_t, 2)}. Proceed with this value? (yes/no): ").strip().lower()
+        user_input = input(f"Optimal delta_t found at {optimal_delta_t}. Proceed with this value? (yes/no): ").strip().lower()
         if user_input in ['yes', 'y']:
             plt.close()
             break
@@ -144,14 +145,13 @@ def initialize_simulation(config, config_path):
         logging.info("Voronoi grid type detected.")
         grid = VoronoiGrid(bounds=config["bounds"], 
                            numbercells=config.get("numbercells", 10), 
-                           grid_transformations = config.get("transformations", None), 
+                           grid_transformations = transformations, 
                            seed=config.get("grid_seed", None),
                            cell_centers=config.get("cell_centers", None),
                            padding_margin= config.get("padding_margin", 'auto')
                            )
     else:
         grid = Grid(bounds=config["bounds"], resolution=config["resolution"], grid_transformations=transformations)
-
 
     if 'control_params' in config.keys():
         model = globals()[config["model"]](control_params=config["control_params"])
@@ -164,7 +164,7 @@ def initialize_simulation(config, config_path):
     # Check if delta_t is given, else determine optimal delta_t and save it to the config json file
     if type(config['delta_t']) == list:
         config = determine_delta_t(config, simulator, config_path)
-    
+
     # Log simulation start
     logging.info(f"Initialized simulation of {config['model']} with the following parameters:")
     logging.info(f"Bounds: {config['bounds']}")
@@ -210,7 +210,7 @@ def run_and_store_simulations(config, config_path):
             # Log success and details
             logging.info(f"Stored {len(simulator.results)} rows of simulation data in {db_path}")
             logging.info("\nConfigs data:")
-            logging.info(simulator.configs.head().to_string())  # Convert DataFrame to string for logging
+            logging.info(simulator.configs.drop(columns=['cell_centers'], errors='ignore').head().to_string())  # Exclude 'cell centers' column for logging
             logging.info("\nResults data:")
             logging.info(simulator.results.head().to_string())  # Convert DataFrame to string for logging
             

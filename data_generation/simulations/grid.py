@@ -60,10 +60,10 @@ class Grid:
         # TODO: Is this needed? Does this work this way?
         elif callable(grid_transformations):
             grid_transformations = [grid_transformations] * self.dimension
-
-
+        
         # Unzip functions
         transformations, inverse_transformations, transformation_derivatives = zip(*grid_transformations)
+        
         self.transformations = transformations
         self.inverse_transformations = inverse_transformations
         self.transformation_derivatives = transformation_derivatives
@@ -332,7 +332,8 @@ class VoronoiGrid(Grid):
                  seed: int = None, 
                  grid_transformations=None, 
                  cell_centers: np.ndarray = None, 
-                 padding_margin = 'auto'):
+                 padding_margin = 'auto',
+                 center_sampling_type: str = 'Poisson_Disk'):
         """
         Initializes the Voronoi tesselation grid based on the bounds of the space and the number of cells.
         The Voronoi tesselation is generated within th transformed space, if transformations are defined.
@@ -346,6 +347,7 @@ class VoronoiGrid(Grid):
                                                     transformation function derivative)
             cell_centers (np.ndarray of dim(numbercenters, self.dimension)): 
                     Optional, if given, the Voronoi cells are generated based on these centers.
+            center_sampling_type: str — type of sampling, either 'uniform' or 'Poisson_Disk'
         """
 
         self.bounds = np.array(copy.deepcopy(bounds))
@@ -357,6 +359,7 @@ class VoronoiGrid(Grid):
         self.transformed_bool = False
         self.transformation_params = dict()
         self.tf_bounds = copy.deepcopy(self.bounds)
+        
         if grid_transformations is not None:
             self._init_transformations(grid_transformations)
 
@@ -370,7 +373,7 @@ class VoronoiGrid(Grid):
                 self.numbercells = self.original_sites.shape[0]
 
         else:
-            self._generate_cell_centers(numbercells, seed=seed)
+            self._generate_cell_centers(numbercells, type = center_sampling_type, seed=seed)
 
         self.kdtree = KDTree(self.original_sites)
         self._generate_voronoi_tesselation(padding_margin)    
@@ -523,7 +526,7 @@ class VoronoiGrid(Grid):
     def get_config(self):
         config = {
             'grid_type': 'Voronoi',
-            'bounds': [[int(x) for x in bound] for bound in self.bounds.tolist()],
+            'bounds': self.bounds.tolist(),
             'dimension': self.dimension,
             'transformations': None if self.transformations is None else [tf.__name__ for tf in self.transformations],
             'transformation_params': self.transformation_params if self.transformation_params is not None else None,  # list of dicts
@@ -532,6 +535,7 @@ class VoronoiGrid(Grid):
             'padding_margin': self.padding_margin,
         }
         return config
+    
 
 
     def get_cell_index(self, coord:np.ndarray, in_transformed_space = False):

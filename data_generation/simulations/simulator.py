@@ -97,6 +97,8 @@ class Simulator:
           f"- State dimensions: {self.x_dim}\n"
           f"- Control dimensions: {self.control_dim}")
 
+
+
         # Possibly store the resulting df in the self.result_df attribute (by adding it to the existing df)
         if save_result == True:
             
@@ -105,7 +107,7 @@ class Simulator:
                 self.results = pd.DataFrame(columns=df.columns).astype(df.dtypes)
             
             self.results = pd.concat([self.results, df], ignore_index=True)
-            
+
                 # Collect all metadata in a dictionary
                 # TODO: add name of the classes
             metadata = {
@@ -378,13 +380,13 @@ class Simulator:
             float: Optimal delta_t value
         """
         _ , _, _, transformed_derivatives = self.get_gridcell_centers_and_derivatives(controls)
-        
+        td_2d = transformed_derivatives.reshape(-1, transformed_derivatives.shape[-1])
+
         if self.grid.__class__.__name__ == 'Grid':
             if not all(res == self.grid.resolution[0] for res in self.grid.resolution):
                 raise ValueError("All entries of self.grid.resolution must be equal, otherwise the implementation has to be changed.")
             gridcellwidth = 1/self.grid.resolution[0]
 
-            td_2d = transformed_derivatives.reshape(-1, transformed_derivatives.shape[-1])
             td_abs = np.abs(td_2d) 
 
             def neighbor_transition_fraction(t):
@@ -398,21 +400,25 @@ class Simulator:
 
                 return -negative_rows_count_neighbor/len(td_abs)
         elif self.grid.__class__.__name__ == 'VoronoiGrid':
-            tf_derivatives_lengths = np.linalg.norm(transformed_derivatives, axis=-1)
+            tf_derivatives_lengths = np.linalg.norm(td_2d, axis=-1)
             avg_cell_heights = np.zeros(self.grid.numbercells)
             cell_data = self.grid.get_complete_cell_data()
             for cell_idx, facet_list in cell_data.items():
                 heights = [facet['height'] for facet in facet_list]
                 avg_cell_heights[cell_idx] = np.mean(heights)
-            
+
             neighbor_range = np.column_stack([avg_cell_heights, 3 * avg_cell_heights]) #approx range from cell center to neighbor cell (min to max)
+            neighbor_range_for_all_controls = np.tile(neighbor_range, (transformed_derivatives.shape[0], 1))  # Repeat for all controls
+            if neighbor_range_for_all_controls.shape[0] !=  tf_derivatives_lengths.shape[0]:
+                raise ValueError(f"Shape mismatch: neighbor_range_for_all_controls {neighbor_range_for_all_controls.shape} does not match transformed_derivatives_lengths {tf_derivatives_lengths.shape}")
+
 
             def neighbor_transition_fraction(t):
                 if t <= 0:
                     return 0
                 stretched_tf_derivatives_lengths = t * tf_derivatives_lengths
                 # Calculate the fraction of cells that are within the neighbor range
-                neighbor_fraction = np.sum((neighbor_range[:, 0] <= stretched_tf_derivatives_lengths) & (stretched_tf_derivatives_lengths <= neighbor_range[:, 1])) / self.grid.numbercells
+                neighbor_fraction = np.sum((neighbor_range_for_all_controls[:, 0] <= stretched_tf_derivatives_lengths) & (stretched_tf_derivatives_lengths <= neighbor_range_for_all_controls[:, 1])) / tf_derivatives_lengths.shape[0]
                 return -neighbor_fraction
 
         # Step 1: Global search
