@@ -459,6 +459,7 @@ def create_plot_and_save_patchwork(db_name,
                                    entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
                                    entropy_measure = 'shannon_entropy',
                                    loss_function_strg = 'TransitionEntropyLoss',
+                                   size_loss_function_strg='shannonEntropy_size_loss',
                                    loss_function_coeff = None):
     """
     Create a patchwork, plot it together with its first entropy and save the results to the corresponding path.
@@ -481,13 +482,14 @@ def create_plot_and_save_patchwork(db_name,
             os.makedirs(path_id)
         path_to_save = path_id + f"/Patchwork_{str(gif_steps)}stepsPerTime"
 
-    patchwork, controls, solver = create_patchwork(db_name, 
-                                                   table_name, 
-                                                   run_ids,  
-                                                   entropy_strategy_strg, 
-                                                   entropy_measure,
-                                                   loss_function_strg,
-                                                   loss_function_coeff)
+    patchwork, controls, solver = create_patchwork(db_name=db_name, 
+                                                   table_name=table_name, 
+                                                   run_ids=run_ids,  
+                                                   entropy_strategy_strg=entropy_strategy_strg, 
+                                                   entropy_measure=entropy_measure,
+                                                   loss_function_strg=loss_function_strg,
+                                                   size_loss_function_strg=size_loss_function_strg,
+                                                   loss_function_coeff=loss_function_coeff)
     if path_to_save != None:
         fig, ax = plt.subplots(figsize=(7, 6))
         plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)

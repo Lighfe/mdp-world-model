@@ -53,7 +53,7 @@ class Patchwork:
         self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
         if type(self.grid).__name__ == 'VoronoiGrid':
             self._init_patch_to_vertices_dict()
-        self.adjacent_cells_losses = self._init_adjacent_cells_losses()  #SortedValueDict
+        self.adjacent_cells_losses = self._init_adjacent_cells_delta_losses()  #SortedValueDict
         
         # Use the patchwork to calculate the initial value(s) of the loss function
         self.loss_function._reset(self)
@@ -147,7 +147,7 @@ class Patchwork:
         """
         return self.entropy_strategy._init_entropy_dict(patchwork=self)
 
-    def _init_adjacent_cells_losses(self):
+    def _init_adjacent_cells_delta_losses(self):
         """
         Initializes a SortedValueDict with the transition entropy loss of merging adjacent patches.
         The dictionary is sorted by the entropy loss and provides efficient functions for:
@@ -589,10 +589,11 @@ def create_patchwork(db_name,
                      entropy_strategy_strg= 'ShannonEntropyAll',
                      entropy_measure = 'conditional_shannon_entropy',
                      loss_function_strg='TransitionAndSizeEntropyLoss',
+                     size_loss_function_strg='shannonEntropy_size_loss',
                      loss_function_coeff = 0.1):    
     
     entropy_strategy = globals()[entropy_strategy_strg](globals()[entropy_measure]) #create the entropy strategy object
-    loss_function = globals()[loss_function_strg]()
+    loss_function = globals()[loss_function_strg](globals()[size_loss_function_strg])
     if loss_function_coeff is not None:
         loss_function.coeff = loss_function_coeff #set the coeffecient of the loss function
            
