@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=saddle_datasets
+#SBATCH --job-name=multi_saddle_datasets
 #SBATCH --partition=standard
 #SBATCH --qos=short
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=4G
-#SBATCH --output=log/saddle_datasets_%j.out
-#SBATCH --error=log/saddle_datasets_%j.err
+#SBATCH --mem=8G
+#SBATCH --output=log/multi_saddle_datasets_%j.out
+#SBATCH --error=log/multi_saddle_datasets_%j.err
 
 # Print job info
 echo "Job started at $(date)"
@@ -29,10 +29,10 @@ export OMP_PROC_BIND=true
 # Create log directory if it doesn't exist
 mkdir -p log
 
-echo "Starting sequential saddle system simulations..."
+echo "Starting sequential multi-saddle system simulations..."
 
-# 1) saddle at [0.0, 0.0] and 180 angle
-echo "=== Running simulation 1/10: saddle at [0.0, 0.0], 180° ==="
+# 1) Both saddles at (0,0), angles 180°, 90°
+echo "=== Running simulation 1/12: both saddles at [0,0], angles 180°, 90° ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
 --avg-samples-per-cell 50 \
@@ -40,15 +40,18 @@ python run_saddle_simulation.py \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[0.0, 0.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [0.0, 0.0]]' \
+--angles '[180, 90]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_1.db
+--db-name multi_saddle_1.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 2) saddle at [0.0, 2.0] and 180 angle (vertical shift)
-echo "=== Running simulation 2/10: saddle at [0.0, 2.0], 180° ==="
+# 2) Saddles at (0,0) and (0,2), angles 180°, 90°
+echo "=== Running simulation 2/12: saddles at [0,0] and [0,2], angles 180°, 90° ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
 --avg-samples-per-cell 50 \
@@ -56,15 +59,18 @@ python run_saddle_simulation.py \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[0.0, 2.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [0.0, 2.0]]' \
+--angles '[180, 90]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_2.db
+--db-name multi_saddle_2.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 3) saddle at [0.0, -2.0] and 180 angle (vertical shift)
-echo "=== Running simulation 3/10: saddle at [0.0, -2.0], 180° ==="
+# 3) Saddles at (0,0) and (2,0), angles 180°, 90°
+echo "=== Running simulation 3/12: saddles at [0,0] and [2,0], angles 180°, 90° ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
 --avg-samples-per-cell 50 \
@@ -72,15 +78,18 @@ python run_saddle_simulation.py \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[0.0, -2.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [2.0, 0.0]]' \
+--angles '[180, 90]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_3.db
+--db-name multi_saddle_3.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 4) saddle at [0.0, 0.0] and 135 angle (diagonal)
-echo "=== Running simulation 4/10: saddle at [0.0, 0.0], 135° ==="
+# 4) Saddles at (2,0) and (0,2), angles 180°, 90°
+echo "=== Running simulation 4/12: saddles at [2,0] and [0,2], angles 180°, 90° ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
 --avg-samples-per-cell 50 \
@@ -88,15 +97,18 @@ python run_saddle_simulation.py \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[0.0, 0.0]]' \
---angles '[135]' \
+--saddle-points '[[2.0, 0.0], [0.0, 2.0]]' \
+--angles '[180, 90]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_4.db
+--db-name multi_saddle_4.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 5) saddle at [2.0, 0.0] and 180 angle (horizontal shift)
-echo "=== Running simulation 5/10: saddle at [2.0, 0.0], 180° ==="
+# 5) Both saddles at (0,0), angles 180°, 45°
+echo "=== Running simulation 5/12: both saddles at [0,0], angles 180°, 45° ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
 --avg-samples-per-cell 50 \
@@ -104,15 +116,18 @@ python run_saddle_simulation.py \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[2.0, 0.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [0.0, 0.0]]' \
+--angles '[180, 45]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_5.db
+--db-name multi_saddle_5.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 6) saddle at [0.0, 0.0] and 180 angle, lambda1 = 0.5
-echo "=== Running simulation 6/10: saddle at [0.0, 0.0], 180°, lambda1=0.5 ==="
+# 6) Saddles at (0,0) and (0,2), angles 180°, 45°
+echo "=== Running simulation 6/12: saddles at [0,0] and [0,2], angles 180°, 45° ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
 --avg-samples-per-cell 50 \
@@ -120,76 +135,129 @@ python run_saddle_simulation.py \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[0.0, 0.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [0.0, 2.0]]' \
+--angles '[180, 45]' \
+--lambda1 1.0 \
+--lambda2 -1.0 \
+--control 0 \
+--db-name multi_saddle_6.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
+
+# 7) Saddles at (0,0) and (2,0), angles 180°, 45°
+echo "=== Running simulation 7/12: saddles at [0,0] and [2,0], angles 180°, 45° ==="
+python run_saddle_simulation.py \
+--resolution 25 25 \
+--avg-samples-per-cell 50 \
+--num-steps 1 \
+--delta-t 1.0 \
+--logistic-k 0.5 \
+--logistic-x0 0.0 \
+--saddle-points '[[0.0, 0.0], [2.0, 0.0]]' \
+--angles '[180, 45]' \
+--lambda1 1.0 \
+--lambda2 -1.0 \
+--control 0 \
+--db-name multi_saddle_7.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
+
+# 8) Saddles at (2,0) and (0,2), angles 180°, 45°
+echo "=== Running simulation 8/12: saddles at [2,0] and [0,2], angles 180°, 45° ==="
+python run_saddle_simulation.py \
+--resolution 25 25 \
+--avg-samples-per-cell 50 \
+--num-steps 1 \
+--delta-t 1.0 \
+--logistic-k 0.5 \
+--logistic-x0 0.0 \
+--saddle-points '[[2.0, 0.0], [0.0, 2.0]]' \
+--angles '[180, 45]' \
+--lambda1 1.0 \
+--lambda2 -1.0 \
+--control 0 \
+--db-name multi_saddle_8.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
+
+# 9) Both saddles at (0,0), angles 180°, 90°, lambda1=0.5
+echo "=== Running simulation 9/12: both saddles at [0,0], angles 180°, 90°, lambda1=0.5 ==="
+python run_saddle_simulation.py \
+--resolution 25 25 \
+--avg-samples-per-cell 50 \
+--num-steps 1 \
+--delta-t 1.0 \
+--logistic-k 0.5 \
+--logistic-x0 0.0 \
+--saddle-points '[[0.0, 0.0], [0.0, 0.0]]' \
+--angles '[180, 90]' \
 --lambda1 0.5 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_6.db
+--db-name multi_saddle_9.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 7) saddle at [2.0, 0.0] and 180 angle, lambda1 = 0.5 (horizontal shift)
-echo "=== Running simulation 7/10: saddle at [2.0, 0.0], 180°, lambda1=0.5 ==="
+# 10a) Both saddles at (0,0), angles 180°, 90°, delta_t=0.1
+echo "=== Running simulation 10a/12: both saddles at [0,0], angles 180°, 90°, delta_t=0.1 ==="
 python run_saddle_simulation.py \
 --resolution 25 25 \
---avg-samples-per-cell 50 \
+--avg-samples-per-cell 20 \
 --num-steps 1 \
---delta-t 1.0 \
+--delta-t 0.1 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[2.0, 0.0]]' \
---angles '[180]' \
---lambda1 0.5 \
---lambda2=-1.0 \
---control 0 \
---db-name single_saddle_7.db
-
-# 8) saddle at [0.0, 0.0] and 180 angle, lambda1 = 1.5
-echo "=== Running simulation 8/10: saddle at [0.0, 0.0], 180°, lambda1=1.5 ==="
-python run_saddle_simulation.py \
---resolution 25 25 \
---avg-samples-per-cell 50 \
---num-steps 1 \
---delta-t 1.0 \
---logistic-k 0.5 \
---logistic-x0 0.0 \
---saddle-points '[[0.0, 0.0]]' \
---angles '[180]' \
---lambda1 1.5 \
---lambda2=-1.0 \
---control 0 \
---db-name single_saddle_8.db
-
-# 9) saddle at [0.0, 0.0] and 180 angle, delta_t = 3.0
-echo "=== Running simulation 9/10: saddle at [0.0, 0.0], 180°, delta_t=3.0 ==="
-python run_saddle_simulation.py \
---resolution 25 25 \
---avg-samples-per-cell 50 \
---num-steps 1 \
---delta-t 3.0 \
---logistic-k 0.5 \
---logistic-x0 0.0 \
---saddle-points '[[0.0, 0.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [0.0, 0.0]]' \
+--angles '[180, 90]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_9.db
+--db-name multi_saddle_10.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
-# 10) saddle at [0.0, 0.0] and 180 angle, resolution 30 30
-echo "=== Running simulation 10/10: saddle at [0.0, 0.0], 180°, resolution 30x30 ==="
+# 10b) Both saddles at (0,0), angles 180°, 90°, delta_t=1.0
+echo "=== Running simulation 10b/12: both saddles at [0,0], angles 180°, 90°, delta_t=1.0 ==="
 python run_saddle_simulation.py \
---resolution 30 30 \
---avg-samples-per-cell 50 \
+--resolution 25 25 \
+--avg-samples-per-cell 20 \
 --num-steps 1 \
 --delta-t 1.0 \
 --logistic-k 0.5 \
 --logistic-x0 0.0 \
---saddle-points '[[0.0, 0.0]]' \
---angles '[180]' \
+--saddle-points '[[0.0, 0.0], [0.0, 0.0]]' \
+--angles '[180, 90]' \
 --lambda1 1.0 \
---lambda2=-1.0 \
+--lambda2 -1.0 \
 --control 0 \
---db-name single_saddle_10.db
+--db-name multi_saddle_10.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
+
+# 10c) Both saddles at (0,0), angles 180°, 90°, delta_t=5.0
+echo "=== Running simulation 10c/12: both saddles at [0,0], angles 180°, 90°, delta_t=5.0 ==="
+python run_saddle_simulation.py \
+--resolution 25 25 \
+--avg-samples-per-cell 20 \
+--num-steps 1 \
+--delta-t 5.0 \
+--logistic-k 0.5 \
+--logistic-x0 0.0 \
+--saddle-points '[[0.0, 0.0], [0.0, 0.0]]' \
+--angles '[180, 90]' \
+--lambda1 1.0 \
+--lambda2 -1.0 \
+--control 0 \
+--db-name multi_saddle_10.db \
+--create-streamplot \
+--streamplot-original \
+--streamplot-range -5.0 5.0
 
 # Print completion information
 echo "All simulations completed at $(date)"

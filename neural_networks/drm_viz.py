@@ -110,183 +110,208 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
         print(f"Saved loss curves to {save_path}")
 
 def visualize_state_space(model, output_path=None, transformations=None, device='cpu',
-                          num_points=1000, num_states=None, soft=False, system_type=None,
-                          points=None, angles_degrees=None):
-    """
-    Visualize the state probabilities in z-space (transformed space) with x-space coordinate labels.
-    
-    Args:
-        model: Trained DRM model.
-        output_path: Optional path to save the visualization. If None, the plot will be displayed.
-        transformations: List of transformation functions.
-        device: Device to run the model on.
-        num_points: Number of points in each dimension of the mesh.
-        num_states: Number of states in the model (if None, will be inferred).
-        soft: Whether to use soft assignment for state probabilities.
-        system_type: Type of system (for default transformations).
-        points: List of point coordinates in x-space (e.g., [[1.0, 0.0], [2.0, 1.0]])
-        angles_degrees: List of angles in degrees corresponding to points (e.g., [90, 45])
-    """
-    if transformations is None:
-        if system_type is None:
-            raise ValueError("Either transformations or system_type must be provided")
-        # Get default transformation for the system
-        transformation = get_transformation(SystemType[system_type.upper()])
-        transformations = [transformation, transformation]  # Same for both dimensions
-    
-    # Unpack the transformation functions
-    forward_transforms, inverse_transforms, _ = zip(*transformations)
-    
-    # Z-space bounds (transformed space)
-    z_bounds = [(0, 1), (0, 1)]
-    
-    # Create a grid of points in z-space
-    z1_values = np.linspace(z_bounds[0][0], z_bounds[0][1], num_points)
-    z2_values = np.linspace(z_bounds[1][0], z_bounds[1][1], num_points)
-    
-    z1_grid, z2_grid = np.meshgrid(z1_values, z2_values)
-    z1_flat, z2_flat = z1_grid.flatten(), z2_grid.flatten()
-    
-    # Transform z-space coordinates to x-space for the input to the model
-    x1_flat = np.array([inverse_transforms[0](z) for z in z1_flat])
-    x2_flat = np.array([inverse_transforms[1](z) for z in z2_flat])
-    
-    # Create input tensor for model
-    x_test = torch.tensor(np.column_stack((x1_flat, x2_flat)), dtype=torch.float32).to(device)
-    
-    # Get state probabilities
-    model.to(device)
-    model.eval()
-    with torch.no_grad():
-        state_probs = model.get_state_probs(x_test, training=False, soft=soft)
-    
-    # Infer number of states if not provided
-    if num_states is None:
-        num_states = state_probs.shape[1]
-    
-    # Transform points from x-space to z-space for plotting
-    points_z = None
-    if points is not None:
-        points_z = []
-        for point in points:
-            z1 = forward_transforms[0](point[0])
-            z2 = forward_transforms[1](point[1])
-            points_z.append([z1, z2])
-    
-    # Define grid layout for the plot
-    cols_per_row = min(4, num_states)
-    #cols_per_row = 2 if num_states == 4 else min(4, num_states)
-    rows = (num_states + cols_per_row - 1) // cols_per_row
-    
-    # Create subplots
-    fig, axes = plt.subplots(rows, cols_per_row, figsize=(cols_per_row * 5, rows * 4))
-    if rows == 1 and cols_per_row == 1:
-        axes = np.array([[axes]])
-    elif rows == 1 or cols_per_row == 1:
-        axes = axes.reshape(rows, cols_per_row)
-    
-    # Plot each state
-    for state in range(num_states):
-        row_idx = state // cols_per_row
-        col_idx = state % cols_per_row
-        ax = axes[row_idx, col_idx]
-        
-        # Reshape probabilities for this state
-        state_prob_grid = state_probs[:, state].cpu().numpy().reshape(num_points, num_points)
-        
-        # Create the plot (using extent to set coordinate system)
-        im = ax.imshow(state_prob_grid, 
-                      extent=[z_bounds[0][0], z_bounds[0][1], z_bounds[1][0], z_bounds[1][1]],
-                      origin='lower', 
-                      cmap='viridis', 
-                      vmin=0, vmax=1)
-        
-        ax.set_xticks(np.linspace(0, 1, 6))
-        ax.set_yticks(np.linspace(0, 1, 6))
-        
-        # Overlay points and angles if provided
-        if points_z is not None and angles_degrees is not None:
-            for i, (point_z, angle_deg) in enumerate(zip(points_z, angles_degrees)):
-                # Draw white point
-                ax.plot(point_z[0], point_z[1], 'wx', markersize=6, markeredgecolor='black', markeredgewidth=0.5)
-                
-                # Draw angle line from edge to edge
-                angle_rad = np.radians(angle_deg)
-                px, py = point_z[0], point_z[1]
+                         num_points=1000, num_states=None, soft=False, system_type=None,
+                         points=None, angles_degrees=None, bounds=None):
+   """
+   Visualize the state probabilities in either transformed z-space or original x-space.
+   
+   Args:
+       model: Trained DRM model.
+       output_path: Optional path to save the visualization. If None, the plot will be displayed.
+       transformations: List of transformation functions.
+       device: Device to run the model on.
+       num_points: Number of points in each dimension of the mesh.
+       num_states: Number of states in the model (if None, will be inferred).
+       soft: Whether to use soft assignment for state probabilities.
+       system_type: Type of system (for default transformations).
+       points: List of point coordinates (e.g., [[1.0, 0.0], [2.0, 1.0]])
+       angles_degrees: List of angles in degrees corresponding to points (e.g., [90, 45])
+       bounds: If None, plot in z-space (0,1) with x-space tick labels. 
+              If provided as [(x1_min, x1_max), (x2_min, x2_max)], plot directly in x-space.
+   """
+   if transformations is None:
+       if system_type is None:
+           raise ValueError("Either transformations or system_type must be provided")
+       # Get default transformation for the system
+       transformation = get_transformation(SystemType[system_type.upper()])
+       transformations = [transformation, transformation]  # Same for both dimensions
+   
+   # Unpack the transformation functions
+   forward_transforms, inverse_transforms, _ = zip(*transformations)
+   
+   if bounds is None:
+       # Original behavior: plot in z-space (0,1) with x-space tick labels
+       plot_bounds = [(0, 1), (0, 1)]
+       use_x_space = False
+       
+       # Create a grid of points in z-space
+       z1_values = np.linspace(plot_bounds[0][0], plot_bounds[0][1], num_points)
+       z2_values = np.linspace(plot_bounds[1][0], plot_bounds[1][1], num_points)
+       
+       z1_grid, z2_grid = np.meshgrid(z1_values, z2_values)
+       z1_flat, z2_flat = z1_grid.flatten(), z2_grid.flatten()
+       
+       # Transform z-space coordinates to x-space for the model input
+       x1_flat = np.array([inverse_transforms[0](z) for z in z1_flat])
+       x2_flat = np.array([inverse_transforms[1](z) for z in z2_flat])
+       
+       # Transform points from x-space to z-space for plotting
+       points_plot = None
+       if points is not None:
+           points_plot = []
+           for point in points:
+               z1 = forward_transforms[0](point[0])
+               z2 = forward_transforms[1](point[1])
+               points_plot.append([z1, z2])
+   else:
+       # New behavior: plot directly in x-space
+       plot_bounds = bounds
+       use_x_space = True
+       
+       # Create a grid of points directly in x-space
+       x1_values = np.linspace(plot_bounds[0][0], plot_bounds[0][1], num_points)
+       x2_values = np.linspace(plot_bounds[1][0], plot_bounds[1][1], num_points)
+       
+       x1_grid, x2_grid = np.meshgrid(x1_values, x2_values)
+       x1_flat, x2_flat = x1_grid.flatten(), x2_grid.flatten()
+       
+       # Points are already in x-space, no transformation needed for plotting
+       points_plot = points
+   
+   # Create input tensor for model (always in x-space)
+   x_test = torch.tensor(np.column_stack((x1_flat, x2_flat)), dtype=torch.float32).to(device)
+   
+   # Get state probabilities
+   model.to(device)
+   model.eval()
+   with torch.no_grad():
+       state_probs = model.get_state_probs(x_test, training=False, soft=soft)
+   
+   # Infer number of states if not provided
+   if num_states is None:
+       num_states = state_probs.shape[1]
+   
+   # Define grid layout for the plot
+   cols_per_row = min(4, num_states)
+   rows = (num_states + cols_per_row - 1) // cols_per_row
+   
+   # Create subplots
+   fig, axes = plt.subplots(rows, cols_per_row, figsize=(cols_per_row * 5, rows * 4))
+   if rows == 1 and cols_per_row == 1:
+       axes = np.array([[axes]])
+   elif rows == 1 or cols_per_row == 1:
+       axes = axes.reshape(rows, cols_per_row)
+   
+   # Plot each state
+   for state in range(num_states):
+       row_idx = state // cols_per_row
+       col_idx = state % cols_per_row
+       ax = axes[row_idx, col_idx]
+       
+       # Reshape probabilities for this state
+       state_prob_grid = state_probs[:, state].cpu().numpy().reshape(num_points, num_points)
+       
+       # Create the plot (using extent to set coordinate system)
+       im = ax.imshow(state_prob_grid, 
+                     extent=[plot_bounds[0][0], plot_bounds[0][1], plot_bounds[1][0], plot_bounds[1][1]],
+                     origin='lower', 
+                     cmap='viridis', 
+                     vmin=0, vmax=1)
+       
+       # Set ticks and labels based on coordinate system
+       if use_x_space:
+           # Direct x-space plotting: use actual coordinate values
+           num_ticks = 6
+           ax.set_xticks(np.linspace(plot_bounds[0][0], plot_bounds[0][1], num_ticks))
+           ax.set_yticks(np.linspace(plot_bounds[1][0], plot_bounds[1][1], num_ticks))
+       else:
+           # Z-space plotting with x-space labels: transform tick values
+           ax.set_xticks(np.linspace(0, 1, 6))
+           ax.set_yticks(np.linspace(0, 1, 6))
+           
+           # Create custom tick formatter functions for x-space labels
+           def format_x1_ticks(z_val, pos):
+               if z_val < 0 or z_val > 1:
+                   return ''
+               x_val = inverse_transforms[0](z_val)
+               return f'{x_val:.1f}'
+           
+           def format_x2_ticks(z_val, pos):
+               if z_val < 0 or z_val > 1:
+                   return ''
+               x_val = inverse_transforms[1](z_val)
+               return f'{x_val:.1f}'
+           
+           # Apply formatters
+           ax.xaxis.set_major_formatter(FuncFormatter(format_x1_ticks))
+           ax.yaxis.set_major_formatter(FuncFormatter(format_x2_ticks))
+       
+       # Overlay points and angles if provided
+       if points_plot is not None and angles_degrees is not None:
+           for i, (point_plot, angle_deg) in enumerate(zip(points_plot, angles_degrees)):
+               # Draw white point
+               ax.plot(point_plot[0], point_plot[1], 'wx', markersize=6, markeredgecolor='black', markeredgewidth=0.5)
+               
+               # Draw angle line from edge to edge
+               angle_rad = np.radians(angle_deg)
+               px, py = point_plot[0], point_plot[1]
 
-                # Line equation: x = px + t*cos(θ), y = py + t*sin(θ)
-                # Find t values where line hits boundaries
-                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+               # Line equation: x = px + t*cos(θ), y = py + t*sin(θ)
+               # Find t values where line hits boundaries
+               cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
 
-                t_values = []
-                # Left/right boundaries (x = 0, x = 1)
-                if abs(cos_a) > 1e-10:  # Avoid division by zero
-                    t_values.extend([(-px) / cos_a, (1-px) / cos_a])
-                # Top/bottom boundaries (y = 0, y = 1)  
-                if abs(sin_a) > 1e-10:  # Avoid division by zero
-                    t_values.extend([(-py) / sin_a, (1-py) / sin_a])
+               t_values = []
+               # Left/right boundaries
+               if abs(cos_a) > 1e-10:  # Avoid division by zero
+                   t_values.extend([(plot_bounds[0][0]-px) / cos_a, (plot_bounds[0][1]-px) / cos_a])
+               # Top/bottom boundaries
+               if abs(sin_a) > 1e-10:  # Avoid division by zero
+                   t_values.extend([(plot_bounds[1][0]-py) / sin_a, (plot_bounds[1][1]-py) / sin_a])
 
-                # Get min/max t to find intersection points
-                t_min, t_max = min(t_values), max(t_values)
+               # Get min/max t to find intersection points
+               t_min, t_max = min(t_values), max(t_values)
 
-                x_start = px + t_min * cos_a
-                x_end = px + t_max * cos_a
-                y_start = py + t_min * sin_a
-                y_end = py + t_max * sin_a
+               x_start = px + t_min * cos_a
+               x_end = px + t_max * cos_a
+               y_start = py + t_min * sin_a
+               y_end = py + t_max * sin_a
 
-                ax.plot([x_start, x_end], [y_start, y_end], 'w--', linewidth=0.5)
-        
-        # Set title
-        ax.set_title(f'State {state + 1}', fontsize=14, fontweight='bold')
-        
-        # Create custom tick formatter functions for x-space labels
-        def format_x1_ticks(z_val, pos):
-            if z_val < 0 or z_val > 1:
-                return ''
-            x_val = inverse_transforms[0](z_val)
-            return f'{x_val:.1f}'
-        
-        def format_x2_ticks(z_val, pos):
-            if z_val < 0 or z_val > 1:
-                return ''
-            x_val = inverse_transforms[1](z_val)
-            return f'{x_val:.1f}'
-        
-        # Apply formatters
-        ax.xaxis.set_major_formatter(FuncFormatter(format_x1_ticks))
-        ax.yaxis.set_major_formatter(FuncFormatter(format_x2_ticks))
-        
-        # Set labels
-        ax.set_xlabel('x1')
-        ax.set_ylabel('x2')
-        
-        # Add grid
-        ax.grid(True, linestyle='--', alpha=0.6)
-        
-        # Add colorbar
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label('State Assignment Strength')
-    
-    # Hide unused subplots
-    for i in range(num_states, rows * cols_per_row):
-        row_idx = i // cols_per_row
-        col_idx = i % cols_per_row
-        axes[row_idx, col_idx].set_visible(False)
-    
-    # Adjust layout
-    plt.subplots_adjust(wspace=0.6, hspace=0.5)
-    
-    # Save the figure if an output path is provided; otherwise, display it
-    if output_path:
-        plt.savefig(output_path, dpi=100, bbox_inches='tight')
-        print(f"Saved state visualization to {output_path}")
-    else:
-        plt.show()
-    
-    plt.close(fig)
-    return fig, axes
+               ax.plot([x_start, x_end], [y_start, y_end], 'w--', linewidth=0.5)
+       
+       # Set title
+       ax.set_title(f'State {state + 1}', fontsize=14, fontweight='bold')
+       
+       # Set labels
+       ax.set_xlabel('x1')
+       ax.set_ylabel('x2')
+       
+       # Add grid
+       ax.grid(True, linestyle='--', alpha=0.6)
+       
+       # Add colorbar
+       divider = make_axes_locatable(ax)
+       cax = divider.append_axes("right", size="5%", pad=0.1)
+       cbar = fig.colorbar(im, cax=cax)
+       cbar.set_label('State Assignment Strength')
+   
+   # Hide unused subplots
+   for i in range(num_states, rows * cols_per_row):
+       row_idx = i // cols_per_row
+       col_idx = i % cols_per_row
+       axes[row_idx, col_idx].set_visible(False)
+   
+   # Adjust layout
+   plt.subplots_adjust(wspace=0.6, hspace=0.5)
+   
+   # Save the figure if an output path is provided; otherwise, display it
+   if output_path:
+       plt.savefig(output_path, dpi=100, bbox_inches='tight')
+       print(f"Saved state visualization to {output_path}")
+   else:
+       plt.show()
+   
+   plt.close(fig)
+   return fig, axes
 
 def analyze_state_transitions(model, 
                               transformations,
