@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=saddle_grid_double
+#SBATCH --job-name=multi_saddle_grid
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=4:20:00
+#SBATCH --time=3:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=4G
-#SBATCH --output=log/saddle_grid_double_%A_%a.out
-#SBATCH --error=log/saddle_grid_double_%A_%a.err
-#SBATCH --array=1-20
+#SBATCH --output=log/multi_saddle_grid_%A_%a.out
+#SBATCH --error=log/multi_saddle_grid_%A_%a.err
+#SBATCH --array=1-40
 
 # Print job info
 echo "Job started at $(date)"
@@ -36,7 +36,7 @@ export OMP_PROC_BIND=true
 
 # Fixed parameters for all runs
 SYSTEM_TYPE="saddle_system"
-BASE_OUTPUT_DIR="neural_networks/output/saddle_datasets_double"
+BASE_OUTPUT_DIR="neural_networks/output/multi_saddle_datasets"
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
@@ -51,7 +51,6 @@ STATE_LOSS_TYPE="kl_div"
 PREDICTOR_TYPE="standard"
 
 # FIXED PARAMETERS
-NUM_STATES=4
 GUMBEL_TEMP=3.0
 GUMBEL_MIN=0.5
 SORT_STATES="--sort_states"
@@ -66,24 +65,41 @@ SEEDS=(7 11 42)
 # Value methods to test
 VALUE_METHODS=("angle" "identity")
 
-# Calculate dataset number and value method for this array task
-# Array tasks 1-10: dataset 1-10 with "angle"
-# Array tasks 11-20: dataset 1-10 with "identity"
+# Number of states to test
+NUM_STATES_OPTIONS=(4 6)
+
+# Calculate configuration for this array task
+# Array tasks 1-10: dataset 1-10 with "angle" and num_states=4
+# Array tasks 11-20: dataset 1-10 with "identity" and num_states=4
+# Array tasks 21-30: dataset 1-10 with "angle" and num_states=6
+# Array tasks 31-40: dataset 1-10 with "identity" and num_states=6
+
 if [ $SLURM_ARRAY_TASK_ID -le 10 ]; then
     DATASET_NUM=$SLURM_ARRAY_TASK_ID
     VALUE_METHOD="angle"
-else
+    NUM_STATES=4
+elif [ $SLURM_ARRAY_TASK_ID -le 20 ]; then
     DATASET_NUM=$((SLURM_ARRAY_TASK_ID - 10))
     VALUE_METHOD="identity"
+    NUM_STATES=4
+elif [ $SLURM_ARRAY_TASK_ID -le 30 ]; then
+    DATASET_NUM=$((SLURM_ARRAY_TASK_ID - 20))
+    VALUE_METHOD="angle"
+    NUM_STATES=6
+else
+    DATASET_NUM=$((SLURM_ARRAY_TASK_ID - 30))
+    VALUE_METHOD="identity"
+    NUM_STATES=6
 fi
 
 # Get database path for this dataset
-DB_PATH="datasets/results/single_saddle_${DATASET_NUM}.db"
+DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
 
 echo "========================================================"
 echo "Array task $SLURM_ARRAY_TASK_ID:"
 echo "  Dataset: $DATASET_NUM"
 echo "  Value method: $VALUE_METHOD"
+echo "  Num states: $NUM_STATES"
 echo "  Database: $DB_PATH"
 echo "Will run ${#SEEDS[@]} seeds sequentially: ${SEEDS[*]}"
 echo "========================================================"
@@ -92,7 +108,7 @@ echo "========================================================"
 for seed in "${SEEDS[@]}"; do
     
     # Create descriptive run name
-    CONFIG_NAME="saddle_${DATASET_NUM}_${VALUE_METHOD}_${PREDICTOR_TYPE}_sl${STATE_LOSS_WEIGHT}_vl${VALUE_LOSS_WEIGHT}_novicreg_seed${seed}"
+    CONFIG_NAME="multi_saddle_${DATASET_NUM}_${VALUE_METHOD}_${PREDICTOR_TYPE}_states${NUM_STATES}_sl${STATE_LOSS_WEIGHT}_vl${VALUE_LOSS_WEIGHT}_novicreg_seed${seed}"
     
     # Create output directory
     OUTPUT_DIR="${BASE_OUTPUT_DIR}"
@@ -106,6 +122,7 @@ for seed in "${SEEDS[@]}"; do
     echo "  database: $DB_PATH"
     echo "  system: $SYSTEM_TYPE"
     echo "  value_method: $VALUE_METHOD"
+    echo "  num_states: $NUM_STATES"
     echo "  predictor_type: $PREDICTOR_TYPE"
     echo "  state_loss_weight: $STATE_LOSS_WEIGHT"
     echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
@@ -153,4 +170,4 @@ for seed in "${SEEDS[@]}"; do
     sleep 2
 done
 
-echo "All seeds for array task $SLURM_ARRAY_TASK_ID (dataset $DATASET_NUM, value method $VALUE_METHOD) completed at $(date)"
+echo "All seeds for array task $SLURM_ARRAY_TASK_ID (dataset $DATASET_NUM, value method $VALUE_METHOD, num_states $NUM_STATES) completed at $(date)"

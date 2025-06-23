@@ -554,7 +554,10 @@ def train_drm_model(db_path,
                 ],
                 device=device,
                 num_states=num_states,
-                system_type=system_type
+                system_type=system_type,
+                # TODO add point and line?
+                # TODO: move bounds to argparser
+                bounds=[(-5, 5), (-5, 5)]
             )
 
         # Check for improvement
@@ -826,8 +829,8 @@ def train_drm_model(db_path,
             }
 
     # Visualize the state space
-    state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
-    visualize_state_space(
+    # state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
+    """visualize_state_space(
         model=model,
         output_path=state_vis_path,
         transformations=[
@@ -838,8 +841,10 @@ def train_drm_model(db_path,
         num_states=num_states,
         system_type=system_type,
         points=points_config['points'] if points_config else None,
-        angles_degrees=points_config['angles_degrees'] if points_config else None
-    )
+        angles_degrees=points_config['angles_degrees'] if points_config else None,
+        # TODO: move bounds to argparser
+        bounds=[(-5, 5), (-5, 5)] if points_config else None
+    )"""
 
     state_soft_vis_path = os.path.join(output_dir, f"states_soft_{run_id}.png")
     visualize_state_space(
@@ -854,7 +859,9 @@ def train_drm_model(db_path,
         soft=True,
         system_type=system_type,
         points=points_config['points'] if points_config else None,
-        angles_degrees=points_config['angles_degrees'] if points_config else None
+        angles_degrees=points_config['angles_degrees'] if points_config else None,
+        # TODO: move bounds to argparser
+        bounds=[(-5, 5), (-5, 5)] if points_config else None
     )
 
     # Analyze and visualize state transitions with argmax assignment
