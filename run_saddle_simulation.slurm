@@ -51,7 +51,9 @@ run_multi_saddle_simulation() {
     echo "  Database: $db_name"
     
     # Count number of saddles to determine how many controls to run
-    local num_saddles=$(echo $saddle_points | grep -o '\[' | wc -l)
+    # Count commas between saddle points and add 1
+    local num_saddles=$(echo $saddle_points | grep -o '], \[' | wc -l)
+    num_saddles=$((num_saddles + 1))
     echo "  Detected $num_saddles saddles - will run controls 0 to $((num_saddles-1))"
     
     # Calculate samples per control to maintain total data amount
