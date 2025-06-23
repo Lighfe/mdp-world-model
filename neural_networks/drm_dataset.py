@@ -167,6 +167,14 @@ class SaddleSystemDataset(BaseDataset):
         # Infer number of saddles from data if not provided
         if self.num_saddles is None:
             self._infer_num_saddles()
+
+        # After inferring num_saddles, validate against system config
+        saddle_config = get_saddle_configuration(db_path)
+        if saddle_config:
+            expected_saddles = len(saddle_config['saddle_points'])
+            if self.num_saddles != expected_saddles:
+                print(f"WARNING: Inferred {self.num_saddles} saddles from data, "
+                    f"but system config shows {expected_saddles} saddle points!")
         
         self._validate_samples()
     

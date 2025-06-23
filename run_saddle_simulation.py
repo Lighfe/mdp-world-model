@@ -111,6 +111,15 @@ def main():
             lambda1=args.lambda1,
             lambda2=args.lambda2
         )
+
+        if len(saddle_points) != len(angles):
+            raise ValueError(f"Number of saddle points ({len(saddle_points)}) must match number of angles ({len(angles)})")
+
+        print(f"Created MultiSaddleSystem with {len(saddle_points)} saddle points")
+        print(f"Valid control values: 0 to {len(saddle_points)-1}")
+        if args.control >= len(saddle_points):
+            raise ValueError(f"Control value {args.control} is invalid. Must be 0 to {len(saddle_points)-1}")
+
         solver = GeneralODENumericalSolver(model)
         grid = Grid(bounds, args.resolution, transformations)
         simulator = Simulator(grid, model, solver)
@@ -127,6 +136,7 @@ def main():
             num_steps=args.num_steps,
             save_result=True
         )
+
         
         print(f"Simulation completed in {time.time() - start_time:.2f} seconds.")
         
