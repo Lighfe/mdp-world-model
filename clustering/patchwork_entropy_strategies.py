@@ -148,7 +148,7 @@ class ShannonEntropyOnlyMerged(EntropyStrategy):
 
         return
     
-    def _find_pairs_to_update_adjacent_cells_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
+    def _find_pairs_to_update_adjacent_cells_delta_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
         """
         Here no other pairs are updated than the direct neighbors of newpatch.
         """
@@ -252,7 +252,7 @@ class ShannonEntropyAll(EntropyStrategy):
     
 
     
-    def _find_pairs_to_update_adjacent_cells_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
+    def _find_pairs_to_update_adjacent_cells_delta_losses(self, patchwork, patch1, patch2, newpatch, old_predecessors):
         """
         Finds all pairs of patches for which the transition entropy loss changes by merging patch1 and patch2 into newpatch,
         excluding the direct neighbors of newpatch.

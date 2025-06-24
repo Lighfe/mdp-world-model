@@ -183,7 +183,7 @@ class TransitionAndSizeEntropyLoss(LossFunction):
     def __init__(self, size_loss_function=shannonEntropy_size_loss):
         self.current_size_loss = 0
         self.current_transition_entropy = 0
-        self.history_of_loss_function_values = {"Total Size Loss": [], "Total Transition Entropy": [], "Loss Function Value": []}
+        self.history_of_loss_function_values = {"Total Size Loss": [], "Total Transition Loss": [], "Loss Function Value": []}
         self.coeff = 1
         self.size_loss_function_term = size_loss_function
 
@@ -205,7 +205,7 @@ class TransitionAndSizeEntropyLoss(LossFunction):
         self.current_transition_entropy = patchwork.entropy_strategy.overall_entropy
         # reset the history of size and transition entropies
         self.history_of_loss_function_values["Total Size Loss"] = [self.current_size_loss]
-        self.history_of_loss_function_values["Total Transition Entropy"] = [self.current_transition_entropy]
+        self.history_of_loss_function_values["Total Transition Loss"] = [self.current_transition_entropy]
         self.history_of_loss_function_values["Loss Function Value"] = [self.current_total_loss_function_value]
 
     def update_values(self, patchwork, total_transition_entropy, patch1_rel, patch2_rel):
@@ -220,7 +220,7 @@ class TransitionAndSizeEntropyLoss(LossFunction):
         self.current_transition_entropy = total_transition_entropy
         # update the history of size and transition entropies
         self.history_of_loss_function_values["Total Size Loss"].append(self.current_size_loss)
-        self.history_of_loss_function_values["Total Transition Entropy"].append(self.current_transition_entropy)
+        self.history_of_loss_function_values["Total Transition Loss"].append(self.current_transition_entropy)
         self.history_of_loss_function_values["Loss Function Value"].append(self.current_total_loss_function_value)
         return
 

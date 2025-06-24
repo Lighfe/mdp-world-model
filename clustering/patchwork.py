@@ -53,7 +53,7 @@ class Patchwork:
         self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
         if type(self.grid).__name__ == 'VoronoiGrid':
             self._init_patch_to_vertices_dict()
-        self.adjacent_cells_losses = self._init_adjacent_cells_delta_losses()  #SortedValueDict
+        self.adjacent_cells_delta_losses = self._init_adjacent_cells_delta_losses()  #SortedValueDict
         
         # Use the patchwork to calculate the initial value(s) of the loss function
         self.loss_function._reset(self)
@@ -155,12 +155,12 @@ class Patchwork:
             - extract_min(): Extracting the key-value pair with the smallest value.
             - remove_by_key(key): Removing the key-value pair with the given key.
         """
-        adjacent_cells_losses = SortedValueDict()
+        adjacent_cells_delta_losses = SortedValueDict()
         for cell, neighbors in self.patch_neighbors.items():
             for neighbor in neighbors:
                 if neighbor > cell: #only calculate once for each pair
-                    adjacent_cells_losses.insert((cell, neighbor),self.calculate_loss_of_merging(cell, neighbor))
-        return  adjacent_cells_losses 
+                    adjacent_cells_delta_losses.insert((cell, neighbor),self.calculate_loss_of_merging(cell, neighbor))
+        return  adjacent_cells_delta_losses 
     
     #****************************************************************************************************************
     #Helper Functions for _init Functions  **************************************************************************
@@ -265,7 +265,7 @@ class Patchwork:
 
         old_predecessors = self._update_predecessors(patch1, patch2, newpatch)
         self._update_patch_neighbors(patch1, patch2, newpatch)
-        self._update_adjacent_cells_losses(patch1, patch2, newpatch, old_predecessors)
+        self._update_adjacent_cells_delta_losses(patch1, patch2, newpatch, old_predecessors)
         self._update_loss_function_value(patch1_rel, patch2_rel)
 
         self._update_children_and_parents(patch1, patch2, newpatch)
@@ -281,7 +281,7 @@ class Patchwork:
         Merges the two adjacent patches with the smallest entropy loss.
         """
         
-        patch1, patch2 = self.adjacent_cells_losses.extract_min()[0]
+        patch1, patch2 = self.adjacent_cells_delta_losses.extract_min()[0]
         
         if patch1 is None or patch2 is None:
             print('No more patches to merge')
@@ -467,7 +467,7 @@ class Patchwork:
 
         return
     
-    def _update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors):
+    def _update_adjacent_cells_delta_losses(self, patch1, patch2, newpatch, old_predecessors):
 
         """
         Updates the adjacent cells losses dictionary for merging patch1 and patch2 into newpatch.
@@ -476,20 +476,20 @@ class Patchwork:
             (Here the entry for (patch1,patch2) is already removed in the merge_adjacent_patches function.)
         """
         # Find all additional pairs of patches for which the transition entropy loss changes 
-        pairs_to_update = self.entropy_strategy._find_pairs_to_update_adjacent_cells_losses(self, patch1, patch2, newpatch, old_predecessors)
+        pairs_to_update = self.entropy_strategy._find_pairs_to_update_adjacent_cells_delta_losses(self, patch1, patch2, newpatch, old_predecessors)
         for couple in pairs_to_update:
-            self.adjacent_cells_losses.remove_by_key(couple)
-            self.adjacent_cells_losses.insert(couple, self.calculate_loss_of_merging(couple[0], couple[1])) #the couple is assumed to be sorted
+            self.adjacent_cells_delta_losses.remove_by_key(couple)
+            self.adjacent_cells_delta_losses.insert(couple, self.calculate_loss_of_merging(couple[0], couple[1])) #the couple is assumed to be sorted
 
         # Update separately all adjacent cell losses for direct neighbors of newpatch
         # Here we also need to remove the entries for merging patch1 or patch2 with the neighbor
         for neighbor in self.patch_neighbors[newpatch]:
             # Create newpatch entries
-            self.adjacent_cells_losses.insert((neighbor, newpatch) , self.calculate_loss_of_merging(neighbor, newpatch)) #always neighbor < newpatch 
+            self.adjacent_cells_delta_losses.insert((neighbor, newpatch) , self.calculate_loss_of_merging(neighbor, newpatch)) #always neighbor < newpatch 
             # Remove all patch1 and patch2 entries
             for patch in [patch1, patch2]:
                 key = tuple(sorted((patch, neighbor)))
-                self.adjacent_cells_losses.remove_by_key(key)
+                self.adjacent_cells_delta_losses.remove_by_key(key)
         return
     
     def _update_loss_function_value(self,  patch1_rel, patch2_rel):
@@ -504,30 +504,30 @@ class Patchwork:
     # Test Functions  ****************************************************************************************
     #****************************************************************************************************************
 
-    def test_adjacent_cells_losses(self, tol = 1e-10):
+    def test_adjacent_cells_delta_losses(self, tol = 1e-10):
         """ 
         Test the calculation of the adjacent cell losses.
         """
         #TODO maybe this won't work now as we've substituted the loss value by a tuple
-        test_adjacent_cells_losses = SortedValueDict()
+        test_adjacent_cells_delta_losses = SortedValueDict()
         for cell, neighbors in self.patch_neighbors.items():
             for neighbor in neighbors:
                 if neighbor > cell: #only calculate once for each pair
-                    test_adjacent_cells_losses.insert((cell, neighbor),self.calculate_loss_of_merging(cell, neighbor))
+                    test_adjacent_cells_delta_losses.insert((cell, neighbor),self.calculate_loss_of_merging(cell, neighbor))
         
         # Compare the two dictionaries
         # Check if the two sorted lists have the same entries
-        if set(self.adjacent_cells_losses().keys()) != set(test_adjacent_cells_losses().keys()):
+        if set(self.adjacent_cells_delta_losses().keys()) != set(test_adjacent_cells_delta_losses().keys()):
             print("Error: The two dictionaries do not have the same keys.")
-            diff_keys = set(self.adjacent_cells_losses.sorted_list).symmetric_difference(set(test_adjacent_cells_losses.sorted_list))
+            diff_keys = set(self.adjacent_cells_delta_losses.sorted_list).symmetric_difference(set(test_adjacent_cells_delta_losses.sorted_list))
             print(f"Difference in keys: {diff_keys}")
             return False
         
         # Check if the two lists are in the same order
-        if [entry[0] for entry in self.adjacent_cells_losses.sorted_list] != [entry[0] for entry in test_adjacent_cells_losses.sorted_list]:           
-            diff_order = [(self.adjacent_cells_losses.sorted_list[i], test_adjacent_cells_losses.sorted_list[i]) 
-                          for i in range(len(self.adjacent_cells_losses.sorted_list)) 
-                          if self.adjacent_cells_losses.sorted_list[i][0] != test_adjacent_cells_losses.sorted_list[i][0]]
+        if [entry[0] for entry in self.adjacent_cells_delta_losses.sorted_list] != [entry[0] for entry in test_adjacent_cells_delta_losses.sorted_list]:           
+            diff_order = [(self.adjacent_cells_delta_losses.sorted_list[i], test_adjacent_cells_delta_losses.sorted_list[i]) 
+                          for i in range(len(self.adjacent_cells_delta_losses.sorted_list)) 
+                          if self.adjacent_cells_delta_losses.sorted_list[i][0] != test_adjacent_cells_delta_losses.sorted_list[i][0]]
             # Maybe the order is different, but the values are the same?
             for pair in diff_order:
                 if abs(pair[0][1] - pair[1][1]) > tol:
@@ -537,10 +537,10 @@ class Patchwork:
                     return False
 
         # Check if the two lists have the same values    
-        for i in range(len(self.adjacent_cells_losses.sorted_list)):
-            if abs(self.adjacent_cells_losses.sorted_list[i][1] - test_adjacent_cells_losses.sorted_list[i][1]) > tol:
+        for i in range(len(self.adjacent_cells_delta_losses.sorted_list)):
+            if abs(self.adjacent_cells_delta_losses.sorted_list[i][1] - test_adjacent_cells_delta_losses.sorted_list[i][1]) > tol:
                 print("Error: The second tuple entries differ beyond the allowed error range.")
-                print(f"Difference in values: {self.adjacent_cells_losses.sorted_list[i]} vs {test_adjacent_cells_losses.sorted_list[i]}")
+                print(f"Difference in values: {self.adjacent_cells_delta_losses.sorted_list[i]} vs {test_adjacent_cells_delta_losses.sorted_list[i]}")
                 return False
             
         #print("Test passed: The list of the adjacent cell losses is in the correct order.")

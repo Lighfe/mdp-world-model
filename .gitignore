@@ -20,6 +20,7 @@ datasets/results/*
 !datasets/processed/.gitkeep
 data_generation/tests/plots/*
 data_generation/simulations/configs/*
+data_generation/simulations/from_julian/*
 data_generation/simulations/simulation.log
 clustering/results/*
 
