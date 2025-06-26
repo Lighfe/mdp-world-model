@@ -20,7 +20,8 @@ class Patchwork:
 
     def __init__(self, grid, df, 
                  entropy_strategy: EntropyStrategy = ShannonEntropyOnlyMerged(),
-                 loss_function: LossFunction = TransitionEntropyLoss()):
+                 loss_function: LossFunction = TransitionEntropyLoss(),
+                 save_history_of_trans_probs: bool = False):
         """
         Initializes the Patchwork object.
         Args:
@@ -51,6 +52,8 @@ class Patchwork:
         self.predecessors = self._init_predecessors()                                           #Dict
         self.entropy_dict = self._init_entropy_dict()                                           #Dict
         self.patch_to_history_of_avg_entropy = {patch: [(0, self.entropy_dict[patch]['avg'])] for patch in self.current_patches} #Dict
+        if save_history_of_trans_probs == True:
+            self.step_to_trans_probs = {-1: copy.deepcopy(self.trans_probs)}
         if type(self.grid).__name__ == 'VoronoiGrid':
             self._init_patch_to_vertices_dict()
         self.adjacent_cells_delta_losses = self._init_adjacent_cells_delta_losses()  #SortedValueDict
@@ -310,6 +313,8 @@ class Patchwork:
             if not self.step():
                 print(f"Done, after {step} steps")
                 break
+            if hasattr(self, 'step_to_trans_probs'):
+                self.step_to_trans_probs[step] = copy.deepcopy(self.trans_probs)
             step += 1
         
         return
@@ -590,7 +595,8 @@ def create_patchwork(db_name,
                      entropy_measure = 'conditional_shannon_entropy',
                      loss_function_strg='TransitionAndSizeEntropyLoss',
                      size_loss_function_strg='shannonEntropy_size_loss',
-                     loss_function_coeff = 0.1):    
+                     loss_function_coeff = 0.1,
+                     save_history_of_trans_probs = False):    
     
     entropy_strategy = globals()[entropy_strategy_strg](globals()[entropy_measure]) #create the entropy strategy object
     loss_function = globals()[loss_function_strg](globals()[size_loss_function_strg])
@@ -614,8 +620,8 @@ def create_patchwork(db_name,
         rows_to_delete_percentage = df[~df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])].shape[0] / df.shape[0] * 100
         print(f"Percentage of data rows deleted: {rows_to_delete_percentage:.2f}%")
         df = df[df['y'].apply(lambda y: max(y) <= grid.bounds[0][-1])] #as we run out of the defined space
-        patchwork = Patchwork(grid,df, entropy_strategy, loss_function)
+        patchwork = Patchwork(grid,df, entropy_strategy, loss_function, save_history_of_trans_probs = save_history_of_trans_probs)
     else:
-        patchwork = Patchwork(grid, df, entropy_strategy, loss_function)
+        patchwork = Patchwork(grid, df, entropy_strategy, loss_function, save_history_of_trans_probs = save_history_of_trans_probs)
 
     return patchwork, controls, solver

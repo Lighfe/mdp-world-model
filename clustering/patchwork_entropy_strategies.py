@@ -246,7 +246,7 @@ class ShannonEntropyAll(EntropyStrategy):
             self.overall_entropy -= patchwork.patch_relevances[pred] * patchwork.entropy_dict[pred]['avg']
             patchwork.entropy_dict[pred] = self._compute_entropy_dict_from_trans_probs(patchwork.trans_probs[pred], pred)
             self.overall_entropy += patchwork.patch_relevances[pred] * patchwork.entropy_dict[pred]['avg']
-            patchwork.patch_to_history_of_avg_entropy[pred].append((step, merged_entropy_dict['avg']))
+            patchwork.patch_to_history_of_avg_entropy[pred].append((step, patchwork.entropy_dict[pred]['avg']))
 
         return
     
