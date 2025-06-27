@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=multi_saddle_grid
+#SBATCH --job-name=multi_saddle_probing
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=3:00:00
+#SBATCH --time=10:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
-#SBATCH --mem=4G
-#SBATCH --output=log/multi_saddle_grid_%A_%a.out
-#SBATCH --error=log/multi_saddle_grid_%A_%a.err
-#SBATCH --array=1-40
+#SBATCH --mem=8G
+#SBATCH --output=log/multi_saddle_probing_%A_%a.out
+#SBATCH --error=log/multi_saddle_probing_%A_%a.err
+#SBATCH --array=1-48
 
 # Print job info
 echo "Job started at $(date)"
@@ -36,61 +36,63 @@ export OMP_PROC_BIND=true
 
 # Fixed parameters for all runs
 SYSTEM_TYPE="saddle_system"
-BASE_OUTPUT_DIR="neural_networks/output/multi_saddle_datasets"
+BASE_OUTPUT_DIR="neural_networks/output/multi_saddle_probing"
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
 BATCH_SIZE=64
 PATIENCE=100
-HIDDEN_DIM=64
+HIDDEN_DIM=32
 LR=1e-5
 USE_WARMUP="--use_warmup --warmup_epochs=10"
 USE_TARGET_ENCODER="--use_target_encoder --ema_decay=0.9"
 USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=1.0"
 STATE_LOSS_TYPE="kl_div"
 PREDICTOR_TYPE="standard"
+PROBING_SIZE=5000
 
-# FIXED PARAMETERS
+# Fixed parameters
 GUMBEL_TEMP=3.0
 GUMBEL_MIN=0.5
 SORT_STATES="--sort_states"
-
-# Fixed loss weights (no VICReg)
 STATE_LOSS_WEIGHT=1.0
-VALUE_LOSS_WEIGHT=1.5
 
-# Seeds to run for each dataset
-SEEDS=(7 11 42)
+# Seeds to run for each configuration (10 seeds: 2-11)
+SEEDS=(2 3 4 5 6 7 8 9 10 11)
 
-# Value methods to test
+# Parameter arrays
+DATASETS=(1 5 10)
 VALUE_METHODS=("angle" "identity")
-
-# Number of states to test
-NUM_STATES_OPTIONS=(4 6)
+VALUE_WEIGHTS=(1.5 2.0)
+ENTROPY_DECAY_PROPS=(0.2 0.5)
+NUM_STATES_OPTIONS=(4 8)
 
 # Calculate configuration for this array task
-# Array tasks 1-10: dataset 1-10 with "angle" and num_states=4
-# Array tasks 11-20: dataset 1-10 with "identity" and num_states=4
-# Array tasks 21-30: dataset 1-10 with "angle" and num_states=6
-# Array tasks 31-40: dataset 1-10 with "identity" and num_states=6
+# Total: 3 datasets × 2 value methods × 2 value weights × 2 entropy decay × 2 num states = 48 jobs
 
-if [ $SLURM_ARRAY_TASK_ID -le 10 ]; then
-    DATASET_NUM=$SLURM_ARRAY_TASK_ID
-    VALUE_METHOD="angle"
-    NUM_STATES=4
-elif [ $SLURM_ARRAY_TASK_ID -le 20 ]; then
-    DATASET_NUM=$((SLURM_ARRAY_TASK_ID - 10))
-    VALUE_METHOD="identity"
-    NUM_STATES=4
-elif [ $SLURM_ARRAY_TASK_ID -le 30 ]; then
-    DATASET_NUM=$((SLURM_ARRAY_TASK_ID - 20))
-    VALUE_METHOD="angle"
-    NUM_STATES=6
-else
-    DATASET_NUM=$((SLURM_ARRAY_TASK_ID - 30))
-    VALUE_METHOD="identity"
-    NUM_STATES=6
-fi
+TASK_ID=$((SLURM_ARRAY_TASK_ID - 1))  # Convert to 0-based indexing
+
+# Extract indices for each parameter
+DATASET_IDX=$((TASK_ID % 3))
+REMAINING=$((TASK_ID / 3))
+
+VALUE_METHOD_IDX=$((REMAINING % 2))
+REMAINING=$((REMAINING / 2))
+
+VALUE_WEIGHT_IDX=$((REMAINING % 2))
+REMAINING=$((REMAINING / 2))
+
+ENTROPY_DECAY_IDX=$((REMAINING % 2))
+REMAINING=$((REMAINING / 2))
+
+NUM_STATES_IDX=$((REMAINING % 2))
+
+# Get actual parameter values
+DATASET_NUM=${DATASETS[$DATASET_IDX]}
+VALUE_METHOD=${VALUE_METHODS[$VALUE_METHOD_IDX]}
+VALUE_LOSS_WEIGHT=${VALUE_WEIGHTS[$VALUE_WEIGHT_IDX]}
+ENTROPY_DECAY_PROPORTION=${ENTROPY_DECAY_PROPS[$ENTROPY_DECAY_IDX]}
+NUM_STATES=${NUM_STATES_OPTIONS[$NUM_STATES_IDX]}
 
 # Get database path for this dataset
 DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
@@ -99,16 +101,19 @@ echo "========================================================"
 echo "Array task $SLURM_ARRAY_TASK_ID:"
 echo "  Dataset: $DATASET_NUM"
 echo "  Value method: $VALUE_METHOD"
+echo "  Value weight: $VALUE_LOSS_WEIGHT"
+echo "  Entropy decay proportion: $ENTROPY_DECAY_PROPORTION"
 echo "  Num states: $NUM_STATES"
 echo "  Database: $DB_PATH"
+echo "  Probing size: $PROBING_SIZE"
 echo "Will run ${#SEEDS[@]} seeds sequentially: ${SEEDS[*]}"
 echo "========================================================"
 
-# Run all seeds for this dataset and value method combination
+# Run all seeds for this configuration
 for seed in "${SEEDS[@]}"; do
     
     # Create descriptive run name
-    CONFIG_NAME="multi_saddle_${DATASET_NUM}_${VALUE_METHOD}_${PREDICTOR_TYPE}_states${NUM_STATES}_sl${STATE_LOSS_WEIGHT}_vl${VALUE_LOSS_WEIGHT}_novicreg_seed${seed}"
+    CONFIG_NAME="ms${DATASET_NUM}_${VALUE_METHOD}_vw${VALUE_LOSS_WEIGHT}_ed${ENTROPY_DECAY_PROPORTION}_s${NUM_STATES}_seed${seed}"
     
     # Create output directory
     OUTPUT_DIR="${BASE_OUTPUT_DIR}"
@@ -120,15 +125,13 @@ for seed in "${SEEDS[@]}"; do
     echo "--------------------------------------------------------"
     echo "Starting run with seed $seed:"
     echo "  database: $DB_PATH"
-    echo "  system: $SYSTEM_TYPE"
     echo "  value_method: $VALUE_METHOD"
-    echo "  num_states: $NUM_STATES"
-    echo "  predictor_type: $PREDICTOR_TYPE"
-    echo "  state_loss_weight: $STATE_LOSS_WEIGHT"
     echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
+    echo "  entropy_decay_proportion: $ENTROPY_DECAY_PROPORTION"
+    echo "  num_states: $NUM_STATES"
+    echo "  probing_size: $PROBING_SIZE"
     echo "  seed: $seed"
     echo "  run_id: $RUN_ID"
-    echo "  output_dir: $OUTPUT_DIR"
     
     # Construct and run the command
     CMD="python -m neural_networks.train_drm $DB_PATH \
@@ -137,11 +140,13 @@ for seed in "${SEEDS[@]}"; do
       --epochs=$EPOCHS \
       --val_size=$VAL_SIZE \
       --test_size=$TEST_SIZE \
+      --probing-size=$PROBING_SIZE \
       --batch_size=$BATCH_SIZE \
       --patience=$PATIENCE \
       --hidden_dim=$HIDDEN_DIM \
       --state_loss_weight=$STATE_LOSS_WEIGHT \
       --value_loss_weight=$VALUE_LOSS_WEIGHT \
+      --entropy_decay_proportion=$ENTROPY_DECAY_PROPORTION \
       --num_states=$NUM_STATES \
       $USE_WARMUP \
       $USE_TARGET_ENCODER \
@@ -170,4 +175,4 @@ for seed in "${SEEDS[@]}"; do
     sleep 2
 done
 
-echo "All seeds for array task $SLURM_ARRAY_TASK_ID (dataset $DATASET_NUM, value method $VALUE_METHOD, num_states $NUM_STATES) completed at $(date)"
+echo "All seeds for array task $SLURM_ARRAY_TASK_ID completed at $(date)"

@@ -467,7 +467,7 @@ def analyze_state_transitions(model,
     
     return results
 
-def analyze_discrete_state_transitions(model, control_values, device='cpu'):
+def analyze_discrete_state_transitions(model, control_values, device='cpu', system_type=None):
     """
     Analyze state transitions for different control values using discrete state assignments.
     
@@ -492,8 +492,8 @@ def analyze_discrete_state_transitions(model, control_values, device='cpu'):
     results = {}
     
     for control_value in control_values:
-        # Prepare control tensor based on control format
-        if hasattr(model, 'control_format') and model.control_format == 'categorical':
+        # For saddle systems, always use one-hot encoding
+        if system_type == 'saddle_system':
             # For categorical controls, create one-hot encoding
             control_batch = torch.zeros((num_states, control_dim), dtype=torch.float32, device=device)
             control_batch[:, control_value] = 1.0

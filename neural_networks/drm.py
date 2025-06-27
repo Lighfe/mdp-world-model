@@ -544,9 +544,17 @@ class ControlGate(nn.Module):
         
         return modulated_features
 
+class LinearProbe(nn.Module):
+    def __init__(self, input_dim, num_saddles):
+        super().__init__()
+        self.probe = nn.Linear(input_dim, num_saddles)
+        
+    def forward(self, x):
+        return torch.sigmoid(self.probe(x))  # Binary classification per saddle
+
+
 
 # NOTE: This function might need some tweaking for future use
-
 def sort_existing_model(model_path, output_path=None, system_type=None, value_method=None, sorted_indices=None):
     """
     Sort states in an already trained model and save the result.

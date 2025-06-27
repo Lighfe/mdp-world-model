@@ -280,20 +280,32 @@ class SaddleSystemDataset(BaseDataset):
         else:
             raise NotImplementedError(f"Probing method '{probing_method}' is not implemented.")
     
-    def _halfspace_probing(self, indices=None, saddle_points=None, manifold_directions=None):
+    def _halfspace_probing(self, indices=None):
         """
-        Calculate halfspace values for value probing.
+        Calculate halfspace values for probing analysis.
+        Determines which side of each stable manifold the points lie on.
         
         Args:
             indices: Optional list of indices to compute values for
-            saddle_points: List of saddle point coordinates
-            manifold_directions: List of stable manifold directions (optional)
             
         Returns:
-            torch.Tensor: Halfspace values (n_samples, n_saddles)
+            torch.Tensor: Binary halfspace values (n_samples, n_saddles)
+                        0 = negative halfspace, 1 = positive halfspace
         """
-        if saddle_points is None:
-            raise ValueError("Saddle points must be provided for halfspace calculation")
+        # Get saddle configuration from database
+        saddle_config = get_saddle_configuration(self.db_path)
+        if saddle_config is None:
+            raise ValueError("Could not extract saddle configuration from database")
+        
+        saddle_points = saddle_config['saddle_points']
+        angles_degrees = saddle_config['angles_degrees']
+        
+        # Convert angles to direction vectors (stable manifold directions)
+        manifold_directions = []
+        for angle_deg in angles_degrees:
+            angle_rad = np.radians(angle_deg)
+            direction = np.array([np.cos(angle_rad), np.sin(angle_rad)])
+            manifold_directions.append(direction)
         
         if indices is None:
             indices = range(len(self))
@@ -308,22 +320,18 @@ class SaddleSystemDataset(BaseDataset):
             
             # Calculate halfspace values for each saddle
             values = []
-            for i, saddle_point in enumerate(saddle_points):
-                # Vector from saddle_point to y
+            for i, (saddle_point, manifold_dir) in enumerate(zip(saddle_points, manifold_directions)):
+                # Vector from saddle_point to point
                 v = point - np.array(saddle_point)
                 
-                if manifold_directions is not None:
-                    # Use the actual stable manifold direction
-                    normal = np.array([-manifold_directions[i][1], manifold_directions[i][0]])
-                    # Signed distance from point to manifold
-                    signed_dist = np.dot(v, normal)
-                    # Assign 0 for negative halfspace, 1 for positive halfspace
-                    value = 0.0 if signed_dist < 0 else 1.0
-                else:
-                    # Simple quadrant-based classification as fallback
-                    quadrant = (v[0] > 0) * 1 + (v[1] > 0) * 2
-                    value = float(quadrant)
+                # Normal vector to the stable manifold (perpendicular to manifold direction)
+                normal = np.array([-manifold_dir[1], manifold_dir[0]])
                 
+                # Signed distance from point to manifold
+                signed_dist = np.dot(v, normal)
+                
+                # Assign 0 for negative halfspace, 1 for positive halfspace
+                value = 0.0 if signed_dist < 0 else 1.0
                 values.append(value)
             
             halfspace_values.append(values)
@@ -331,9 +339,9 @@ class SaddleSystemDataset(BaseDataset):
         return torch.tensor(halfspace_values, dtype=torch.float32)
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
-                       test_size=1000, seed=42, value_method=None):
+                       test_size=1000, probing_size=None, seed=42, value_method=None):
     """
-    Create training, validation, and test data loaders for specified system
+    Create training, validation, test, and optionally probing data loaders
     
     Args:
         system_type: Type of system ('tech_substitution' or 'saddle_system')
@@ -341,11 +349,13 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
         batch_size: Batch size for training
         val_size: Number of samples to use for validation
         test_size: Number of samples to use for final testing
+        probing_size: Number of samples to reserve for probing (if None, no probing loader)
         seed: Random seed for reproducibility
         value_method: Optional value method (if None, uses system default)
     
     Returns:
-        train_loader, val_loader, test_loader: DataLoader objects
+        If probing_size is None: train_loader, val_loader, test_loader
+        If probing_size is not None: train_loader, val_loader, test_loader, probing_loader
     """
     from neural_networks.system_registry import SystemType, get_system_config
     
@@ -354,12 +364,11 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     
     # Validate/set value_method
     if value_method is None:
-        value_method = system_config['default_value_method']
+        value_method = system_config['default_value_type']
         print(f"Using default value method for {system_type}: {value_method}")
-    elif value_method not in system_config['value_methods']:
+    elif value_method not in system_config['value_types']:
         raise ValueError(f"Invalid value method '{value_method}' for {system_type}. "
-                        f"Available: {system_config['value_methods']}")
-    
+                        f"Available: {system_config['value_types']}")
     
     # Create the appropriate dataset
     if system_type == 'tech_substitution':
@@ -369,19 +378,36 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     else:
         raise ValueError(f"Unknown system type: {system_type}")
     
-    # Prepare indices for training, validation, and testing
+    # Prepare indices for splitting
     indices = list(range(len(dataset)))
     np.random.shuffle(indices)
     
-    # Ensure sizes aren't too large for the dataset
-    total_reserved = min(val_size + test_size, len(dataset) // 2)
-    val_size = min(val_size, total_reserved // 2)
-    test_size = min(test_size, total_reserved - val_size)
-    
-    # Split indices
-    test_indices = indices[:test_size]
-    val_indices = indices[test_size:test_size + val_size]
-    train_indices = indices[test_size + val_size:]
+    if probing_size is not None:
+        # Reserve probing data first (never seen during training)
+        probing_indices = indices[:probing_size]
+        remaining_indices = indices[probing_size:]
+        
+        # Ensure sizes aren't too large for remaining data
+        remaining_size = len(remaining_indices)
+        total_reserved = min(val_size + test_size, remaining_size // 2)
+        val_size = min(val_size, total_reserved // 2)
+        test_size = min(test_size, total_reserved - val_size)
+        
+        # Split remaining indices
+        test_indices = remaining_indices[:test_size]
+        val_indices = remaining_indices[test_size:test_size + val_size]
+        train_indices = remaining_indices[test_size + val_size:]
+        
+        print(f"Probing set: {len(probing_indices)} samples")
+    else:
+        # Original logic without probing
+        total_reserved = min(val_size + test_size, len(dataset) // 2)
+        val_size = min(val_size, total_reserved // 2)
+        test_size = min(test_size, total_reserved - val_size)
+        
+        test_indices = indices[:test_size]
+        val_indices = indices[test_size:test_size + val_size]
+        train_indices = indices[test_size + val_size:]
     
     print(f"Training set: {len(train_indices)} samples")
     print(f"Validation set: {len(val_indices)} samples")
@@ -409,7 +435,15 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
         sampler=SubsetRandomSampler(test_indices, generator=generator)
     )
     
-    return train_loader, val_loader, test_loader
+    if probing_size is not None:
+        probing_loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            sampler=SubsetRandomSampler(probing_indices, generator=generator)
+        )
+        return train_loader, val_loader, test_loader, probing_loader
+    else:
+        return train_loader, val_loader, test_loader
 
 
 def get_saddle_configuration(db_path):

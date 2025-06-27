@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from neural_networks.system_registry import SystemType, get_system_config, get_transformation
 from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset, get_saddle_configuration
 from neural_networks.drm_loss import StableDRMLoss
-from neural_networks.drm import DiscreteRepresentationsModel
+from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
@@ -44,6 +44,119 @@ def set_all_seeds(seed):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+def train_probe(features, targets, probe_name, num_epochs=50, lr=1e-3):
+    """
+    Train a linear probe
+    
+    Args:
+        features: (n_samples, feature_dim)
+        targets: (n_samples, num_saddles) - binary targets
+        probe_name: str for logging
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create probe
+    input_dim = features.shape[1]
+    num_saddles = targets.shape[1]
+    probe = LinearProbe(input_dim, num_saddles).to(device)
+    
+    # Move data to device
+    features = features.to(device)
+    targets = targets.to(device)
+    
+    # Setup training
+    optimizer = torch.optim.Adam(probe.parameters(), lr=lr)
+    criterion = nn.BCELoss()
+    
+    print(f"Training {probe_name} probe...")
+    
+    for epoch in range(num_epochs):
+        optimizer.zero_grad()
+        
+        predictions = probe(features)
+        loss = criterion(predictions, targets)
+        
+        loss.backward()
+        optimizer.step()
+        
+        if (epoch + 1) % 10 == 0:
+            # Calculate accuracy
+            binary_preds = (predictions > 0.5).float()
+            accuracy = (binary_preds == targets).float().mean()
+            print(f"  Epoch {epoch+1}/{num_epochs} - Loss: {loss:.4f}, Accuracy: {accuracy:.4f}")
+    
+    return probe, accuracy.item()
+
+def extract_features(model, probing_loader, device):
+    """
+    Extract features from both discrete states and embeddings layers
+    
+    Returns:
+        discrete_features: (n_samples, num_states) - one-hot encoded states  
+        embedding_features: (n_samples, hidden_dim) - continuous embeddings
+    """
+    model.eval()
+    
+    discrete_features = []
+    embedding_features = []
+    
+    with torch.no_grad():
+        for x, c, y, v_true in probing_loader:
+            x = x.to(device)
+            
+            # Extract continuous embeddings (pre-logits)
+            embed_x, logits_x = model.get_embeddings_and_logits(x, use_target=False)
+            
+            # Extract discrete states (post-softmax, with argmax)
+            discrete_x = model.get_state_probs(x, training=False, hard=True, use_target=False)
+            
+            # Collect features
+            embedding_features.append(embed_x.cpu())
+            discrete_features.append(discrete_x.cpu())
+    
+    # Concatenate all batches
+    discrete_features = torch.cat(discrete_features, dim=0)  # (n_samples, num_states)
+    embedding_features = torch.cat(embedding_features, dim=0)  # (n_samples, hidden_dim)
+    
+    print(f"Extracted features - Discrete: {discrete_features.shape}, Embeddings: {embedding_features.shape}")
+    
+    return discrete_features, embedding_features
+
+def run_layer_probing(model, probing_loader, device, system_type, db_path):
+    """Complete layer probing pipeline"""
+    print("\n" + "="*50)
+    print("STARTING LAYER PROBING")
+    print("="*50)
+    
+    # 1. Calculate probe targets
+    if system_type == 'saddle_system':
+        dataset = probing_loader.dataset
+        probing_indices = list(probing_loader.sampler.indices)
+        probe_targets = dataset._halfspace_probing(indices=probing_indices)
+        print(f"Probe targets shape: {probe_targets.shape}")
+        print(f"Number of saddles: {probe_targets.shape[1]}")
+        print(f"Target distribution per saddle: {probe_targets.mean(dim=0)}")
+    else:
+        raise ValueError("Layer probing only implemented for saddle_system")
+    
+    # 2. Extract features
+    discrete_features, embedding_features = extract_features(model, probing_loader, device)
+    
+    # 3. Train probes
+    print("\nTraining probes...")
+    discrete_probe, discrete_acc = train_probe(discrete_features, probe_targets, "discrete")
+    embedding_probe, embedding_acc = train_probe(embedding_features, probe_targets, "embedding")
+    
+    print(f"\nFINAL PROBING RESULTS:")
+    print(f"  Discrete states accuracy: {discrete_acc:.4f}")
+    print(f"  Embeddings accuracy: {embedding_acc:.4f}")
+    print("="*50)
+    
+    return {
+        'discrete_accuracy': discrete_acc,
+        'embedding_accuracy': embedding_acc
+    }
+
 def train_drm_model(db_path, 
                     system_type,
                     output_dir="./neural_networks/output",
@@ -51,6 +164,7 @@ def train_drm_model(db_path,
                     seed=42,
                     val_size=2000,
                     test_size=2000, 
+                    probing_size=None,
                     batch_size=64, 
                     epochs=100,
                     learning_rate=1e-4, 
@@ -161,16 +275,28 @@ def train_drm_model(db_path,
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    
-    train_loader, val_loader, test_loader = create_data_loaders(
-        system_type=system_type,
-        db_path=db_path,
-        value_method=value_method,
-        batch_size=batch_size,
-        val_size=val_size, 
-        test_size=test_size,
-        seed=seed
-    )
+    if probing_size is not None:
+        train_loader, val_loader, test_loader, probing_loader = create_data_loaders(
+            system_type=system_type,
+            db_path=db_path,
+            value_method=value_method,
+            batch_size=batch_size,
+            val_size=val_size, 
+            test_size=test_size,
+            probing_size=probing_size,  # Add this
+            seed=seed
+        )
+    else:
+        train_loader, val_loader, test_loader = create_data_loaders(
+            system_type=system_type,
+            db_path=db_path,
+            value_method=value_method,
+            batch_size=batch_size,
+            val_size=val_size, 
+            test_size=test_size,
+            seed=seed
+        )
+        probing_loader = None
 
     # Get dimensions from first batch
     for x, c, y, v_true in train_loader:
@@ -626,8 +752,6 @@ def train_drm_model(db_path,
     test_vicreg_variance = 0.0
     test_vicreg_covariance = 0.0
     test_samples = 0
-    test_value_predictions = []
-    test_value_targets = []
     
     with torch.no_grad():
         for x, c, y, v_true in test_loader:
@@ -658,13 +782,6 @@ def train_drm_model(db_path,
                 # Skip if loss is NaN
                 if torch.isnan(total_loss):
                     continue
-                
-                # Calculate expected value prediction based on predicted state distribution
-                expected_v_pred = (s_y_pred @ v_pred_for_all_states).detach()  # Matrix multiply: [batch, states] @ [states, value_dim]
-
-                # Store predictions and targets for analysis
-                test_value_predictions.append(expected_v_pred.cpu().numpy())
-                test_value_targets.append(v_true.cpu().numpy())
                 
                 # Accumulate losses
                 test_loss += total_loss.item() * len(x)
@@ -698,16 +815,13 @@ def train_drm_model(db_path,
         test_vicreg_variance /= test_samples
         test_vicreg_covariance /= test_samples
     
-    # Calculate additional metrics if needed
-    test_value_predictions = np.concatenate(test_value_predictions) if test_value_predictions else np.array([])
-    test_value_targets = np.concatenate(test_value_targets) if test_value_targets else np.array([])
+    # Layer probing
+    probing_results = None
+    if probing_loader is not None and system_type == 'saddle_system':
+        probing_results = run_layer_probing(model, probing_loader, device, system_type, db_path)
+
     
-    # Calculate R^2 for value predictions if we have enough data
-    r2_score = 0
-    if len(test_value_predictions) > 0:
-        from sklearn.metrics import r2_score as sklearn_r2_score
-        r2_score = sklearn_r2_score(test_value_targets, test_value_predictions)
-    
+
     # Create test metrics dictionary
     test_metrics = {
         "test_loss": float(test_loss),
@@ -721,34 +835,25 @@ def train_drm_model(db_path,
         "test_vicreg_invariance": float(test_vicreg_invariance),
         "test_vicreg_variance": float(test_vicreg_variance),
         "test_vicreg_covariance": float(test_vicreg_covariance),
-        "test_r2_score": float(r2_score),
         "test_samples": test_samples,
+        "probing_discrete_accuracy": probing_results['discrete_accuracy'] if probing_results else None,
+        "probing_embedding_accuracy": probing_results['embedding_accuracy'] if probing_results else None
     }
-    # Add performance metrics to test_metrics
-    test_metrics["peak_memory_mb"] = psutil.Process().memory_info().rss / (1024 * 1024)
-    test_metrics["cpu_percent"] = psutil.Process().cpu_percent()
-    test_metrics["execution_time_sec"] = time.time() - start_time
     
     # Print test results
     print(f"Test Results:")
     print(f"  Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Value: {test_value_loss:.4f})")
     print(f"  Div Loss: {test_div_loss:.4f}, Entropy Loss: {test_entropy_loss:.4f}")
     print(f"  Batch Entropy: {test_batch_entropy:.4f}, Individual Entropy: {test_individual_entropy:.4f}")
-    print(f"  R²: {r2_score:.4f}")
-    
+    if probing_results:
+        print(f"  Linear Probing - Discrete Accuracy: {probing_results['discrete_accuracy']:.4f}, Embedding Accuracy: {probing_results['embedding_accuracy']:.4f}")
+
     # Save test results
     test_results_path = os.path.join(output_dir, f"drm_test_results_{run_id}.json")
     with open(test_results_path, 'w') as f:
         json.dump(test_metrics, f, indent=4)
     print(f"Saved test results to {test_results_path}")
 
-    # For multi-dimensional outputs, report per-dimension errors if applicable
-    if test_value_predictions.ndim > 1 and test_value_predictions.shape[1] > 1:
-        print(f"\nPer-dimension value metrics:")
-        for dim in range(test_value_predictions.shape[1]):
-            dim_mse = np.mean((test_value_targets[:, dim] - test_value_predictions[:, dim])**2)
-            dim_mae = np.mean(np.abs(test_value_targets[:, dim] - test_value_predictions[:, dim]))
-            print(f"  Dimension {dim}: MSE={dim_mse:.4f}, MAE={dim_mae:.4f}")
     
     # Save final model
     final_model_path = os.path.join(output_dir, f"drm_final_{run_id}.pt")
@@ -880,7 +985,8 @@ def train_drm_model(db_path,
     transition_matrices = analyze_discrete_state_transitions(
         model=model,
         control_values=control_values,
-        device=device
+        device=device,
+        system_type=system_type
     )
     transitions_vis_path = os.path.join(output_dir, f"transitions_{run_id}.png")
     visualize_transition_matrices(transition_matrices, control_values, transitions_vis_path)
@@ -888,6 +994,9 @@ def train_drm_model(db_path,
     #mdp_vis_path = os.path.join(output_dir, f"mdp_visualization_{run_id}.png")
     #mdp_data = analyze_mdp_from_model(model, control_values=control_values, device='cuda' if torch.cuda.is_available() else 'cpu')
     #graphs, paths = visualize_mdp(mdp_data, output_path=mdp_vis_path, min_prob_to_show=0.02)
+
+
+    return model, history
 
     # Calculate training time
     training_time = time.time() - start_time
@@ -997,6 +1106,8 @@ if __name__ == "__main__":
                     help='Target standard deviation for VICReg variance term')
     parser.add_argument('--vicreg_invariance_schedule', action='store_true',
                     help='Gradually reduce VICReg invariance weight over training')
+    parser.add_argument('--probing-size', type=int, default=None,
+                    help='Number of samples to reserve for layer probing (default: None)')
     
     args = parser.parse_args()
 
@@ -1027,6 +1138,7 @@ if __name__ == "__main__":
         seed=args.seed,
         val_size=args.val_size,
         test_size=args.test_size,
+        probing_size=args.probing_size,
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.lr,
