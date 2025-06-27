@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mplcol
 import seaborn as sns
 import holoviews as hv
+import param
 import panel as pn
 import pandas as pd
 from shapely.geometry import Polygon
@@ -219,7 +220,10 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         cbar.set_label(label, fontsize=8)
         cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
         return fig
-   
+    
+    # Tap Stream
+    tap_stream = hv.streams.Tap(source = None)
+
     def create_loss_function_plot_hv(step=0):
         """
         Create a HoloViews plot of the loss function values over time with a vertical line.
@@ -249,6 +253,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             fontsize={'title': 12, 'labels': 10, 'ticks': 8, 'legend': 8},
             show_grid=True
         )
+        tap_stream.source = overlay
 
         return overlay
     
@@ -389,21 +394,34 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
     if show_interactive == True:
         # Interactive slider and selection widget
-        slider = pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
+        class StepController(param.Parameterized):
+            step = param.Integer(default=0, bounds=(0, number_of_steps))
+
+        controller = StepController()
+        # Callback: update slider value on tap
+        def on_tap(x, y):
+            if x is not None:
+                step = int(round(x))
+                if controller.param.step.bounds[0] <= step <= controller.param.step.bounds[1]:
+                    controller.step = step
+        tap_stream.add_subscriber(on_tap)            
+        slider =  pn.widgets.IntSlider.from_param(controller.param.step)
+        int_input = pn.widgets.IntInput.from_param(controller.param.step, name="Enter Step")
+        #pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
         
         vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[])
         vector_selector_nullclines = pn.widgets.MultiChoice(name="Select Controls for Nullclines", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
         color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches', 'White'])
         
-        # Bind the functions to the slider
+        # Bind the functions to the controller
         interactive_plot = pn.bind(get_current_patchwork, 
-                                   step=slider, 
+                                   step=controller.param.step,
                                    selected_controls = vector_selector_streamplots, 
                                    selected_nullcline_controls = vector_selector_nullclines, 
                                    selected_color = color_selector)
         
         interactive_loss_function_plot = pn.bind(create_loss_function_plot_hv,
-                                                 step = slider)
+                                                 step=controller.param.step)
                                                  
 
         # Title for the widgetbox
@@ -422,8 +440,8 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         title_column = pn.Column(title,
                                  pn.Spacer(height=5), 
                         loss_fct_explanation,
-                        pn.Spacer(height=30),
-                        pn.WidgetBox('## Patchwork Display Tools', slider, vector_selector_streamplots, vector_selector_nullclines, color_selector),
+                        pn.Spacer(height=15),
+                        pn.WidgetBox('## Patchwork Display Tools', int_input, slider, vector_selector_streamplots, vector_selector_nullclines, color_selector),
                         width = 400)
         
         # Wrap the interactive plot in a fixed-height column to help with alignment
