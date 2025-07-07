@@ -224,13 +224,58 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     # Tap Stream
     tap_stream = hv.streams.Tap(source = None)
 
-    def create_loss_function_plot_hv(step=0):
+    def create_loss_function_plot_hv(step=0, x_axis_mode='Step', x_transform='None', show_derivative=False):
         """
         Create a HoloViews plot of the loss function values over time with a vertical line.
         """
         curves = []
         color_cycle = plt.get_cmap('tab10').colors #hv.Cycle('Category10')  # Colorblind-friendly
+        history = patchwork.loss_function.history_of_loss_function_values
+        n_steps = len(list(history.values())[0])
 
+        #Construct x-axis
+        steps = list(range(n_steps))
+        if x_axis_mode == 'Step':
+            x_vals = steps
+        elif x_axis_mode == 'Number of Patches':
+            x_vals = [len(patchwork.cell_to_patchindex) - i for i in steps]
+
+        # Apply transform
+        if x_transform == 'log':
+            x_vals = list(np.log1p(x_vals))  # log(1+x) to handle 0
+        elif x_transform == 'exp':
+            x_vals = list(np.exp(x_vals))
+        
+        # Save mapping for tap-stream use
+        create_loss_function_plot_hv.x_map = list(zip(x_vals, steps))
+
+        # Build curves
+        for idx, (loss_type, values) in enumerate(history.items()):
+            color=color_cycle[idx % len(color_cycle)]
+            y_vals = values
+            label = loss_type
+            curve = hv.Curve((x_vals, y_vals), 'X', 'Loss', label=label).opts(
+                color=color,
+                line_width=2,
+                hover_tooltips=[("Label", "$label"), ("X", "$x"), ("Value", "$y")]
+            )
+            curves.append(curve)
+
+            if show_derivative:
+                y_vals = np.gradient(values)
+                label = f"d({loss_type})/dx"
+                curve = hv.Curve((x_vals, y_vals), 'X', 'Loss', label=label).opts(
+                color=color,
+                line_width=2,
+                hover_tooltips=[("Label", "$label"), ("X", "$x"), ("Value", "$y")], alpha = 0.5, line_dash = 'dotted'
+                )
+                curves.append(curve)
+
+        # Vertical line
+        vline_x = x_vals[step] if step < len(x_vals) else x_vals[-1]
+        vline = hv.VLine(vline_x).opts(color='red', line_dash='dashed', line_width=2)
+
+        """    
         for idx, (loss_type, values) in enumerate(patchwork.loss_function.history_of_loss_function_values.items()):
             curve = hv.Curve((list(range(len(values))), values), 'Time Step', 'Loss Function Value', label =loss_type)\
                 .opts(
@@ -241,7 +286,8 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             curves.append(curve)
 
         # Create vertical line
-        vline = hv.VLine(step).opts(color='red', line_dash='dashed', line_width=2)
+        vline = hv.VLine(x_vals[step]).opts(color='red', line_dash='dashed', line_width=2)
+        """
 
         # Overlay curves and vertical line
         overlay = hv.Overlay(curves + [vline]).opts(
@@ -380,6 +426,13 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
         return hv.Overlay(layers)
 
+    # Function for mapping loss function x value to step for tapstream
+    def x_to_step(x):
+        if not hasattr(create_loss_function_plot_hv, 'x_map'):
+            return 0
+        x_vals, steps = zip(*create_loss_function_plot_hv.x_map)
+        idx = np.argmin([abs(xi - x) for xi in x_vals])
+        return steps[idx]
 
     
     #Save to .gif
@@ -398,20 +451,27 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             step = param.Integer(default=0, bounds=(0, number_of_steps))
 
         controller = StepController()
+
         # Callback: update slider value on tap
         def on_tap(x, y):
             if x is not None:
-                step = int(round(x))
+                step = x_to_step(x)
                 if controller.param.step.bounds[0] <= step <= controller.param.step.bounds[1]:
                     controller.step = step
-        tap_stream.add_subscriber(on_tap)            
+        tap_stream.add_subscriber(on_tap)        
+
         slider =  pn.widgets.IntSlider.from_param(controller.param.step)
         int_input = pn.widgets.IntInput.from_param(controller.param.step, name="Enter Step")
-        #pn.widgets.IntSlider(name="Clustering Step", start=0, end=number_of_steps, step=1)
         
         vector_selector_streamplots = pn.widgets.MultiChoice(name="Select Controls for Streamplots", options=list(controls), value=[])
         vector_selector_nullclines = pn.widgets.MultiChoice(name="Select Controls for Nullclines", options=list(controls), value=[]) # Initially, value=[] means no vector fields are selected.
         color_selector = pn.widgets.Select(name= "Select Color Mapping", options = ['Entropy', 'Patches', 'White'])
+
+        # Loss Function Interactive Elements
+        x_axis_mode_loss_fct = pn.widgets.RadioButtonGroup(name='X Axis Mode', options=['Step', 'Number of Patches'], button_type='default')
+        x_transform_loss_fct = pn.widgets.RadioButtonGroup(name='X Axis Transform', options=['None', 'log', 'exp'], button_type='default')
+        show_loss_fct_derivative = pn.widgets.Checkbox(name='Show Loss Function Derivatives', value=False)
+
         
         # Bind the functions to the controller
         interactive_plot = pn.bind(get_current_patchwork, 
@@ -421,7 +481,10 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                                    selected_color = color_selector)
         
         interactive_loss_function_plot = pn.bind(create_loss_function_plot_hv,
-                                                 step=controller.param.step)
+                                                 step=controller.param.step,
+                                                 x_axis_mode=x_axis_mode_loss_fct,
+                                                 x_transform=x_transform_loss_fct,
+                                                 show_derivative=show_loss_fct_derivative)
                                                  
 
         # Title for the widgetbox
@@ -450,10 +513,13 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         # Right-side column with bottom-aligned plots
         
         right_column = pn.Column(
-            pn.Spacer(height=50), 
+            pn.Spacer(height=20), 
             colorbar_pane,
-            pn.Spacer(height=50), 
+            pn.Spacer(height=20), 
             interactive_loss_function_plot,
+            pn.Row(x_axis_mode_loss_fct,
+            x_transform_loss_fct),
+            show_loss_fct_derivative,
             sizing_mode='fixed',
             height=500  # Match height with interactive_column
         )

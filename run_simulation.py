@@ -186,11 +186,12 @@ def run_and_store_simulations(config, config_path):
     """Run simulations based on the configuration, possibly for multiple controls."""
     
     run_ids = []
+    simulator = initialize_simulation(config, config_path)
 
     for control in np.array(config['controls']):
         
         try:
-            simulator = initialize_simulation(config, config_path)
+            
             logging.info(f"Starting simulation with control: {control}")
             # Run simulation
             simulator.simulate(

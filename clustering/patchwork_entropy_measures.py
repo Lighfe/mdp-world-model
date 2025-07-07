@@ -45,6 +45,22 @@ def conditional_shannon_entropy(probs_dict, source_patch):
     return entropy(probs, base=2)
 
 
+def renyi05_entropy(probs_dict, source_patch):
+    """
+    Calculate the Renyi entropy (with alpha = 0.5) of a source patch based on the probabilities of transitions.
+
+    Args:
+        probs_dict (dict): Dictionary containing probabilities for each patch which is reached.
+                            keys: target patches, values: probability of transition from source patch to that target patch.
+        source_patch (str): The source patch for which to calculate the entropy. May be a key in probs_dict.
+
+    Returns:
+        float: The Renyi entropy (with alpha = 0.5) of the source patch.
+    """
+    
+    return  2 * log2(sum([prob ** 0.5 for prob in probs_dict.values()]))
+
+
 
 def renyi2_entropy(probs_dict, source_patch):
     """
