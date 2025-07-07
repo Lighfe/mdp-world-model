@@ -47,7 +47,7 @@ echo "  Overwrite existing: $OVERWRITE_EXISTING"
 echo "========================================================"
 
 # Run batch layer probing
-python neural_networks/run_batch_probing.py "$BASE_OUTPUT_DIR" \
+python run_batch_probing.py "$BASE_OUTPUT_DIR" \
     --probing_size $PROBING_SIZE \
     --device "$DEVICE" \
     $(if [ "$OVERWRITE_EXISTING" = "true" ]; then echo "--overwrite_existing"; fi)
