@@ -3,6 +3,7 @@ import random
 import copy
 from itertools import product
 import sys
+from scipy.special import expit
 
 
 class Grid:
@@ -371,7 +372,7 @@ def logistic_transformation(param_dict= {'k': 1, 'x_0': 0} ):
     
 
     def logistic_transformation(x):
-        return 1 / (1 + np.exp(-k*(x-x_0)))
+        return expit(k * (x - x_0))
     
     logistic_transformation.parameters = param_dict
     
@@ -382,7 +383,8 @@ def logistic_transformation(param_dict= {'k': 1, 'x_0': 0} ):
             return (x_0 * k - np.log((1/x - 1))) / k
     
     def logistic_transformation_derivative(x):
-        return k * np.exp(k*(x-x_0)) / (1 + np.exp(k*(x-x_0)))**2
+        sig = expit(k * (x - x_0))
+        return k * sig * (1 - sig)
     
 
     return (logistic_transformation, inverse_logistic_transformation, logistic_transformation_derivative)
