@@ -44,113 +44,107 @@ def set_all_seeds(seed):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-def train_probe(features, targets, probe_name, num_epochs=50, lr=1e-3):
-    """
-    Train a linear probe
-    
-    Args:
-        features: (n_samples, feature_dim)
-        targets: (n_samples, num_saddles) - binary targets
-        probe_name: str for logging
-    """
+def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_size=64):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Create probe
     input_dim = features.shape[1]
     num_saddles = targets.shape[1]
     probe = LinearProbe(input_dim, num_saddles).to(device)
     
-    # Move data to device
-    features = features.to(device)
-    targets = targets.to(device)
+    # Create DataLoader for batching
+    dataset = torch.utils.data.TensorDataset(features, targets)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    # Setup training
     optimizer = torch.optim.Adam(probe.parameters(), lr=lr)
     criterion = nn.BCELoss()
     
-    print(f"Training {probe_name} probe...")
-    
     for epoch in range(num_epochs):
-        optimizer.zero_grad()
+        for batch_features, batch_targets in dataloader:
+            batch_features, batch_targets = batch_features.to(device), batch_targets.to(device)
+            
+            optimizer.zero_grad()
+            predictions = probe(batch_features)
+            loss = criterion(predictions, batch_targets)
+            loss.backward()
+            optimizer.step()
         
-        predictions = probe(features)
-        loss = criterion(predictions, targets)
-        
-        loss.backward()
-        optimizer.step()
-        
+        # Evaluate on full dataset every 10 epochs
         if (epoch + 1) % 10 == 0:
-            # Calculate accuracy
-            binary_preds = (predictions > 0.5).float()
-            accuracy = (binary_preds == targets).float().mean()
-            print(f"  Epoch {epoch+1}/{num_epochs} - Loss: {loss:.4f}, Accuracy: {accuracy:.4f}")
+            with torch.no_grad():
+                full_predictions = probe(features.to(device))
+                binary_preds = (full_predictions > 0.5).float()
+                accuracy = (binary_preds == targets.to(device)).float().mean()
+                print(f"  Epoch {epoch+1}/{num_epochs} - Accuracy: {accuracy:.4f}")
     
     return probe, accuracy.item()
 
-def extract_features(model, probing_loader, device):
+def extract_features_and_targets(model, probing_loader, device, system_type):
     """
-    Extract features from both discrete states and embeddings layers
-    
-    Returns:
-        discrete_features: (n_samples, num_states) - one-hot encoded states  
-        embedding_features: (n_samples, hidden_dim) - continuous embeddings
+    Extract features and targets for layer probing
     """
     model.eval()
     
+    dataset = probing_loader.dataset
+    probing_indices = list(probing_loader.sampler.indices)
+    
     discrete_features = []
     embedding_features = []
+    targets = []
     
     with torch.no_grad():
-        for x, c, y, v_true in probing_loader:
-            x = x.to(device)
+        batch_size = probing_loader.batch_size
+        for i in range(0, len(probing_indices), batch_size):
+            batch_indices = probing_indices[i:i+batch_size]
             
-            # Extract continuous embeddings (pre-logits)
-            embed_x, logits_x = model.get_embeddings_and_logits(x, use_target=False)
+            batch_x = []
+            for idx in batch_indices:
+                x, _, _, _ = dataset[idx]
+                batch_x.append(x)
             
-            # Extract discrete states (post-softmax, with argmax)
-            discrete_x = model.get_state_probs(x, training=False, hard=True, use_target=False)
+            batch_x = torch.stack(batch_x)
             
-            # Collect features
+            # Calculate targets for entire batch at once - EFFICIENT!
+            if system_type == 'saddle_system':
+                batch_targets = dataset._halfspace_for_batch(batch_x)
+                targets.append(batch_targets)
+            else:
+                raise NotImplementedError(f"Layer probing not implemented for system_type: {system_type}")
+            
+            # Process batch through model
+            batch_x_gpu = batch_x.to(device)
+            embed_x, _ = model.get_embeddings_and_logits(batch_x_gpu, use_target=False)
+            discrete_x = model.get_state_probs(batch_x_gpu, training=False, hard=True, use_target=False)
+            
             embedding_features.append(embed_x.cpu())
             discrete_features.append(discrete_x.cpu())
     
-    # Concatenate all batches
-    discrete_features = torch.cat(discrete_features, dim=0)  # (n_samples, num_states)
-    embedding_features = torch.cat(embedding_features, dim=0)  # (n_samples, hidden_dim)
-    
-    print(f"Extracted features - Discrete: {discrete_features.shape}, Embeddings: {embedding_features.shape}")
-    
-    return discrete_features, embedding_features
+    return (torch.cat(discrete_features), 
+            torch.cat(embedding_features), 
+            torch.cat(targets))
+
 
 def run_layer_probing(model, probing_loader, device, system_type, db_path):
-    """Complete layer probing pipeline"""
+    """Simplified layer probing with guaranteed data alignment"""
+    
     print("\n" + "="*50)
     print("STARTING LAYER PROBING")
     print("="*50)
+
+    # Freeze model
+    for param in model.parameters():
+        param.requires_grad = False
+    model.eval()
     
-    # 1. Calculate probe targets
-    if system_type == 'saddle_system':
-        dataset = probing_loader.dataset
-        probing_indices = list(probing_loader.sampler.indices)
-        probe_targets = dataset._halfspace_probing(indices=probing_indices)
-        print(f"Probe targets shape: {probe_targets.shape}")
-        print(f"Number of saddles: {probe_targets.shape[1]}")
-        print(f"Target distribution per saddle: {probe_targets.mean(dim=0)}")
-    else:
-        raise ValueError("Layer probing only implemented for saddle_system")
+    # Extract everything together - guaranteed alignment
+    discrete_features, embedding_features, probe_targets = extract_features_and_targets(
+        model, probing_loader, device, system_type
+    )
     
-    # 2. Extract features
-    discrete_features, embedding_features = extract_features(model, probing_loader, device)
+    print(f"Extracted paired data - Features: {discrete_features.shape}, Targets: {probe_targets.shape}")
     
-    # 3. Train probes
-    print("\nTraining probes...")
+    # Train probes
     discrete_probe, discrete_acc = train_probe(discrete_features, probe_targets, "discrete")
     embedding_probe, embedding_acc = train_probe(embedding_features, probe_targets, "embedding")
-    
-    print(f"\nFINAL PROBING RESULTS:")
-    print(f"  Discrete states accuracy: {discrete_acc:.4f}")
-    print(f"  Embeddings accuracy: {embedding_acc:.4f}")
-    print("="*50)
     
     return {
         'discrete_accuracy': discrete_acc,
@@ -995,8 +989,6 @@ def train_drm_model(db_path,
     #mdp_data = analyze_mdp_from_model(model, control_values=control_values, device='cuda' if torch.cuda.is_available() else 'cpu')
     #graphs, paths = visualize_mdp(mdp_data, output_path=mdp_vis_path, min_prob_to_show=0.02)
 
-
-    return model, history
 
     # Calculate training time
     training_time = time.time() - start_time

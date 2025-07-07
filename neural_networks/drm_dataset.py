@@ -169,9 +169,9 @@ class SaddleSystemDataset(BaseDataset):
             self._infer_num_saddles()
 
         # After inferring num_saddles, validate against system config
-        saddle_config = get_saddle_configuration(db_path)
-        if saddle_config:
-            expected_saddles = len(saddle_config['saddle_points'])
+        self.saddle_config = get_saddle_configuration(db_path, verbose=False)
+        if self.saddle_config:
+            expected_saddles = len(self.saddle_config['saddle_points'])
             if self.num_saddles != expected_saddles:
                 print(f"WARNING: Inferred {self.num_saddles} saddles from data, "
                     f"but system config shows {expected_saddles} saddle points!")
@@ -263,80 +263,49 @@ class SaddleSystemDataset(BaseDataset):
         else:
             raise NotImplementedError(f"Method '{self.value_method}' is not implemented for saddle system.")
     
-    def probing_values(self, indices=None, probing_method="halfspace", **kwargs):
-        """
-        Calculate values for probing analysis after training.
+    def _halfspace_for_single_point(self, x):
+        """Calculate halfspace values for a single point tensor"""
+        point = x.numpy()
         
-        Args:
-            indices: Optional list of indices to compute values for
-            probing_method: Method to use for probing ('halfspace', etc.)
-            **kwargs: Additional arguments specific to the probing method
-            
-        Returns:
-            torch.Tensor: Probing values
-        """
-        if probing_method == "halfspace":
-            return self._halfspace_probing(indices, **kwargs)
-        else:
-            raise NotImplementedError(f"Probing method '{probing_method}' is not implemented.")
-    
-    def _halfspace_probing(self, indices=None):
-        """
-        Calculate halfspace values for probing analysis.
-        Determines which side of each stable manifold the points lie on.
+        # Use stored config instead of reloading from database
+        saddle_points = self.saddle_config['saddle_points']
+        angles_degrees = self.saddle_config['angles_degrees']
         
-        Args:
-            indices: Optional list of indices to compute values for
-            
-        Returns:
-            torch.Tensor: Binary halfspace values (n_samples, n_saddles)
-                        0 = negative halfspace, 1 = positive halfspace
-        """
-        # Get saddle configuration from database
-        saddle_config = get_saddle_configuration(self.db_path)
-        if saddle_config is None:
-            raise ValueError("Could not extract saddle configuration from database")
-        
-        saddle_points = saddle_config['saddle_points']
-        angles_degrees = saddle_config['angles_degrees']
-        
-        # Convert angles to direction vectors (stable manifold directions)
-        manifold_directions = []
-        for angle_deg in angles_degrees:
+        values = []
+        for saddle_point, angle_deg in zip(saddle_points, angles_degrees):
+            v = point - np.array(saddle_point)
             angle_rad = np.radians(angle_deg)
-            direction = np.array([np.cos(angle_rad), np.sin(angle_rad)])
-            manifold_directions.append(direction)
+            manifold_dir = np.array([np.cos(angle_rad), np.sin(angle_rad)])
+            normal = np.array([-manifold_dir[1], manifold_dir[0]])
+            signed_dist = np.dot(v, normal)
+            values.append(0.0 if signed_dist < 0 else 1.0)
         
-        if indices is None:
-            indices = range(len(self))
+        return torch.tensor(values, dtype=torch.float32)
+    
+    def _halfspace_for_batch(self, x_batch):
+        """Calculate halfspace values for a batch of points"""
+        points = x_batch.numpy()  # (batch_size, 2)
         
-        halfspace_values = []
+        # Use stored config
+        saddle_points = self.saddle_config['saddle_points']
+        angles_degrees = self.saddle_config['angles_degrees']
         
-        for idx in indices:
-            x, _, y, _ = self[idx]  # Get the data point
-            
-            # Use y (next state) for halfspace calculation
-            point = y.numpy()
-            
-            # Calculate halfspace values for each saddle
-            values = []
-            for i, (saddle_point, manifold_dir) in enumerate(zip(saddle_points, manifold_directions)):
-                # Vector from saddle_point to point
-                v = point - np.array(saddle_point)
-                
-                # Normal vector to the stable manifold (perpendicular to manifold direction)
-                normal = np.array([-manifold_dir[1], manifold_dir[0]])
-                
-                # Signed distance from point to manifold
-                signed_dist = np.dot(v, normal)
-                
-                # Assign 0 for negative halfspace, 1 for positive halfspace
-                value = 0.0 if signed_dist < 0 else 1.0
-                values.append(value)
-            
-            halfspace_values.append(values)
+        batch_size = points.shape[0]
+        num_saddles = len(saddle_points)
+        values = np.zeros((batch_size, num_saddles))
         
-        return torch.tensor(halfspace_values, dtype=torch.float32)
+        for saddle_idx, (saddle_point, angle_deg) in enumerate(zip(saddle_points, angles_degrees)):
+            # Vectorized calculation
+            v = points - np.array(saddle_point)  # (batch_size, 2)
+            angle_rad = np.radians(angle_deg)
+            manifold_dir = np.array([np.cos(angle_rad), np.sin(angle_rad)])
+            normal = np.array([-manifold_dir[1], manifold_dir[0]])
+            signed_dist = np.dot(v, normal)  # (batch_size,)
+            values[:, saddle_idx] = (signed_dist >= 0).astype(float)
+        
+        return torch.tensor(values, dtype=torch.float32)
+    
+
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
                        test_size=1000, probing_size=None, seed=42, value_method=None):
@@ -446,7 +415,7 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
         return train_loader, val_loader, test_loader
 
 
-def get_saddle_configuration(db_path):
+def get_saddle_configuration(db_path, verbose=True):
     """
     Extract saddle points and angles from the database configuration.
     
@@ -486,8 +455,9 @@ def get_saddle_configuration(db_path):
             saddle_points = model_config.get('saddle_points', [])
             angles_degrees = model_config.get('angles_degrees', [])
             
-            print(f"Found {len(saddle_points)} saddle points: {saddle_points}")
-            print(f"Found {len(angles_degrees)} angles: {angles_degrees}")
+            if verbose:
+                print(f"Found {len(saddle_points)} saddle points: {saddle_points}")
+                print(f"Found {len(angles_degrees)} angles: {angles_degrees}")
             
             return {
                 'saddle_points': saddle_points,
