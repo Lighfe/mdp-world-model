@@ -406,6 +406,16 @@ def train_drm_model(db_path,
         value_dim = v_true.shape[1]
         break
 
+    # For visualization later
+    points_config = None
+    if system_type == 'saddle_system':
+        saddle_config = get_saddle_configuration(db_path)
+        if saddle_config:
+            points_config = {
+                'points': saddle_config['saddle_points'],
+                'angles_degrees': saddle_config['angles_degrees']
+            }
+
 
     # Update checkpoint config to use actual dimensions
     checkpoint_config = {
@@ -1050,15 +1060,6 @@ def train_drm_model(db_path,
     # Visualize Modl Architecture
     #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
     #visualize_model_architecture(model, arch_vis_path)
-
-    points_config = None
-    if system_type == 'saddle_system':
-        saddle_config = get_saddle_configuration(db_path)
-        if saddle_config:
-            points_config = {
-                'points': saddle_config['saddle_points'],
-                'angles_degrees': saddle_config['angles_degrees']
-            }
 
     # Visualize the state space
     # state_vis_path = os.path.join(output_dir, f"states_{run_id}.png")
