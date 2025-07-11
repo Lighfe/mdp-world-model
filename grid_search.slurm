@@ -24,20 +24,7 @@ mkdir -p log
 
 # Load modules and activate environment
 module load anaconda
-echo "Activating conda environment..."
-
-# Try different activation methods
-if command -v conda &> /dev/null; then
-    echo "Using conda activate..."
-    conda activate mdp-world-model
-else
-    echo "Using source activate..."
-    source activate mdp-world-model
-fi
-
-# Verify environment activation
-echo "Current conda environment: $CONDA_DEFAULT_ENV"
-echo "Python path: $(which python)"
+source activate mdp-world-model
 
 # Check GPU
 echo "Checking GPU availability..."
