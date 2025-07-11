@@ -20,9 +20,27 @@ echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
 # Create log directory if it doesn't exist
 mkdir -p log
 
-# Load modules and activate environment
+# Load modules and initialize conda
 module load anaconda
-source activate mdp-world-model
+echo "Initializing conda..."
+
+# Initialize conda for bash shell
+eval "$(conda shell.bash hook)"
+
+# Alternative: Use direct path if conda command still not available
+if ! command -v conda &> /dev/null; then
+    echo "Conda command not found, trying direct initialization..."
+    # Use the base conda path from your environment list
+    source /p/system/packages/tools/miniforge/25.3.0-3/etc/profile.d/conda.sh
+fi
+
+echo "Activating conda environment..."
+conda activate mdp-world-model
+
+# Verify environment activation
+echo "Current conda environment: $CONDA_DEFAULT_ENV"
+echo "Python path: $(which python)"
+echo "Python version: $(python --version)"
 
 # Check GPU
 echo "Checking GPU availability..."
