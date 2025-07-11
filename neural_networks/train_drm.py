@@ -180,6 +180,9 @@ def extract_state_assignment_data(model, transformations, device, num_states,
     # Set default bounds if not provided
     if bounds is None:
         bounds = [(-5, 5), (-5, 5)]
+
+    # Unpack the transformation functions (following pattern from other functions)
+    forward_transforms, _, _ = zip(*transformations)
     
     # Generate grid points in original space
     x_range = np.linspace(bounds[0][0], bounds[0][1], grid_size)
@@ -193,8 +196,8 @@ def extract_state_assignment_data(model, transformations, device, num_states,
     transformed_points = []
     for point in grid_points:
         transformed_point = [
-            transformations[0](point[0]),  # x1 transform
-            transformations[1](point[1])   # x2 transform  
+            forward_transforms[0](point[0]),  # x1 transform
+            forward_transforms[1](point[1])   # x2 transform  
         ]
         transformed_points.append(transformed_point)
     
