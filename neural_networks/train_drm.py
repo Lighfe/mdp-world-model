@@ -156,7 +156,7 @@ def run_layer_probing(model, probing_loader, device, system_type, db_path):
         'embedding_accuracy': embedding_acc
     }
 
-def extract_state_assignment_data(model, transformations, device, num_states, 
+def extract_state_assignment_data(model, device, num_states, 
                                 system_type, bounds=None, grid_size=100, 
                                 epoch=None, softmax_temp=1.0):
     """
@@ -180,9 +180,6 @@ def extract_state_assignment_data(model, transformations, device, num_states,
     # Set default bounds if not provided
     if bounds is None:
         bounds = [(-5, 5), (-5, 5)]
-
-    # Unpack the transformation functions (following pattern from other functions)
-    forward_transforms, _, _ = zip(*transformations)
     
     # Generate grid points in original space
     x_range = np.linspace(bounds[0][0], bounds[0][1], grid_size)
@@ -203,7 +200,7 @@ def extract_state_assignment_data(model, transformations, device, num_states,
     
     # Create DataFrame
     df_data = []
-    for i, (orig_point, trans_point) in enumerate(grid_points):
+    for i, orig_point in enumerate(grid_points):
         row = {
             'x1': orig_point[0],
             'x2': orig_point[1], 
@@ -785,7 +782,6 @@ def train_drm_model(db_path,
             
             epoch_data = extract_state_assignment_data(
                 model=model,
-                transformations=[transformation, transformation],
                 device=device,
                 num_states=num_states,
                 system_type=system_type,
