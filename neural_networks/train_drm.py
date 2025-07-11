@@ -192,44 +192,21 @@ def extract_state_assignment_data(model, transformations, device, num_states,
     # Flatten grid points
     grid_points = np.column_stack([xx.ravel(), yy.ravel()])
     
-    # Apply transformations to get model input space
-    transformed_points = []
-    for point in grid_points:
-        transformed_point = [
-            forward_transforms[0](point[0]),  # x1 transform
-            forward_transforms[1](point[1])   # x2 transform  
-        ]
-        transformed_points.append(transformed_point)
-    
-    transformed_points = np.array(transformed_points)
-    
     # Get model predictions
     model.eval()
     with torch.no_grad():
-        obs_tensor = torch.FloatTensor(transformed_points).to(device)
+        obs_tensor = torch.FloatTensor(grid_points).to(device)
         
-        # Get logits from encoder
-        if hasattr(model, 'encoder'):
-            logits = model.encoder(obs_tensor)
-        else:
-            # Fallback - try to get state probabilities directly
-            state_probs = model.get_state_probabilities(obs_tensor, soft=True)
-            logits = None
-        
-        # Apply softmax with specified temperature
-        if logits is not None:
-            state_probs = F.softmax(logits / softmax_temp, dim=1)
+        state_probs = model.get_state_probs(obs_tensor, training=False, soft=True)
         
         state_probs = state_probs.cpu().numpy()
     
     # Create DataFrame
     df_data = []
-    for i, (orig_point, trans_point) in enumerate(zip(grid_points, transformed_points)):
+    for i, (orig_point, trans_point) in enumerate(grid_points):
         row = {
             'x1': orig_point[0],
             'x2': orig_point[1], 
-            'transformed_x1': trans_point[0],
-            'transformed_x2': trans_point[1],
             'grid_idx': i
         }
         
