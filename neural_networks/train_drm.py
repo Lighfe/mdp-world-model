@@ -157,7 +157,7 @@ def run_layer_probing(model, probing_loader, device, system_type, db_path):
     }
 
 def extract_state_assignment_data(model, transformations, device, num_states, 
-                                system_type, bounds=None, grid_size=50, 
+                                system_type, bounds=None, grid_size=100, 
                                 epoch=None, softmax_temp=1.0):
     """
     Extract state assignment data for visualization without creating plots.
@@ -866,7 +866,7 @@ def train_drm_model(db_path,
                 output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
                 epoch_frequency=1,
                 create_gif=True,
-                gif_duration=0.2
+                gif_duration=0.3
             )
         print(f"Created state evolution GIF")
 
