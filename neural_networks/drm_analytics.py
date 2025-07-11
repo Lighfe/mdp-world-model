@@ -99,13 +99,13 @@ def analyze_experiment_results(base_dir, group_by=None, metrics=None, aggregate_
     # Group and aggregate if requested
     if group_by is not None and metrics is not None:
         grouped = df.groupby(group_by)[metrics]
-        return grouped.agg(['mean', 'std', 'count'])
+        return grouped.agg(['mean', 'count'])
     elif group_by is not None:
         # Group by specified columns, aggregate all numeric columns
         numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
         if numeric_cols:
             grouped = df.groupby(group_by)[numeric_cols]
-            return grouped.agg(['mean', 'std', 'count'])
+            return grouped.agg(['mean', 'count'])
         else:
             return df.groupby(group_by).size().to_frame('count')
     elif metrics is not None:

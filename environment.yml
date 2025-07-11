@@ -19,3 +19,4 @@ dependencies:
   - psutil
   - graphviz=8.1.0  
   - python-graphviz=0.20.1 
+  - imageio=2.36.0

@@ -14,6 +14,10 @@ import torch.optim as optim
 import psutil
 import copy
 
+import pandas as pd
+import pickle
+import torch.nn.functional as F
+
 # Define project root at the module level
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -30,7 +34,8 @@ from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
     plot_training_curves, plot_regulization_metrics,
-    analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics
+    analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
+    create_state_viz_from_data, analyze_state_assignment_evolution
 )
 
 def set_all_seeds(seed):
@@ -151,6 +156,110 @@ def run_layer_probing(model, probing_loader, device, system_type, db_path):
         'embedding_accuracy': embedding_acc
     }
 
+def extract_state_assignment_data(model, transformations, device, num_states, 
+                                system_type, bounds=None, grid_size=50, 
+                                epoch=None, softmax_temp=1.0):
+    """
+    Extract state assignment data for visualization without creating plots.
+    
+    Args:
+        model: Trained DRM model
+        transformations: List of transformation functions for each dimension
+        device: PyTorch device
+        num_states: Number of discrete states
+        system_type: Type of system ('tech_substitution', 'saddle_system')
+        bounds: [(x1_min, x1_max), (x2_min, x2_max)] or None for defaults
+        grid_size: Number of points per dimension (grid_size x grid_size total)
+        epoch: Current epoch number (for tracking)
+        softmax_temp: Temperature for softmax (default 1.0 for visualization)
+    
+    Returns:
+        pd.DataFrame: Contains grid points, transformations, and state probabilities
+    """
+    
+    # Set default bounds if not provided
+    if bounds is None:
+        bounds = [(-5, 5), (-5, 5)]
+    
+    # Generate grid points in original space
+    x_range = np.linspace(bounds[0][0], bounds[0][1], grid_size)
+    y_range = np.linspace(bounds[1][0], bounds[1][1], grid_size)
+    xx, yy = np.meshgrid(x_range, y_range)
+    
+    # Flatten grid points
+    grid_points = np.column_stack([xx.ravel(), yy.ravel()])
+    
+    # Apply transformations to get model input space
+    transformed_points = []
+    for point in grid_points:
+        transformed_point = [
+            transformations[0](point[0]),  # x1 transform
+            transformations[1](point[1])   # x2 transform  
+        ]
+        transformed_points.append(transformed_point)
+    
+    transformed_points = np.array(transformed_points)
+    
+    # Get model predictions
+    model.eval()
+    with torch.no_grad():
+        obs_tensor = torch.FloatTensor(transformed_points).to(device)
+        
+        # Get logits from encoder
+        if hasattr(model, 'encoder'):
+            logits = model.encoder(obs_tensor)
+        else:
+            # Fallback - try to get state probabilities directly
+            state_probs = model.get_state_probabilities(obs_tensor, soft=True)
+            logits = None
+        
+        # Apply softmax with specified temperature
+        if logits is not None:
+            state_probs = F.softmax(logits / softmax_temp, dim=1)
+        
+        state_probs = state_probs.cpu().numpy()
+    
+    # Create DataFrame
+    df_data = []
+    for i, (orig_point, trans_point) in enumerate(zip(grid_points, transformed_points)):
+        row = {
+            'x1': orig_point[0],
+            'x2': orig_point[1], 
+            'transformed_x1': trans_point[0],
+            'transformed_x2': trans_point[1],
+            'grid_idx': i
+        }
+        
+        # Add state probabilities
+        for state_idx in range(num_states):
+            row[f'state_{state_idx}_prob'] = state_probs[i, state_idx]
+        
+        # Add dominant state and its probability
+        dominant_state = np.argmax(state_probs[i])
+        row['dominant_state'] = dominant_state
+        row['dominant_prob'] = state_probs[i, dominant_state]
+        
+        # Add metadata
+        if epoch is not None:
+            row['epoch'] = epoch
+        row['softmax_temp'] = softmax_temp
+        row['system_type'] = system_type
+        
+        df_data.append(row)
+    
+    df = pd.DataFrame(df_data)
+    
+    # Add grid metadata as attributes
+    df.attrs = {
+        'grid_size': grid_size,
+        'bounds': bounds,
+        'num_states': num_states,
+        'x_range': x_range.tolist(),
+        'y_range': y_range.tolist()
+    }
+    
+    return df
+
 def train_drm_model(db_path, 
                     system_type,
                     output_dir="./neural_networks/output",
@@ -162,10 +271,9 @@ def train_drm_model(db_path,
                     batch_size=64, 
                     epochs=100,
                     learning_rate=1e-4, 
-                    early_stopping_patience=10,
                     num_states=4,
                     hidden_dim=128,
-                    checkpoint_every=10,
+                    checkpoint_every=25,
                     state_loss_weight=0.5, 
                     value_loss_weight=1.5,
                     predictor_type='bilinear',
@@ -208,7 +316,6 @@ def train_drm_model(db_path,
         batch_size: Batch size for training
         epochs: Number of training epochs
         learning_rate: Learning rate for the optimizer
-        early_stopping_patience: Number of epochs to wait before early stopping
         num_states: Number of discrete states in the model
         hidden_dim: Hidden dimension size in the model
         checkpoint_every: Save checkpoint every N epochs
@@ -423,9 +530,11 @@ def train_drm_model(db_path,
         "val_vicreg_variance": [],
         "val_vicreg_covariance": []
     }
-    
-    best_val_loss = float("inf")
-    patience_counter = 0
+
+    # Initialize state assignment data collection 
+    state_assignment_data = []
+    collect_every_n_epochs = 2 
+
     
     # Start training loop
     print(f"Starting training for {epochs} epochs...")
@@ -660,8 +769,8 @@ def train_drm_model(db_path,
             f"Div: {val_div_loss:.4f}, Entropy: {val_entropy_loss:.4f})")
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
 
-        #TODO: put back to 5 and 25
-        if epoch == 5 or epoch == 10 or epoch == 25:
+
+        if epoch == 20 or epoch == 50:
 
             # Visualize the state space
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
@@ -679,25 +788,25 @@ def train_drm_model(db_path,
                 # TODO: move bounds to argparser
                 bounds=[(-5, 5), (-5, 5)]
             )
-
-        # Check for improvement
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            patience_counter = 0
+        
+        # Collect state assignment data
+        if epoch % collect_every_n_epochs == 0:
+            print(f"Collecting state assignment data for epoch {epoch}...")
             
-            # Save best model
-            best_model_path = os.path.join(output_dir, f"drm_best_{run_id}.pt")
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'loss': best_val_loss,
-                'config': checkpoint_config
-            }, best_model_path)
-            print(f"Saved best model to {best_model_path}")
-        else:
-            patience_counter += 1
+            epoch_data = extract_state_assignment_data(
+                model=model,
+                transformations=[transformation, transformation],
+                device=device,
+                num_states=num_states,
+                system_type=system_type,
+                bounds=[(-5, 5), (-5, 5)] if points_config else None,
+                epoch=epoch,
+                softmax_temp=1.0  # Standard visualization temperature
+            )
+            
+            state_assignment_data.append(epoch_data)
 
+        # TODO look at learning rate scheduling 
         # Apply learning rate scheduler after validation
         if use_lr_scheduler and (not use_warmup or epoch >= warmup_epochs):
             if scheduler_type == 'plateau':
@@ -714,7 +823,7 @@ def train_drm_model(db_path,
         print(f"Current learning rate: {current_lr:.2e}")
             
         # Save checkpoint every N epochs
-        if (epoch + 1) % checkpoint_every == 0:
+        if (epoch + 1) % checkpoint_every == 0 or (epoch+1) == 10:
             checkpoint_path = os.path.join(output_dir, f"drm_checkpoint_epoch{epoch+1}_{run_id}.pt")
             torch.save({
                 'epoch': epoch,
@@ -725,11 +834,35 @@ def train_drm_model(db_path,
                 'config': checkpoint_config
             }, checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
+
+    # After training, combine all epoch data
+    if state_assignment_data:
+        print("Combining state assignment data from all epochs...")
+        combined_df = pd.concat(state_assignment_data, ignore_index=True)
         
-        # Early stopping
-        if patience_counter >= early_stopping_patience:
-            print(f"Early stopping triggered after {epoch+1} epochs")
-            break
+        # Save the data
+        data_path = os.path.join(output_dir, f"state_assignment_data_{run_id}.pkl")
+        with open(data_path, 'wb') as f:
+            pickle.dump(combined_df, f)
+        print(f"Saved state assignment data to {data_path}")
+
+        # TODO: Remove gif later
+        # create GIF of evolution
+        gif_result = create_state_viz_from_data(
+                df=combined_df,
+                output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
+                epoch_frequency=1,
+                create_gif=True,
+                gif_duration=0.2
+            )
+        print(f"Created state evolution GIF")
+
+        # Create analysis of state assignment evolution
+        analysis_path = os.path.join(output_dir, f"state_evolution_analysis_{run_id}.png")
+        analysis_result = analyze_state_assignment_evolution(combined_df, analysis_path)
+        print(f"Created state evolution analysis: {analysis_path}")
+        
+
 
     # Final evaluation on test set
     print("Evaluating on test set...")
@@ -1009,7 +1142,6 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
-    parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
     parser.add_argument('--num_states', type=int, default=4, help='Number of discrete states')
     parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension size')
     parser.add_argument('--state_loss_weight', type=float, default=1.0, help='Stateloss weight')
@@ -1134,10 +1266,9 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         epochs=args.epochs,
         learning_rate=args.lr,
-        early_stopping_patience=args.patience,
         num_states=args.num_states,
         hidden_dim=args.hidden_dim,
-        checkpoint_every=10,
+        checkpoint_every=25,
         state_loss_weight=args.state_loss_weight,
         value_loss_weight=args.value_loss_weight,
         predictor_type=args.predictor_type,
