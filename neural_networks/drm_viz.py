@@ -15,6 +15,8 @@ import torch.nn as nn
 import re
 from collections import defaultdict
 
+import tempfile
+import shutil
 import imageio
 
 from pathlib import Path
@@ -333,10 +335,6 @@ def create_state_viz_from_data(df, output_path=None, epochs=None, epoch_frequenc
     Returns:
         dict: Dictionary with information about created files
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import pandas as pd
-    from pathlib import Path
     
     # Get available epochs
     if 'epoch' in df.columns:
@@ -362,122 +360,134 @@ def create_state_viz_from_data(df, output_path=None, epochs=None, epoch_frequenc
     
     created_files = []
     temp_files = []  # For GIF creation
+    temp_dir = None
     
-    for epoch in epochs_to_plot:
-        # Filter data for this epoch
-        if epoch is not None:
-            epoch_df = df[df['epoch'] == epoch].copy()
-            epoch_suffix = f"_epoch_{epoch}"
-        else:
-            epoch_df = df.copy()
-            epoch_suffix = ""
-        
-        if len(epoch_df) == 0:
-            continue
-            
-        # Determine subplot layout based on number of states
-        if num_states <= 4:
-            nrows, ncols = 2, 2
-        elif num_states <= 6:
-            nrows, ncols = 2, 3
-        elif num_states <= 9:
-            nrows, ncols = 3, 3
-        elif num_states <= 12:
-            nrows, ncols = 3, 4
-        else:
-            nrows, ncols = 4, 4  # Max 4x4 grid, limit to 16 states
-        
-        # Adjust figure size based on layout
-        fig_width = ncols * (figsize[0] / 2)
-        fig_height = nrows * (figsize[1] / 2)
-        
-        # Create the visualization
-        fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height))
-        if nrows * ncols == 1:
-            axes = [axes]
-        else:
-            axes = axes.ravel()
-        
-        # Get grid coordinates
-        x1_vals = epoch_df['x1'].values.reshape(grid_size, grid_size)
-        x2_vals = epoch_df['x2'].values.reshape(grid_size, grid_size)
-        
-        # Plot each state
-        for state_idx in range(min(num_states, nrows * ncols)):
-            ax = axes[state_idx]
-            
-            # Get state probabilities and reshape to grid
-            state_col = f'state_{state_idx}_prob'
-            if state_col in epoch_df.columns:
-                state_probs = epoch_df[state_col].values.reshape(grid_size, grid_size)
+    # Create temp directory if creating GIF
+    if create_gif and len(epochs_to_plot) > 1:
+        temp_dir = tempfile.mkdtemp()
+    
+    try:
+        for epoch in epochs_to_plot:
+            # Filter data for this epoch
+            if epoch is not None:
+                epoch_df = df[df['epoch'] == epoch].copy()
+                epoch_suffix = f"_epoch_{epoch}"
             else:
-                # Fallback: create empty grid
-                state_probs = np.zeros((grid_size, grid_size))
+                epoch_df = df.copy()
+                epoch_suffix = ""
             
-            # Create heatmap
-            im = ax.imshow(state_probs, extent=[bounds[0][0], bounds[0][1], 
-                                               bounds[1][0], bounds[1][1]], 
-                          origin='lower', cmap='viridis', vmin=0, vmax=1, 
-                          aspect='auto', interpolation='bilinear')
+            if len(epoch_df) == 0:
+                continue
+                
+            # Determine subplot layout based on number of states
+            if num_states <= 4:
+                nrows, ncols = 2, 2
+            elif num_states <= 6:
+                nrows, ncols = 2, 3
+            elif num_states <= 9:
+                nrows, ncols = 3, 3
+            elif num_states <= 12:
+                nrows, ncols = 3, 4
+            else:
+                nrows, ncols = 4, 4  # Max 4x4 grid, limit to 16 states
             
-            # Styling
-            ax.set_xlabel('x1')
-            ax.set_ylabel('x2')
-            ax.set_title(f'State {state_idx + 1}')
-            ax.grid(True, alpha=0.3)
+            # Adjust figure size based on layout
+            fig_width = ncols * (figsize[0] / 2)
+            fig_height = nrows * (figsize[1] / 2)
             
-            # Add colorbar
-            cbar = plt.colorbar(im, ax=ax)
-            cbar.set_label('State Assignment Strength')
+            # Create the visualization
+            fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height))
+            if nrows * ncols == 1:
+                axes = [axes]
+            else:
+                axes = axes.ravel()
+            
+            # Get grid coordinates
+            x1_vals = epoch_df['x1'].values.reshape(grid_size, grid_size)
+            x2_vals = epoch_df['x2'].values.reshape(grid_size, grid_size)
+            
+            # Plot each state
+            for state_idx in range(min(num_states, nrows * ncols)):
+                ax = axes[state_idx]
+                
+                # Get state probabilities and reshape to grid
+                state_col = f'state_{state_idx}_prob'
+                if state_col in epoch_df.columns:
+                    state_probs = epoch_df[state_col].values.reshape(grid_size, grid_size)
+                else:
+                    # Fallback: create empty grid
+                    state_probs = np.zeros((grid_size, grid_size))
+                
+                # Create heatmap
+                im = ax.imshow(state_probs, extent=[bounds[0][0], bounds[0][1], 
+                                                   bounds[1][0], bounds[1][1]], 
+                              origin='lower', cmap='viridis', vmin=0, vmax=1, 
+                              aspect='auto', interpolation='bilinear')
+                
+                # Styling
+                ax.set_xlabel('x1')
+                ax.set_ylabel('x2')
+                ax.set_title(f'State {state_idx + 1}')
+                ax.grid(True, alpha=0.3)
+                
+                # Add colorbar
+                cbar = plt.colorbar(im, ax=ax)
+                cbar.set_label('State Assignment Strength')
+            
+            # Hide unused subplots
+            for idx in range(num_states, len(axes)):
+                axes[idx].set_visible(False)
+            
+            # Overall title
+            if epoch is not None:
+                fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
+            else:
+                fig.suptitle('State Space Visualization', fontsize=14)
+            
+            plt.tight_layout()
+            
+            # Save or store for GIF
+            if create_gif and len(epochs_to_plot) > 1:
+                temp_path = os.path.join(temp_dir, f"state_viz_epoch_{epoch}.png")
+                plt.savefig(temp_path, dpi=150, bbox_inches='tight')
+                temp_files.append(temp_path)
+                plt.close()
+            elif output_path:
+                file_path = f"{output_path}{epoch_suffix}.png"
+                plt.savefig(file_path, dpi=150, bbox_inches='tight')
+                created_files.append(file_path)
+                plt.close()
+            else:
+                plt.show()
         
-        # Hide unused subplots
-        for idx in range(num_states, len(axes)):
-            axes[idx].set_visible(False)
-        
-        # Overall title
-        if epoch is not None:
-            fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
-        else:
-            fig.suptitle('State Space Visualization', fontsize=14)
-        
-        plt.tight_layout()
-        
-        # Save or store for GIF
-        if create_gif and len(epochs_to_plot) > 1:
-            temp_path = f"temp_state_viz_epoch_{epoch}.png"
-            plt.savefig(temp_path, dpi=150, bbox_inches='tight')
-            temp_files.append(temp_path)
-            plt.close()
-        elif output_path:
-            file_path = f"{output_path}{epoch_suffix}.png"
-            plt.savefig(file_path, dpi=150, bbox_inches='tight')
-            created_files.append(file_path)
-            plt.close()
-        else:
-            plt.show()
-    
-    # Create GIF if requested
-    if create_gif and len(temp_files) > 1 and output_path:
-        try:
-            gif_path = f"{output_path}_animation.gif"
-            
-            with imageio.get_writer(gif_path, mode='I', duration=gif_duration) as writer:
-                for temp_file in temp_files:
-                    image = imageio.imread(temp_file)
-                    writer.append_data(image)
-            
-            created_files.append(gif_path)
-            print(f"Created GIF with {len(temp_files)} frames: {gif_path}")
-            
-        except ImportError:
-            print("Warning: imageio not available for GIF creation")
-        
-        # Clean up temp files
-        for temp_file in temp_files:
+        # Create GIF if requested
+        if create_gif and len(temp_files) > 1 and output_path:
             try:
-                Path(temp_file).unlink()
-            except:
-                pass
+                gif_path = f"{output_path}_animation.gif"
+                
+                with imageio.get_writer(gif_path, mode='I', duration=gif_duration) as writer:
+                    for temp_file in temp_files:
+                        image = imageio.imread(temp_file)
+                        writer.append_data(image)
+                
+                created_files.append(gif_path)
+                print(f"Created GIF with {len(temp_files)} frames: {gif_path}")
+                
+            except ImportError:
+                print("Warning: imageio not available for GIF creation")
+                print("Individual PNG files saved instead")
+                
+                # If GIF creation fails, save individual files instead
+                if output_path:
+                    for i, temp_file in enumerate(temp_files):
+                        final_path = f"{output_path}_frame_{i:03d}.png"
+                        shutil.copy2(temp_file, final_path)
+                        created_files.append(final_path)
+    
+    finally:
+        # Clean up temp directory
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
     
     return {
         'created_files': created_files,
@@ -497,6 +507,9 @@ def analyze_state_assignment_evolution(df, output_path=None):
     Returns:
         dict: Analysis results
     """
+
+    # Paul Tol's muted color scheme for colorblind accessibility
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
     
     if 'epoch' not in df.columns:
         print("No epoch information found in DataFrame")
@@ -517,12 +530,12 @@ def analyze_state_assignment_evolution(df, output_path=None):
         for state_idx in range(num_states):
             epoch_metrics[f'state_{state_idx}_usage'] = state_usage.get(state_idx, 0.0)
         
-        # Minimum probabilities per state
+        # Mean probabilities per state
         for state_idx in range(num_states):
             state_col = f'state_{state_idx}_prob'
             if state_col in epoch_df.columns:
-                min_prob = epoch_df[state_col].min()
-                epoch_metrics[f'state_{state_idx}_min'] = min_prob
+                mean_prob = epoch_df[state_col].mean()  
+                epoch_metrics[f'state_{state_idx}_mean'] = mean_prob
         
         # Sharpness: per-grid-point entropy
         state_prob_cols = [f'state_{i}_prob' for i in range(num_states) if f'state_{i}_prob' in epoch_df.columns]
@@ -570,13 +583,15 @@ def analyze_state_assignment_evolution(df, output_path=None):
         for state_idx in range(num_states):
             usage_col = f'state_{state_idx}_usage'
             if usage_col in metrics_df.columns:
+                color = tol_muted[state_idx % len(tol_muted)]
                 ax.plot(metrics_df['epoch'], metrics_df[usage_col] * 100, 
-                       label=f'State {state_idx}', marker='o', linewidth=2)
+                       label=f'State {state_idx + 1}', marker='o', 
+                       linewidth=2, color=color)
         ax.set_xlabel('Epoch')
-        ax.set_ylabel('Usage Frequency (%)')
-        ax.set_title('State Usage Over Training')
+        ax.set_ylabel('Dominant State (%)')
+        ax.set_title('Dominant State Assignments Over Training')
         ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.grid(True, alpha=0.4)
         
         # 2. Assignment sharpness over time (with distribution)
         ax = axes[0, 1]
@@ -596,20 +611,21 @@ def analyze_state_assignment_evolution(df, output_path=None):
         ax.set_ylabel('Per-Point Entropy (Sharpness)')
         ax.set_title('Assignment Sharpness Over Training\n(Lower = More Discrete)')
         ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.grid(True, alpha=0.4)
         
-        # 3. Minimum probabilities per state
+        # 3. Mean probabilities per state
         ax = axes[1, 0]
         for state_idx in range(num_states):
-            min_col = f'state_{state_idx}_min'
-            if min_col in metrics_df.columns:
-                ax.plot(metrics_df['epoch'], metrics_df[min_col], 
-                       label=f'State {state_idx}', marker='s', linewidth=2)
+            mean_col = f'state_{state_idx}_mean' 
+            if mean_col in metrics_df.columns:
+                color = tol_muted[state_idx % len(tol_muted)]
+                ax.plot(metrics_df['epoch'], metrics_df[mean_col], 
+                       label=f'State {state_idx + 1}', marker='o', 
+                       linewidth=2, color=color)
         ax.set_xlabel('Epoch')
-        ax.set_ylabel('Minimum Probability')
-        ax.set_title('Minimum State Probabilities\n(Collapse Detection)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.set_ylabel('Mean Probability')
+        ax.set_title('Average State Assignment Strength')
+        ax.grid(True, alpha=0.4)
         
         # 4. Stability metrics (both on same scale)
         ax = axes[1, 1]
@@ -617,15 +633,15 @@ def analyze_state_assignment_evolution(df, output_path=None):
             # Remove first epoch (no stability data)
             stability_df = metrics_df.dropna(subset=['dominant_stability'])
             ax.plot(stability_df['epoch'], stability_df['dominant_stability'], 
-                   color='green', marker='o', linewidth=2, label='Dominant State Stability')
+            color='#AA4499', marker='o', linewidth=2, label='Dominant State Stability')  # Purple
             ax.plot(stability_df['epoch'], stability_df['probability_stability'], 
-                   color='orange', marker='^', linewidth=2, label='Probability Stability')
+            color='#DDDDDD', marker='^', linewidth=2, label='Probability Stability')    # Gray
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Stability (%)')
         ax.set_title('Assignment Stability Between Epochs')
         ax.legend()
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, 100)  # Both are percentages
+        ax.grid(True, alpha=0.4)
+        ax.set_ylim(50, 100)  # Both are percentages
         
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
