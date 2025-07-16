@@ -185,12 +185,7 @@ def load_trained_model(model_path, device='cuda'):
     # Check what keys exist in the state dict to infer missing config
     state_dict_keys = set(checkpoint['model_state_dict'].keys())
     print(f"State dict keys (first 10): {list(state_dict_keys)[:10]}")
-    
-    # Infer missing config parameters from state dict
-    has_target_encoder = any(key.startswith('target_encoder') for key in state_dict_keys)
-    if has_target_encoder and not config.get('use_target_encoder', False):
-        print("⚠️  Detected target_encoder in state dict but not in config. Setting use_target_encoder=True")
-        config['use_target_encoder'] = True
+
     
     # Recreate the model with corrected config
     model = DiscreteRepresentationsModel(

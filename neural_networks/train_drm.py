@@ -18,6 +18,9 @@ import pandas as pd
 import pickle
 import torch.nn.functional as F
 
+from torch.utils.data import WeightedRandomSampler
+from collections import Counter
+
 # Define project root at the module level
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -49,16 +52,53 @@ def set_all_seeds(seed):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+def calculate_state_weights(targets):
+    """
+    Calculate sample-level weights based on ground truth state frequency
+    
+    Args:
+        targets: [num_samples, num_halfspaces] binary targets
+    
+    Returns:
+        sample_weights: [num_samples] weight for each sample
+    """
+    # Convert each sample's halfspace pattern to a state ID
+    state_ids = []
+    for i in range(targets.shape[0]):
+        # Convert binary pattern to unique state ID
+        state_pattern = tuple(targets[i].numpy())
+        state_ids.append(state_pattern)
+    
+    # Count frequency of each state
+    state_counts = Counter(state_ids)
+    total_samples = len(state_ids)
+    
+    print("State distribution:")
+    for state, count in state_counts.items():
+        print(f"  State {state}: {count} samples ({count/total_samples*100:.1f}%)")
+    
+    # Calculate inverse frequency weights
+    sample_weights = []
+    for state_id in state_ids:
+        # Weight = 1 / (num_states * frequency)
+        weight = total_samples / (len(state_counts) * state_counts[state_id])
+        sample_weights.append(weight)
+    
+    return torch.tensor(sample_weights, dtype=torch.float32)
+
 def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_size=64):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
     input_dim = features.shape[1]
     num_saddles = targets.shape[1]
     probe = LinearProbe(input_dim, num_saddles).to(device)
     
-    # Create DataLoader for batching
+    # Calculate weights from the extracted targets
+    sample_weights = calculate_state_weights(targets)
+    
+    # Create dataset and weighted sampler
     dataset = torch.utils.data.TensorDataset(features, targets)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    weighted_sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, sampler=weighted_sampler)
     
     optimizer = torch.optim.Adam(probe.parameters(), lr=lr)
     criterion = nn.BCELoss()
@@ -66,22 +106,78 @@ def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_si
     for epoch in range(num_epochs):
         for batch_features, batch_targets in dataloader:
             batch_features, batch_targets = batch_features.to(device), batch_targets.to(device)
-            
             optimizer.zero_grad()
             predictions = probe(batch_features)
             loss = criterion(predictions, batch_targets)
             loss.backward()
             optimizer.step()
         
-        # Evaluate on full dataset every 10 epochs
-        if (epoch + 1) % 10 == 0:
+        # Evaluate on full dataset
+        if (epoch==0) or (epoch==10) or (epoch==40):
             with torch.no_grad():
                 full_predictions = probe(features.to(device))
                 binary_preds = (full_predictions > 0.5).float()
-                accuracy = (binary_preds == targets.to(device)).float().mean()
-                print(f"  Epoch {epoch+1}/{num_epochs} - Accuracy: {accuracy:.4f}")
+                targets_device = targets.to(device)
+                
+                # Balanced accuracy - calculate accuracy per state, then average
+                unique_states = []
+                state_accuracies = []
+                
+                # Get unique state patterns
+                for i in range(targets_device.shape[0]):
+                    state_pattern = tuple(targets_device[i].cpu().numpy())
+                    if state_pattern not in unique_states:
+                        unique_states.append(state_pattern)
+                
+                # Calculate accuracy for each state
+                for state_pattern in unique_states:
+                    # Find samples with this state
+                    state_mask = torch.zeros(targets_device.shape[0], dtype=torch.bool)
+                    for i in range(targets_device.shape[0]):
+                        if tuple(targets_device[i].cpu().numpy()) == state_pattern:
+                            state_mask[i] = True
+                    
+                    if state_mask.sum() > 0:
+                        state_preds = binary_preds[state_mask]
+                        state_targets = targets_device[state_mask]
+                        state_acc = (state_preds == state_targets).all(dim=1).float().mean()
+                        state_accuracies.append(state_acc.item())
+                
+                # Balanced accuracy = mean of per-state accuracies
+                state_accuracy = np.mean(state_accuracies)
+                
+                print(f" Epoch {epoch+1}/{num_epochs} - Balanced State Acc: {state_accuracy:.4f}")
     
-    return probe, accuracy.item()
+    # Final evaluation with same balanced accuracy calculation
+    with torch.no_grad():
+        full_predictions = probe(features.to(device))
+        binary_preds = (full_predictions > 0.5).float()
+        targets_device = targets.to(device)
+        
+        # Balanced accuracy calculation (same as above)
+        unique_states = []
+        state_accuracies = []
+        
+        for i in range(targets_device.shape[0]):
+            state_pattern = tuple(targets_device[i].cpu().numpy())
+            if state_pattern not in unique_states:
+                unique_states.append(state_pattern)
+        
+        for state_pattern in unique_states:
+            state_mask = torch.zeros(targets_device.shape[0], dtype=torch.bool)
+            for i in range(targets_device.shape[0]):
+                if tuple(targets_device[i].cpu().numpy()) == state_pattern:
+                    state_mask[i] = True
+            
+            if state_mask.sum() > 0:
+                state_preds = binary_preds[state_mask]
+                state_targets = targets_device[state_mask]
+                state_acc = (state_preds == state_targets).all(dim=1).float().mean()
+                state_accuracies.append(state_acc.item())
+        
+        state_accuracy = np.mean(state_accuracies)
+    
+    return probe, state_accuracy
 
 def extract_features_and_targets(model, probing_loader, device, system_type):
     """
