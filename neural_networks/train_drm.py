@@ -919,7 +919,7 @@ def train_drm_model(db_path,
             )
         
         # Collect state assignment data
-        if (epoch % collect_every_n_epochs == 0) or (epoch in (1, 2, 3)):
+        if (epoch % collect_every_n_epochs == 0) or (epoch in (0, 1, 2, 3)):
             print(f"Collecting state assignment data for epoch {epoch}...")
             
             epoch_data = extract_state_assignment_data(
@@ -928,7 +928,7 @@ def train_drm_model(db_path,
                 num_states=num_states,
                 system_type=system_type,
                 bounds=[(-5, 5), (-5, 5)] if points_config else None,
-                epoch=epoch,
+                epoch=epoch+1,
                 softmax_temp=1.0  # Standard visualization temperature
             )
             
