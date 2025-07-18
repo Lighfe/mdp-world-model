@@ -586,7 +586,7 @@ def analyze_state_assignment_evolution(df, output_path=None):
                 color = tol_muted[state_idx % len(tol_muted)]
                 ax.plot(metrics_df['epoch'], metrics_df[usage_col] * 100, 
                        label=f'State {state_idx + 1}', marker='o', 
-                       linewidth=2, color=color)
+                       markersize=3, linewidth=1.5, color=color)
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Dominant State (%)')
         ax.set_title('Dominant State Assignments Over Training')
@@ -621,7 +621,7 @@ def analyze_state_assignment_evolution(df, output_path=None):
                 color = tol_muted[state_idx % len(tol_muted)]
                 ax.plot(metrics_df['epoch'], metrics_df[mean_col], 
                        label=f'State {state_idx + 1}', marker='o', 
-                       linewidth=2, color=color)
+                       markersize=3, linewidth=1.5, color=color)
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Mean Probability')
         ax.set_title('Average State Assignment Strength')

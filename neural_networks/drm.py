@@ -408,7 +408,7 @@ def initialize_model_weights(model, encoder_init_method='xavier_uniform', bias=0
     if hasattr(model, 'target_encoder'):
         model._copy_weights(model.encoder, model.target_encoder)
 
-def init_encoder_with_method(encoder, method, num_states, bias=0.00):
+def init_encoder_with_method(encoder, method, num_states, bias=0.01):
     """Initialize encoder layers based on specified method"""
     
     for i, module in enumerate(encoder):
@@ -426,18 +426,18 @@ def init_encoder_with_method(encoder, method, num_states, bias=0.00):
                 
             elif method == 'he':
                 nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
-                module.bias.data.fill_(bias)
+                module.bias.data.fill_(0.00)
                 
             elif method == 'chaos':
                 if is_final_layer:
-                    # Final layer: use He initialization
-                    nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
-                    module.bias.data.fill_(bias)
-                else:
-                    # Early layers: chaos (high variance)
+                    # Final layers: chaos (high variance)
                     std = 3.0
                     nn.init.normal_(module.weight, mean=0, std=std)
                     nn.init.normal_(module.bias, mean=0, std=0.1)
+                else:
+                    # Early layers: use He initialization
+                    nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+                    module.bias.data.fill_(0.00)
             else:
                 raise ValueError(f"Unknown encoder_init_method: {method}")
 

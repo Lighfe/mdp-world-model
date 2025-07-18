@@ -613,7 +613,23 @@ def train_drm_model(db_path,
 
     # Initialize state assignment data collection 
     state_assignment_data = []
-    collect_every_n_epochs = 2 
+    collect_every_n_epochs = 2
+    collect_initial = True  
+    collect_early_batches = 50
+
+    # COLLECTION RIGHT AFTER INITIALIZATION (EPOCH 0)
+    if collect_initial:
+        print("Collecting initial state assignments (epoch 0)...")
+        epoch_0_data = extract_state_assignment_data(
+            model=model,
+            device=device,
+            num_states=num_states,
+            system_type=system_type,
+            bounds=[(-5, 5), (-5, 5)],
+            epoch=0,  # Epoch 0
+            softmax_temp=1.0
+        )
+        state_assignment_data.append(epoch_0_data)
 
     
     # Start training loop
@@ -722,6 +738,39 @@ def train_drm_model(db_path,
                 import traceback
                 traceback.print_exc()
                 continue
+
+        # EARLY BATCH COLLECTION (EPOCH 0.1)
+        if epoch == 0 and batch_idx == collect_early_batches:
+            print(f"Collecting early state assignments (epoch 0.1, after {collect_early_batches} batches)...")
+            model.eval()  # Switch to eval mode for collection
+            epoch_01_data = extract_state_assignment_data(
+                model=model,
+                device=device,
+                num_states=num_states,
+                system_type=system_type,
+                bounds=[(-5, 5), (-5, 5)],
+                epoch=0.1,  # Special epoch 0.1
+                softmax_temp=1.0
+            )
+            state_assignment_data.append(epoch_01_data)
+
+            # Visualize the state space
+            try:
+                state_vis_path = os.path.join(output_dir, f"states_after_batch{batch_idx}_{run_id}.png")
+                visualize_state_space(
+                    model=model,
+                    output_path=state_vis_path,
+                    transformations=[transformation, transformation],
+                    device=device,
+                    num_states=num_states,
+                    system_type=system_type,
+                    bounds=[(-5, 5), (-5, 5)]
+                )
+                print(f"Saved early state visualization to {state_vis_path}")
+            except Exception as e:
+                print(f"Warning: Failed to create early state visualization: {e}")
+
+            model.train() # set back to train mode
         
         # Average training losses
         num_batches = len(train_loader)
