@@ -102,6 +102,11 @@ class DiscreteRepresentationsModel(nn.Module):
         self.num_states = num_states
         self.value_dim = value_dim
 
+    def _copy_weights(self, src_model, tgt_model):
+        """Helper method to copy weights from source to target model"""
+        for src_param, tgt_param in zip(src_model.parameters(), tgt_model.parameters()):
+            tgt_param.data.copy_(src_param.data)
+
     
     def update_target_encoder(self):
         """Update target encoder using exponential moving average"""
