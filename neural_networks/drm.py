@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
+import copy
 
 from torch.utils.data import Dataset, DataLoader
 from sqlalchemy import create_engine, select, Table, MetaData
@@ -68,20 +69,8 @@ class DiscreteRepresentationsModel(nn.Module):
 
         # Create target encoder - initially a copy of the encoder
         if use_target_encoder:
-            self.target_encoder = nn.Sequential(
-                nn.Linear(obs_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, num_states)
-            )
-            # Copy weights from encoder to target encoder
-            self._copy_weights(self.encoder, self.target_encoder)
-            # Disable gradient computation for target encoder
+            self.target_encoder = copy.deepcopy(self.encoder)
+            # Disable gradients
             for param in self.target_encoder.parameters():
                 param.requires_grad = False
         
@@ -113,10 +102,6 @@ class DiscreteRepresentationsModel(nn.Module):
         self.num_states = num_states
         self.value_dim = value_dim
 
-    def _copy_weights(self, src_model, tgt_model):
-        """Helper method to copy weights from source to target model"""
-        for src_param, tgt_param in zip(src_model.parameters(), tgt_model.parameters()):
-            tgt_param.data.copy_(src_param.data)
     
     def update_target_encoder(self):
         """Update target encoder using exponential moving average"""
@@ -399,6 +384,65 @@ class DiscreteRepresentationsModel(nn.Module):
         if output_layer.bias is not None:
             output_layer.bias.data = output_layer.bias.data[sorted_indices]
     
+def initialize_model_weights(model, encoder_init_method='xavier_uniform', bias=0.01):
+    """
+    Initialize all model components with appropriate methods
+    
+    Args:
+        model: DiscreteRepresentationsModel instance
+        encoder_init_method: 'xavier_uniform', 'xavier_normal', 'chaos', 'he'
+    """
+    # Initialize encoder based on method
+    init_encoder_with_method(model.encoder, encoder_init_method, model.num_states, bias)
+    
+    # Predictor and value_net always use xavier_uniform
+    init_network_xavier_uniform(model.predictor, bias)
+    init_network_xavier_uniform(model.value_net, bias)
+    
+    # Target encoder gets copied automatically if it exists
+    if hasattr(model, 'target_encoder'):
+        model._copy_weights(model.encoder, model.target_encoder)
+
+def init_encoder_with_method(encoder, method, num_states, bias=0.00):
+    """Initialize encoder layers based on specified method"""
+    
+    for i, module in enumerate(encoder):
+        if isinstance(module, nn.Linear):
+            # Check if this is the final layer (outputs num_states)
+            is_final_layer = (module.out_features == num_states)
+            
+            if method == 'xavier_uniform':
+                nn.init.xavier_uniform_(module.weight)
+                module.bias.data.fill_(bias)
+                
+            elif method == 'xavier_normal':
+                nn.init.xavier_normal_(module.weight)
+                module.bias.data.fill_(bias)
+                
+            elif method == 'he':
+                nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+                module.bias.data.fill_(bias)
+                
+            elif method == 'chaos':
+                if is_final_layer:
+                    # Final layer: use He initialization
+                    nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+                    module.bias.data.fill_(bias)
+                else:
+                    # Early layers: chaos (high variance)
+                    std = 3.0
+                    nn.init.normal_(module.weight, mean=0, std=std)
+                    nn.init.normal_(module.bias, mean=0, std=0.1)
+            else:
+                raise ValueError(f"Unknown encoder_init_method: {method}")
+
+def init_network_xavier_uniform(network, bias=0.01):
+    """Initialize a network (predictor or value_net) with xavier_uniform"""
+    for module in network.modules():
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_uniform_(module.weight)
+            module.bias.data.fill_(bias)
+
 class BasePredictor(nn.Module):
     """Base class for predictor implementations"""
     def __init__(self, num_states, control_dim, hidden_dim, control_format="continuous"):

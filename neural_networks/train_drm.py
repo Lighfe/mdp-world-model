@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from neural_networks.system_registry import SystemType, get_system_config, get_transformation
 from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset, get_saddle_configuration
 from neural_networks.drm_loss import StableDRMLoss
-from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe
+from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe, initialize_model_weights
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
@@ -377,7 +377,8 @@ def train_drm_model(db_path,
                     vicreg_mu=25.0,
                     vicreg_nu=1.0,
                     vicreg_variance_target=0.4,
-                    vicreg_invariance_schedule=True
+                    vicreg_invariance_schedule=True,
+                    encoder_init_method="xavier_uniform"
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -521,13 +522,9 @@ def train_drm_model(db_path,
         value_activation=value_activation
     )
     
-    # Initialize model weights properly
-    def init_weights(m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            m.bias.data.fill_(0.01)
-    
-    model.apply(init_weights)
+    # initialize weights
+    initialize_model_weights(model, encoder_init_method=encoder_init_method)
+
     
     # Check if CUDA is available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -557,7 +554,7 @@ def train_drm_model(db_path,
     )
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
-        # Setup learning rate scheduling if enabled
+    # Setup learning rate scheduling if enabled
     if use_warmup:
         # If warmup is enabled, start with a lower learning rate
         for param_group in optimizer.param_groups:
@@ -873,7 +870,7 @@ def train_drm_model(db_path,
             )
         
         # Collect state assignment data
-        if epoch % collect_every_n_epochs == 0:
+        if (epoch % collect_every_n_epochs == 0) or (epoch in (1, 2, 3)):
             print(f"Collecting state assignment data for epoch {epoch}...")
             
             epoch_data = extract_state_assignment_data(
@@ -935,7 +932,7 @@ def train_drm_model(db_path,
                 output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
                 epoch_frequency=1,
                 create_gif=True,
-                gif_duration=0.3
+                gif_duration=250
             )
         print(f"Created state evolution GIF")
 
@@ -1306,6 +1303,10 @@ if __name__ == "__main__":
     parser.add_argument('--probing-size', type=int, default=None,
                     help='Number of samples to reserve for layer probing (default: None)')
     
+    parser.add_argument('--encoder_init_method', type=str, default='xavier_uniform',
+                    choices=['xavier_uniform', 'xavier_normal', 'chaos', 'he'],
+                    help='Initialization method for encoder layers')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -1371,5 +1372,6 @@ if __name__ == "__main__":
         vicreg_mu=args.vicreg_mu,
         vicreg_nu=args.vicreg_nu,
         vicreg_variance_target=args.vicreg_variance_target,
-        vicreg_invariance_schedule=args.vicreg_invariance_schedule
+        vicreg_invariance_schedule=args.vicreg_invariance_schedule,
+        encoder_init_method=args.encoder_init_method
     )

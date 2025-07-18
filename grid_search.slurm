@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=collapse_analysis
+#SBATCH --job-name=encoder_init_grid_search
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=4:00:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=8G
-#SBATCH --output=log/collapse_analysis_%A_%a.out
-#SBATCH --error=log/collapse_analysis_%A_%a.err
-#SBATCH --array=1-2
+#SBATCH --output=log/encoder_init_%A_%a.out
+#SBATCH --error=log/encoder_init_%A_%a.err
+#SBATCH --array=1-4
 
 # Print job info
 echo "Job started at $(date)"
@@ -34,9 +34,16 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available()); pr
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
-# Fixed parameters for all runs
+# Fixed parameters (from grid_search.slurm + user specifications)
 SYSTEM_TYPE="saddle_system"
-BASE_OUTPUT_DIR="neural_networks/output/collapse_analysis"
+BASE_OUTPUT_DIR="neural_networks/output/encoder_init_test"
+DB_PATH="datasets/results/multi_saddle_1.db"
+VALUE_METHOD="angle"
+VALUE_LOSS_WEIGHT=1.5
+ENTROPY_DECAY_PROPORTION=0.3
+SEED=17
+
+# Fixed training parameters from grid_search.slurm
 EPOCHS=100
 VAL_SIZE=2000
 TEST_SIZE=2000
@@ -49,114 +56,83 @@ USE_ENTROPY_REG="--use_entropy_reg --entropy_weight=1.0"
 STATE_LOSS_TYPE="kl_div"
 PREDICTOR_TYPE="standard"
 PROBING_SIZE=5000
-
-# Fixed parameters
 GUMBEL_TEMP=3.0
 GUMBEL_MIN=0.5
-SORT_STATES="--sort_states"
 STATE_LOSS_WEIGHT=1.0
 
-# Define configurations for each array
-if [ $SLURM_ARRAY_TASK_ID -eq 1 ]; then
-    # Array 1: Non-collapsed + some collapsed
-    echo "=== ARRAY 1: Non-collapsed + Collapsed cases ==="
-    CONFIGS=(
-        "angle 2.0 0.2 4 5 non-collapsed"       # ms1_angle_vw2.0_ed0.2_s4_seed5
-        "identity 1.5 0.2 4 6 non-collapsed"   # ms1_identity_vw1.5_ed0.2_s4_seed6
-        "angle 2.0 0.5 4 3 non-collapsed"      # ms1_angle_vw2.0_ed0.5_s4_seed3
-        "angle 2.0 0.2 4 6 collapsed"          # ms1_angle_vw2.0_ed0.2_s4_seed6
-        "angle 2.0 0.5 4 10 collapsed"         # ms1_angle_vw2.0_ed0.5_s4_seed10
-    )
+# Grid search configurations: encoder initialization methods
+ENCODER_INIT_METHODS=(
+    "xavier_uniform"    # Array ID 1
+    "xavier_normal"     # Array ID 2
+    "chaos"             # Array ID 3
+    "he"                # Array ID 4
+)
+
+# Select encoder initialization method based on array task ID
+ENCODER_INIT_METHOD=${ENCODER_INIT_METHODS[$((SLURM_ARRAY_TASK_ID-1))]}
+
+echo "========================================================"
+echo "Encoder Initialization Grid Search - Array $SLURM_ARRAY_TASK_ID"
+echo "Database: $DB_PATH"
+echo "Encoder Init Method: $ENCODER_INIT_METHOD"
+echo "Value Method: $VALUE_METHOD"
+echo "Value Loss Weight: $VALUE_LOSS_WEIGHT"
+echo "Entropy Decay Proportion: $ENTROPY_DECAY_PROPORTION"
+echo "Seed: $SEED"
+echo "========================================================"
+
+# Create output directory
+mkdir -p "$BASE_OUTPUT_DIR"
+
+# Create descriptive run name
+CONFIG_NAME="ms1_${VALUE_METHOD}_vw${VALUE_LOSS_WEIGHT}_ed${ENTROPY_DECAY_PROPORTION}_encoder${ENCODER_INIT_METHOD}_seed${SEED}"
+
+# Create unique run ID
+RUN_ID="${CONFIG_NAME}_$(date +%Y%m%d_%H%M%S)"
+
+echo "Running configuration:"
+echo "  database: $DB_PATH"
+echo "  encoder_init_method: $ENCODER_INIT_METHOD"
+echo "  value_method: $VALUE_METHOD"
+echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
+echo "  entropy_decay_proportion: $ENTROPY_DECAY_PROPORTION"
+echo "  seed: $SEED"
+echo "  run_id: $RUN_ID"
+
+# Construct and run the command (note: no --sort_states flag as requested)
+CMD="python -m neural_networks.train_drm $DB_PATH \
+  --system_type=$SYSTEM_TYPE \
+  --value_method=$VALUE_METHOD \
+  --encoder_init_method=$ENCODER_INIT_METHOD \
+  --epochs=$EPOCHS \
+  --val_size=$VAL_SIZE \
+  --test_size=$TEST_SIZE \
+  --probing-size=$PROBING_SIZE \
+  --batch_size=$BATCH_SIZE \
+  --hidden_dim=$HIDDEN_DIM \
+  --state_loss_weight=$STATE_LOSS_WEIGHT \
+  --value_loss_weight=$VALUE_LOSS_WEIGHT \
+  --entropy_decay_proportion=$ENTROPY_DECAY_PROPORTION \
+  $USE_WARMUP \
+  $USE_TARGET_ENCODER \
+  $USE_ENTROPY_REG \
+  --state_loss_type=$STATE_LOSS_TYPE \
+  --use_gumbel \
+  --min_temp=$GUMBEL_MIN \
+  --initial_temp=$GUMBEL_TEMP \
+  --predictor_type=$PREDICTOR_TYPE \
+  --lr=$LR \
+  --seed=$SEED \
+  --output_dir=$BASE_OUTPUT_DIR \
+  --run_id=$RUN_ID"
+
+echo "Running command: $CMD"
+eval $CMD
+
+if [ $? -eq 0 ]; then
+    echo "✓ Successfully completed $ENCODER_INIT_METHOD at $(date)"
 else
-    # Array 2: Remaining collapsed + collapsed different
-    echo "=== ARRAY 2: Collapsed + Collapsed Different cases ==="
-    CONFIGS=(
-        "identity 1.5 0.2 4 11 collapsed"         # ms1_identity_vw1.5_ed0.2_s4_seed11
-        "identity 1.5 0.5 4 6 collapsed-different" # ms1_identity_vw1.5_ed0.5_s4_seed6
-        "angle 1.5 0.2 4 8 collapsed-different"   # ms1_angle_vw1.5_ed0.2_s4_seed8
-        "identity 1.5 0.5 4 7 collapsed-different" # ms1_identity_vw1.5_ed0.5_s4_seed7
-        "identity 1.5 0.2 4 3 collapsed-different" # ms1_identity_vw1.5_ed0.2_s4_seed3
-    )
+    echo "✗ Failed $ENCODER_INIT_METHOD at $(date)"
 fi
 
-# Fixed dataset
-DATASET_NUM=1
-DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
-
-echo "========================================================"
-echo "Array $SLURM_ARRAY_TASK_ID will run ${#CONFIGS[@]} configurations sequentially"
-echo "Database: $DB_PATH"
-echo "========================================================"
-
-# Run all configurations for this array
-for i in "${!CONFIGS[@]}"; do
-    CONFIG=(${CONFIGS[$i]})
-    VALUE_METHOD=${CONFIG[0]}
-    VALUE_LOSS_WEIGHT=${CONFIG[1]}
-    ENTROPY_DECAY_PROPORTION=${CONFIG[2]}
-    NUM_STATES=${CONFIG[3]}
-    SEED=${CONFIG[4]}
-    COLLAPSE_TYPE=${CONFIG[5]}
-    
-    # Create descriptive run name
-    CONFIG_NAME="ms${DATASET_NUM}_${VALUE_METHOD}_vw${VALUE_LOSS_WEIGHT}_ed${ENTROPY_DECAY_PROPORTION}_s${NUM_STATES}_seed${SEED}"
-    
-    # Create output directory
-    OUTPUT_DIR="${BASE_OUTPUT_DIR}"
-    mkdir -p "$OUTPUT_DIR"
-    
-    # Create unique run ID with collapse type annotation
-    RUN_ID="${CONFIG_NAME}_${COLLAPSE_TYPE}_$(date +%Y%m%d_%H%M%S)"
-    
-    echo "--------------------------------------------------------"
-    echo "Array $SLURM_ARRAY_TASK_ID - Config $((i+1))/${#CONFIGS[@]} (${COLLAPSE_TYPE}):"
-    echo "  database: $DB_PATH"
-    echo "  value_method: $VALUE_METHOD"
-    echo "  value_loss_weight: $VALUE_LOSS_WEIGHT"
-    echo "  entropy_decay_proportion: $ENTROPY_DECAY_PROPORTION"
-    echo "  num_states: $NUM_STATES"
-    echo "  seed: $SEED"
-    echo "  run_id: $RUN_ID"
-    
-    # Construct and run the command
-    CMD="python -m neural_networks.train_drm $DB_PATH \
-      --system_type=$SYSTEM_TYPE \
-      --value_method=$VALUE_METHOD \
-      --epochs=$EPOCHS \
-      --val_size=$VAL_SIZE \
-      --test_size=$TEST_SIZE \
-      --probing-size=$PROBING_SIZE \
-      --batch_size=$BATCH_SIZE \
-      --hidden_dim=$HIDDEN_DIM \
-      --state_loss_weight=$STATE_LOSS_WEIGHT \
-      --value_loss_weight=$VALUE_LOSS_WEIGHT \
-      --entropy_decay_proportion=$ENTROPY_DECAY_PROPORTION \
-      --num_states=$NUM_STATES \
-      $USE_WARMUP \
-      $USE_TARGET_ENCODER \
-      $USE_ENTROPY_REG \
-      --state_loss_type=$STATE_LOSS_TYPE \
-      --use_gumbel \
-      --min_temp=$GUMBEL_MIN \
-      --initial_temp=$GUMBEL_TEMP \
-      --predictor_type=$PREDICTOR_TYPE \
-      $SORT_STATES \
-      --lr=$LR \
-      --seed=$SEED \
-      --output_dir=$OUTPUT_DIR \
-      --run_id=$RUN_ID"
-    
-    echo "Running command: $CMD"
-    eval $CMD
-    
-    if [ $? -eq 0 ]; then
-        echo "✓ Successfully completed config $((i+1)) (${COLLAPSE_TYPE}) at $(date)"
-    else
-        echo "✗ Failed config $((i+1)) (${COLLAPSE_TYPE}) at $(date)"
-    fi
-    
-    # Small delay between runs
-    sleep 5
-done
-
-echo "Array $SLURM_ARRAY_TASK_ID completed all configurations at $(date)"
+echo "Array $SLURM_ARRAY_TASK_ID completed at $(date)"
