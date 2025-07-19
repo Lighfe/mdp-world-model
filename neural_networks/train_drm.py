@@ -1350,7 +1350,7 @@ if __name__ == "__main__":
                     help='Number of samples to reserve for layer probing (default: None)')
     
     parser.add_argument('--encoder_init_method', type=str, default='xavier_uniform',
-                    choices=['xavier_uniform', 'xavier_normal', 'chaos', 'he'],
+                    choices=['xavier_uniform', 'xavier_normal', 'chaos', 'chaos2', 'he'],
                     help='Initialization method for encoder layers')
     
     args = parser.parse_args()
