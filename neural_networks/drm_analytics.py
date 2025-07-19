@@ -167,62 +167,40 @@ def print_state_values(model_path, device='cpu'):
 def load_trained_model(model_path, device='cuda'):
     """
     Load a trained DRM model from checkpoint
-    
-    Args:
-        model_path: Path to the saved model checkpoint
-        device: Device to load model on
-        
-    Returns:
-        model: Loaded and initialized model
-        config: Model configuration dict
     """
     checkpoint = torch.load(model_path, map_location=device)
     config = checkpoint['config']
     
     print(f"Loading model from: {model_path}")
-    print(f"Model config: {config}")
     
-    # Check what keys exist in the state dict to infer missing config
+    # Infer use_target_encoder from state dict keys
     state_dict_keys = set(checkpoint['model_state_dict'].keys())
-    print(f"State dict keys (first 10): {list(state_dict_keys)[:10]}")
-
+    has_target_encoder = any(key.startswith('target_encoder.') for key in state_dict_keys)
     
-    # Recreate the model with corrected config
+    print(f"Detected target encoder in model: {has_target_encoder}")
+    
+    # Recreate the model with inferred config
     model = DiscreteRepresentationsModel(
         obs_dim=config['obs_dim'],
         control_dim=config['control_dim'],
         value_dim=config['value_dim'],
         num_states=config['num_states'],
         hidden_dim=config['hidden_dim'],
-        # Add other config parameters that might be needed
         predictor_type=config.get('predictor_type', 'standard'),
         use_gumbel=config.get('use_gumbel', False),
         initial_temp=config.get('initial_temp', 5.0),
         min_temp=config.get('min_temp', 0.5),
-        use_target_encoder=config.get('use_target_encoder', False),  # Now corrected above
+        use_target_encoder=has_target_encoder,  # Infer from state dict
         ema_decay=config.get('ema_decay', 0.996),
         value_activation=config.get('value_activation', 'sigmoid')
     )
     
     # Load the trained weights
-    try:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print("✓ Model weights loaded successfully")
-    except RuntimeError as e:
-        print(f"❌ Error loading model weights: {e}")
-        print("Attempting to load with strict=False...")
-        missing_keys, unexpected_keys = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        if missing_keys:
-            print(f"Missing keys: {missing_keys}")
-        if unexpected_keys:
-            print(f"Unexpected keys: {unexpected_keys}")
-        print("⚠️  Model loaded with mismatched keys - results may be unreliable")
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print("✓ Model weights loaded successfully")
     
     model.to(device)
     model.eval()
-    
-    print(f"Model loaded successfully on {device}")
-    print(f"Model has {sum(p.numel() for p in model.parameters())} total parameters")
     
     return model, config
 
