@@ -145,9 +145,10 @@ def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_si
                 
                 # Balanced accuracy = mean of per-state accuracies
                 state_accuracy = np.mean(state_accuracies)
-                
-                print(f" Epoch {epoch+1}/{num_epochs} - Balanced State Acc: {state_accuracy:.4f}")
-    
+                # Standard (unweighted) accuracy - all samples treated equally
+                unweighted_accuracy = (binary_preds == targets_device).all(dim=1).float().mean().item()
+                print(f" Epoch {epoch+1}/{num_epochs} - Balanced State Acc: {state_accuracy:.4f}, Unweighted Acc: {unweighted_accuracy:.4f}")
+                    
     # Final evaluation with same balanced accuracy calculation
     with torch.no_grad():
         full_predictions = probe(features.to(device))
@@ -176,8 +177,9 @@ def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_si
                 state_accuracies.append(state_acc.item())
         
         state_accuracy = np.mean(state_accuracies)
+        unweighted_accuracy = (binary_preds == targets_device).all(dim=1).float().mean().item()
     
-    return probe, state_accuracy
+    return probe, state_accuracy, unweighted_accuracy
 
 def extract_features_and_targets(model, probing_loader, device, system_type):
     """
@@ -189,7 +191,6 @@ def extract_features_and_targets(model, probing_loader, device, system_type):
     probing_indices = list(probing_loader.sampler.indices)
     
     discrete_features = []
-    embedding_features = []
     targets = []
     
     with torch.no_grad():
@@ -213,14 +214,11 @@ def extract_features_and_targets(model, probing_loader, device, system_type):
             
             # Process batch through model
             batch_x_gpu = batch_x.to(device)
-            embed_x, _ = model.get_embeddings_and_logits(batch_x_gpu, use_target=False)
             discrete_x = model.get_state_probs(batch_x_gpu, training=False, hard=True, use_target=False)
             
-            embedding_features.append(embed_x.cpu())
             discrete_features.append(discrete_x.cpu())
     
     return (torch.cat(discrete_features), 
-            torch.cat(embedding_features), 
             torch.cat(targets))
 
 
@@ -237,19 +235,18 @@ def run_layer_probing(model, probing_loader, device, system_type, db_path):
     model.eval()
     
     # Extract everything together - guaranteed alignment
-    discrete_features, embedding_features, probe_targets = extract_features_and_targets(
+    discrete_features, probe_targets = extract_features_and_targets(
         model, probing_loader, device, system_type
     )
     
     print(f"Extracted paired data - Features: {discrete_features.shape}, Targets: {probe_targets.shape}")
     
     # Train probes
-    discrete_probe, discrete_acc = train_probe(discrete_features, probe_targets, "discrete")
-    embedding_probe, embedding_acc = train_probe(embedding_features, probe_targets, "embedding")
+    discrete_probe, discrete_acc, discrete_acc_unweighted = train_probe(discrete_features, probe_targets, "discrete")
     
     return {
         'discrete_accuracy': discrete_acc,
-        'embedding_accuracy': embedding_acc
+        'discrete_accuracy_unweighted': discrete_acc_unweighted
     }
 
 def extract_state_assignment_data(model, device, num_states, 
@@ -1091,8 +1088,8 @@ def train_drm_model(db_path,
         "test_vicreg_variance": float(test_vicreg_variance),
         "test_vicreg_covariance": float(test_vicreg_covariance),
         "test_samples": test_samples,
-        "probing_discrete_accuracy": probing_results['discrete_accuracy'] if probing_results else None,
-        "probing_embedding_accuracy": probing_results['embedding_accuracy'] if probing_results else None
+        "prob_discrete_accuracy": probing_results['discrete_accuracy'] if probing_results else None,
+        "prob_discrete_accuracy_unweighted": probing_results['discrete_accuracy_unweighted'] if probing_results else None
     }
     
     # Print test results
@@ -1101,7 +1098,7 @@ def train_drm_model(db_path,
     print(f"  Div Loss: {test_div_loss:.4f}, Entropy Loss: {test_entropy_loss:.4f}")
     print(f"  Batch Entropy: {test_batch_entropy:.4f}, Individual Entropy: {test_individual_entropy:.4f}")
     if probing_results:
-        print(f"  Linear Probing - Discrete Accuracy: {probing_results['discrete_accuracy']:.4f}, Embedding Accuracy: {probing_results['embedding_accuracy']:.4f}")
+        print(f"  Linear Probing - Discrete Accuracy: {probing_results['discrete_accuracy']:.4f}, Unweighted Accuracy: {probing_results['discrete_accuracy_unweighted']:.4f}")
 
     # Save test results
     test_results_path = os.path.join(output_dir, f"drm_test_results_{run_id}.json")
