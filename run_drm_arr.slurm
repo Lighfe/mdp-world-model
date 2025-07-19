@@ -41,6 +41,7 @@ DB_PATH="datasets/results/multi_saddle_1.db"  # Use dataset 1 for test
 VALUE_METHOD="angle"
 VALUE_LOSS_WEIGHT=1.5
 ENTROPY_DECAY_PROPORTION=0.5
+ENTROPY_WEIGHT=1.0
 SEED=42  # Fixed seed for test
 
 # Fixed training parameters (same as big experiment)
@@ -60,16 +61,14 @@ GUMBEL_TEMP=3.0
 GUMBEL_MIN=0.5
 STATE_LOSS_WEIGHT=1.0
 
-# Fixed encoder method for test
-ENCODER_INIT_METHOD="chaos"
 
 # Variable: entropy weight based on array ID
 if [ $SLURM_ARRAY_TASK_ID -eq 1 ]; then
-    ENTROPY_WEIGHT="1.0"
-    TEST_LABEL="ew1.0"
+    ENCODER_INIT_METHOD="chaos"
+    TEST_LABEL="chaos1"
 else
-    ENTROPY_WEIGHT="0.5"
-    TEST_LABEL="ew0.5"
+    ENCODER_INIT_METHOD="chaos2"
+    TEST_LABEL="chaos2"
 fi
 
 echo "========================================================"

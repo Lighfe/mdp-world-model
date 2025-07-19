@@ -433,11 +433,21 @@ def init_encoder_with_method(encoder, method, num_states, bias=0.01):
                     # Final layers: chaos (high variance)
                     std = 3.0
                     nn.init.normal_(module.weight, mean=0, std=std)
-                    nn.init.normal_(module.bias, mean=0, std=0.1)
+                    module.bias.data.fill_(0.00)
                 else:
                     # Early layers: use He initialization
                     nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
                     module.bias.data.fill_(0.00)
+            elif method == 'chaos2':
+                if is_final_layer:
+                    # Final layers: chaos (high variance)
+                    std = 3.0
+                    nn.init.normal_(module.weight, mean=0, std=std)
+                    module.bias.data.fill_(0.00)
+                else:
+                    # Early layers: use He initialization
+                    nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+                    nn.init.normal_(module.bias, mean=0, std=0.1)
             else:
                 raise ValueError(f"Unknown encoder_init_method: {method}")
 
