@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=social_tipping_datasets
-#SBATCH --partition=cpu
+#SBATCH --partition=standard
+#SBATCH --qos=short
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
