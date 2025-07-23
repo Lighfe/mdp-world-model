@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
-#SBATCH --time=15:00
+#SBATCH --time=00:15:00
 #SBATCH --output=social_tipping_datasets_%j.out
 #SBATCH --error=social_tipping_datasets_%j.err
 
