@@ -81,8 +81,8 @@ SYSTEM_CONFIGS = {
             'identity': 'mse'
         },
         'transformation': {
-            'type': 'logistic',
-            'params': {'k': 0.5, 'x_0': 0.0}
+            'type': 'identity', # no transformation needed
+            'params': {}
         },
         'value_sorting_functions': {
             'abs_distance': lambda values: values[:, 0],  # Single distance value, sort directly

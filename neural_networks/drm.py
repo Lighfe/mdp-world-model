@@ -263,7 +263,8 @@ class DiscreteRepresentationsModel(nn.Module):
             v_pred_for_all_states: Tensor of shape (num_states, value_dim)
         """
         one_hot_states = torch.eye(self.num_states, device=next(self.parameters()).device)
-        return self.compute_value(one_hot_states)
+        result = self.compute_value(one_hot_states)
+        return result
     
     # State sorting
     def sort_states_by_value(self, system_type=None, value_method=None, sorted_indices=None, descending=True):

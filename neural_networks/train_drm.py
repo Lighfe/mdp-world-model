@@ -36,8 +36,7 @@ from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe, initi
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
-    plot_training_curves, plot_regulization_metrics,
-    analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
+    plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
     create_state_viz_from_data, analyze_state_assignment_evolution
 )
 
@@ -363,8 +362,6 @@ def train_drm_model(db_path,
                     entropy_decay_proportion=0.2,
                     use_target_encoder=False,
                     ema_decay=0.9,
-                    use_state_diversity=False,
-                    diversity_weight=1.0,
                     state_loss_type="kl_div",
                     sort_states=False,
                     use_vicreg=True,
@@ -477,6 +474,8 @@ def train_drm_model(db_path,
         value_dim = v_true.shape[1]
         break
 
+    print(f"Detected dimensions: obs_dim={obs_dim}, control_dim={control_dim}, value_dim={value_dim}")
+
     # For visualization later
     points_config = None
     if system_type == 'saddle_system':
@@ -518,6 +517,7 @@ def train_drm_model(db_path,
         ema_decay=ema_decay,
         value_activation=value_activation
     )
+    print(f"Model created with control_dim={model.predictor.control_dim}")
     
     # initialize weights
     initialize_model_weights(model, encoder_init_method=encoder_init_method)
@@ -532,8 +532,6 @@ def train_drm_model(db_path,
     loss_fn = StableDRMLoss(
         state_loss_weight=state_loss_weight, 
         value_loss_weight=value_loss_weight,
-        use_state_diversity=use_state_diversity,
-        diversity_weight=diversity_weight,
         use_entropy_reg=use_entropy_reg,
         entropy_weight=entropy_weight,
         use_entropy_decay=use_entropy_decay,
@@ -587,7 +585,6 @@ def train_drm_model(db_path,
         "train_loss": [],
         "train_state_loss": [],
         "train_value_loss": [],
-        "train_div_loss": [],
         "train_entropy_loss": [],
         "train_batch_entropy": [],
         "train_individual_entropy": [],
@@ -598,7 +595,6 @@ def train_drm_model(db_path,
         "val_loss": [],
         "val_state_loss": [],
         "val_value_loss": [],
-        "val_div_loss": [],
         "val_entropy_loss": [],
         "val_batch_entropy": [],
         "val_individual_entropy": [],
@@ -652,7 +648,6 @@ def train_drm_model(db_path,
         train_loss = 0.0
         train_state_loss = 0.0
         train_value_loss = 0.0
-        train_div_loss = 0.0
         train_entropy_loss = 0.0
         train_batch_entropy = 0.0 
         train_individual_entropy = 0.0
@@ -691,7 +686,7 @@ def train_drm_model(db_path,
                     continue
                 
                 # Calculate loss
-                (total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy,
+                (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropy,
                     vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
                         s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
                         embed_x, embed_y, epoch=epoch, max_epochs=epochs) 
@@ -721,7 +716,6 @@ def train_drm_model(db_path,
                 train_loss += total_loss.item()
                 train_state_loss += state_loss.item()
                 train_value_loss += value_loss.item()
-                train_div_loss += div_loss.item()
                 train_entropy_loss += entropy_loss.item()
                 train_batch_entropy += batch_entropy.item()
                 train_individual_entropy += individual_entropy.item()
@@ -775,7 +769,6 @@ def train_drm_model(db_path,
             train_loss /= num_batches
             train_state_loss /= num_batches
             train_value_loss /= num_batches
-            train_div_loss /= num_batches
             train_entropy_loss /= num_batches
             train_batch_entropy /= num_batches
             train_individual_entropy /= num_batches
@@ -789,7 +782,6 @@ def train_drm_model(db_path,
         val_loss = 0.0
         val_state_loss = 0.0
         val_value_loss = 0.0
-        val_div_loss = 0.0
         val_entropy_loss = 0.0
         val_batch_entropy = 0.0
         val_individual_entropy = 0.0
@@ -818,7 +810,7 @@ def train_drm_model(db_path,
                         continue
                     
                     # Calculate loss
-                    (total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy,
+                    (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropy,
                         vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
                             s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
                             embed_x, embed_y, epoch=epoch, max_epochs=epochs)
@@ -831,7 +823,6 @@ def train_drm_model(db_path,
                     val_loss += total_loss.item()
                     val_state_loss += state_loss.item()
                     val_value_loss += value_loss.item()
-                    val_div_loss += div_loss.item()
                     val_entropy_loss += entropy_loss.item()
                     val_batch_entropy += batch_entropy.item()
                     val_individual_entropy += individual_entropy.item()
@@ -850,7 +841,6 @@ def train_drm_model(db_path,
             val_loss /= valid_batches
             val_state_loss /= valid_batches
             val_value_loss /= valid_batches
-            val_div_loss /= valid_batches
             val_entropy_loss /= valid_batches
             val_batch_entropy /= valid_batches
             val_individual_entropy /= valid_batches
@@ -863,7 +853,6 @@ def train_drm_model(db_path,
         history["train_loss"].append(train_loss)
         history["train_state_loss"].append(train_state_loss)
         history["train_value_loss"].append(train_value_loss)
-        history["train_div_loss"].append(train_div_loss)
         history["train_entropy_loss"].append(train_entropy_loss)
         history["train_batch_entropy"].append(train_batch_entropy)
         history["train_individual_entropy"].append(train_individual_entropy)
@@ -874,7 +863,6 @@ def train_drm_model(db_path,
         history["val_loss"].append(val_loss)
         history["val_state_loss"].append(val_state_loss)
         history["val_value_loss"].append(val_value_loss)
-        history["val_div_loss"].append(val_div_loss)
         history["val_entropy_loss"].append(val_entropy_loss)
         history["val_batch_entropy"].append(val_batch_entropy)
         history["val_individual_entropy"].append(val_individual_entropy)
@@ -886,13 +874,12 @@ def train_drm_model(db_path,
         # Print progress
         # Print progress with all metrics
         print(f"Epoch {epoch+1}/{epochs} - "
-            f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f}, "
-            f"Div: {train_div_loss:.4f}, Entropy: {train_entropy_loss:.4f})")
+            f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f} "
+            )
         print(f"  VICReg: {train_vicreg_total/num_batches:.4f} (Inv: {train_vicreg_invariance/num_batches:.4f}, "
             f"Var: {train_vicreg_variance/num_batches:.4f}, Cov: {train_vicreg_covariance/num_batches:.4f})")
         print(f"  Batch Entropy: {train_batch_entropy:.4f}, Individual Entropy: {train_individual_entropy:.4f}")
-        print(f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}, "
-            f"Div: {val_div_loss:.4f}, Entropy: {val_entropy_loss:.4f})")
+        print(f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}")
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
 
 
@@ -995,7 +982,6 @@ def train_drm_model(db_path,
     test_loss = 0.0
     test_state_loss = 0.0
     test_value_loss = 0.0
-    test_div_loss = 0.0
     test_entropy_loss = 0.0
     test_batch_entropy = 0.0
     test_individual_entropy = 0.0
@@ -1026,7 +1012,7 @@ def train_drm_model(db_path,
                 # TODO: entropy
 
                 # Calculate loss
-                (total_loss, state_loss, value_loss, div_loss, entropy_loss, batch_entropy, individual_entropy,
+                (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropy,
                     vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
                         s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
                         embed_x, embed_y, epoch=epoch, max_epochs=epochs)
@@ -1039,7 +1025,6 @@ def train_drm_model(db_path,
                 test_loss += total_loss.item() * len(x)
                 test_state_loss += state_loss.item() * len(x)
                 test_value_loss += value_loss.item() * len(x)
-                test_div_loss += div_loss.item() * len(x)
                 test_entropy_loss += entropy_loss.item() * len(x)
                 test_batch_entropy += batch_entropy.item() * len(x)
                 test_individual_entropy += individual_entropy.item() * len(x)
@@ -1058,7 +1043,6 @@ def train_drm_model(db_path,
         test_loss /= test_samples
         test_state_loss /= test_samples
         test_value_loss /= test_samples
-        test_div_loss /= test_samples
         test_entropy_loss /= test_samples
         test_batch_entropy /= test_samples
         test_individual_entropy /= test_samples
@@ -1078,7 +1062,6 @@ def train_drm_model(db_path,
     test_metrics = {
         "test_loss": float(test_loss),
         "test_state_loss": float(test_state_loss),
-        "test_div_loss": float(test_div_loss),
         "test_value_loss": float(test_value_loss),
         "test_entropy_loss": float(test_entropy_loss),
         "test_batch_entropy": float(test_batch_entropy),
@@ -1095,7 +1078,7 @@ def train_drm_model(db_path,
     # Print test results
     print(f"Test Results:")
     print(f"  Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Value: {test_value_loss:.4f})")
-    print(f"  Div Loss: {test_div_loss:.4f}, Entropy Loss: {test_entropy_loss:.4f}")
+    print(f"  Entropy Loss: {test_entropy_loss:.4f}")
     print(f"  Batch Entropy: {test_batch_entropy:.4f}, Individual Entropy: {test_individual_entropy:.4f}")
     if probing_results:
         print(f"  Linear Probing - Discrete Accuracy: {probing_results['discrete_accuracy']:.4f}, Unweighted Accuracy: {probing_results['discrete_accuracy_unweighted']:.4f}")
@@ -1162,8 +1145,6 @@ def train_drm_model(db_path,
     # Plot training curves
     plot_training_curves(history, os.path.join(output_dir, f"training_curves_{run_id}.png"), 
                          state_loss_type=loss_fn.state_loss_type)
-    # Plot regulization metrics
-    plot_regulization_metrics(history, test_metrics, os.path.join(output_dir, f"entropy_metrics_{run_id}.png"))
     # Plot VICReg metrics
     vicreg_weights = {
         'lambda': vicreg_lambda, 
@@ -1323,13 +1304,6 @@ if __name__ == "__main__":
     parser.add_argument('--ema_decay', type=float, default=0.9,
                     help='EMA decay rate for target encoder (higher = slower updates)')
     
-    parser.add_argument('--use_state_diversity', action='store_true',
-                    help='Whether to use correlation-based state diversity regularization')
-    parser.add_argument('--no_state_diversity', dest='use_state_diversity',
-                        action='store_false', help='Disable state diversity regularization')
-    parser.set_defaults(use_state_diversity=False)
-    parser.add_argument('--diversity_weight', type=float, default=1.0,
-                        help='Weight for state diversity regularization')
     
     parser.add_argument('--state_loss_type', type=str, default=None,
                     choices=['kl_div', 'cross_entropy', 'mse', 'js_div'],
@@ -1428,8 +1402,6 @@ if __name__ == "__main__":
         entropy_decay_proportion=args.entropy_decay_proportion,
         use_target_encoder=args.use_target_encoder,
         ema_decay=args.ema_decay,
-        use_state_diversity=args.use_state_diversity,
-        diversity_weight=args.diversity_weight,
         state_loss_type=args.state_loss_type,
         value_loss_type=args.value_loss_type,
         sort_states = args.sort_states,

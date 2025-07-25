@@ -6,72 +6,21 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-class StateDiversityLoss(nn.Module):
-    """
-    Loss that encourages diverse usage of states across a batch by minimizing correlations 
-    between different state activations.
-    """
-    def __init__(self, normalize=True):
-        super(StateDiversityLoss, self).__init__()
-        self.normalize = normalize  # Whether to normalize state activations
-        
-    def forward(self, state_batch, epsilon=1e-8):
-        """
-        Calculate state diversity loss
-        
-        Args:
-            state_batch: Batch of state probability distributions (batch_size, num_states)
-            epsilon: Small constant for numerical stability
-            
-        Returns:
-            Loss value - smaller means more diverse state usage
-        """
-        batch_size = state_batch.size(0)
-        
-        # Skip if batch is too small
-        if batch_size <= 1:
-            return torch.tensor(0.0, device=state_batch.device)
-        
-        # Center and standardize each state dimension across the batch
-        if self.normalize:
-            # Center (subtract mean)
-            centered_states = state_batch - state_batch.mean(dim=0, keepdim=True)
-            
-            # Standardize (divide by standard deviation)
-            std = torch.std(centered_states, dim=0, keepdim=True) + epsilon
-            normalized_states = centered_states / std
-        else:
-            normalized_states = state_batch - state_batch.mean(dim=0, keepdim=True)
-        
-        # Calculate correlation matrix: (num_states, num_states)
-        corr_matrix = torch.matmul(normalized_states.t(), normalized_states) / batch_size
-        
-        # Create mask to select only off-diagonal elements
-        num_states = corr_matrix.size(0)
-        mask = 1.0 - torch.eye(num_states, device=corr_matrix.device)
-        
-        # Sum squared correlations (both positive and negative hurt diversity)
-        off_diag_correlations = (corr_matrix * mask).pow(2).sum()
-        
-        return off_diag_correlations
+import numpy as np
 
 class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=0.5, value_loss_weight=1.5, 
-                 use_state_diversity=False, diversity_weight=0.001,
                  use_entropy_reg=True, entropy_weight=3.0, 
                  use_entropy_decay=True, entropy_decay_proportion=0.2,
                  use_vicreg=True, vicreg_weight=0.1, vicreg_lambda=25.0, vicreg_mu=25.0, vicreg_nu=1.0,
                  vicreg_variance_target=0.4, vicreg_invariance_schedule=True,
                  state_loss_type="kl_div", value_loss_type="mse", value_method=None):
         """
-        Loss function for the Discrete Representations Model with optional entropy and state diversity regularization.
+        Loss function for the Discrete Representations Model with optional entropy regularization.
         
         Args:
             state_loss_weight: Weight for state prediction loss
             value_loss_weight: Weight for value prediction loss
-            use_state_diversity: Whether to use diversity regularization
-            diversity_weight: Weight for diversity regularization
             use_entropy_reg: Whether to use entropy regularization
             entropy_weight: Initial weight for entropy regularization
             use_entropy_decay: Whether to decay entropy weight during training
@@ -91,13 +40,7 @@ class StableDRMLoss(nn.Module):
         self.state_loss_weight = state_loss_weight
         self.value_loss_weight = value_loss_weight
 
-        self.diversity_weight = diversity_weight
-        self.use_state_diversity = use_state_diversity
-        self.diversity_weight = diversity_weight if use_state_diversity else 0.0
-        self.state_diversity = StateDiversityLoss()
-        #TODO: Remove State Diversity Loss
-
-        # New entropy regularization parameters
+        # Entropy regularization parameters
         self.use_entropy_reg = use_entropy_reg
         self.initial_entropy_weight = entropy_weight if self.use_entropy_reg else 0.0
         self.current_entropy_weight = entropy_weight
@@ -118,136 +61,37 @@ class StableDRMLoss(nn.Module):
         # State loss type
         self.state_loss_type = state_loss_type
         if state_loss_type not in ["kl_div", "cross_entropy", "mse", "js_div"]:
-            raise ValueError(f"Unsupported state loss type: {state_loss_type}. Must be one of 'kl_div', 'mse', or 'js_div'")
-        
+            raise ValueError(f"Unsupported state loss type: {state_loss_type}. "
+                           f"Choose from ['kl_div', 'cross_entropy', 'mse', 'js_div']")
+            
         # Value loss type
-        self.value_loss_type = value_loss_type
-        if value_loss_type not in ["mse", "angular", "binary_cross_entropy"]:
-            raise ValueError(f"Unsupported value loss type: {value_loss_type}. Must be one of 'mse', 'angular', or 'binary_cross_entropy'")
-        
+        self.value_loss_type = value_loss_type  
         self.value_method = value_method
-    
-    def _kl_div_loss(self, s_y, s_y_pred):
-        """KL divergence loss (original implementation)"""
-        epsilon = 1e-8
-        s_y = torch.clamp(s_y, epsilon, 1.0 - epsilon)
-        s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
-        return F.kl_div(torch.log(s_y_pred), s_y, reduction='batchmean')
-    
-    def _cross_entropy_loss(self, s_y, s_y_pred):
-        """Cross entropy loss with soft targets"""
-        epsilon = 1e-8
-        s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
-        return -torch.sum(s_y * torch.log(s_y_pred), dim=1).mean()
-    
-    def _mse_loss(self, s_y, s_y_pred):
-        """Mean Squared Error between probability distributions"""
-        return torch.mean(torch.sum((s_y - s_y_pred) ** 2, dim=1))
-    
-    def _js_div_loss(self, s_y, s_y_pred):
-        """Jensen-Shannon divergence: 0.5 * KL(P || M) + 0.5 * KL(Q || M) where M = 0.5 * (P + Q)"""
-        epsilon = 1e-8
-        s_y = torch.clamp(s_y, epsilon, 1.0 - epsilon)
-        s_y_pred = torch.clamp(s_y_pred, epsilon, 1.0 - epsilon)
+        if value_loss_type not in ["mse", "angular", "binary_cross_entropy"]:
+            raise ValueError(f"Unsupported value loss type: {value_loss_type}. "
+                           f"Choose from ['mse', 'angular', 'binary_cross_entropy']")
         
-        # Calculate the mixture distribution M = 0.5 * (P + Q)
-        m = 0.5 * (s_y + s_y_pred)
-        m = torch.clamp(m, epsilon, 1.0 - epsilon)
-        
-        # Calculate KL(P || M)
-        kl_p_m = torch.sum(s_y * torch.log(s_y / m), dim=1).mean()
-        
-        # Calculate KL(Q || M)
-        kl_q_m = torch.sum(s_y_pred * torch.log(s_y_pred / m), dim=1).mean()
-        
-        # JS divergence is 0.5 * (KL(P || M) + KL(Q || M))
-        return 0.5 * (kl_p_m + kl_q_m)
-    # TODO: KS divergence turned around
-    
-    def _circular_mse_loss(self, v_pred, v_true):
-        # Convert to angles, ignores magnitude
-        angle_pred = torch.atan2(v_pred[:, 0], v_pred[:, 1])
-        angle_true = torch.atan2(v_true[:, 0], v_true[:, 1])
-        
-        # Circular difference (handles 1°↔359° correctly)
-        diff = angle_pred - angle_true
-        circular_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
-        
-        return torch.mean(circular_diff ** 2) / (np.pi ** 2) # scaling
-
-    
-    def _binary_cross_entropy_loss(self, v_pred, v_true):
-        """
-        Binary cross entropy loss for binary predictions (e.g., 90% market share)
-        
-        Args:
-            v_pred: Predicted values (batch_size, 1) - probabilities
-            v_true: True values (batch_size, 1) - binary targets
-            
-        Returns:
-            Binary cross entropy loss
-        """
-        epsilon = 1e-8
-        v_pred = torch.clamp(v_pred, epsilon, 1.0 - epsilon)
-        return F.binary_cross_entropy(v_pred, v_true)
-    
-    def get_vicreg_invariance_weight(self, epoch, max_epochs):
-        """Anneals VICReg invariance weight over time"""
-        if not self.vicreg_invariance_schedule:
-            return self.vicreg_lambda
-            
-        # Reduce invariance weight over time as state boundaries form
-        # TODO: test out if this helps or hurts
-        decay_factor = max(0.1, 1.0 - (epoch / (max_epochs * 0.5)))
-        return self.vicreg_lambda * decay_factor
-    
-    def _vicreg_loss(self, embed_x, embed_y, epoch, max_epochs):
-        """VICReg loss on embeddings instead of state probabilities"""
-        
-        batch_size, embed_dim = embed_x.shape
-        
-        # Invariance loss - temporal consistency of embeddings
-        lambda_effective = self.get_vicreg_invariance_weight(epoch, max_epochs)
-        vicreg_invariance = F.mse_loss(embed_x, embed_y)
-        
-        # Variance loss - prevent embedding collapse
-        std_x = torch.sqrt(embed_x.var(dim=0) + self.vicreg_epsilon)
-        std_y = torch.sqrt(embed_y.var(dim=0) + self.vicreg_epsilon)
-        vicreg_variance = (torch.mean(F.relu(self.vicreg_variance_target - std_x)) + 
-                        torch.mean(F.relu(self.vicreg_variance_target - std_y)))
-        
-        # Covariance loss - decorrelate embedding dimensions
-        def compute_cov_loss(embeddings):
-            centered = embeddings - embeddings.mean(dim=0)
-            cov_matrix = (centered.T @ centered) / (batch_size - 1)
-            off_diag_mask = ~torch.eye(embed_dim, dtype=torch.bool, device=embeddings.device)
-            return cov_matrix[off_diag_mask].pow(2).sum() / embed_dim
-        
-        vicreg_covariance = compute_cov_loss(embed_x) + compute_cov_loss(embed_y)
-        
-        # Total VICReg loss
-        vicreg_total = (lambda_effective * vicreg_invariance + 
-                    self.vicreg_mu * vicreg_variance + 
-                    self.vicreg_nu * vicreg_covariance)
-        
-        return vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance
-
     def forward(self, s_y, s_y_pred, v_true, v_pred_for_all_states, s_x=None, 
                 embed_x=None, embed_y=None, epoch=0, max_epochs=100):
         """
-        Compute the combined loss with optional diversity and entropy regularization.
+        Forward pass of the loss function
         
         Args:
-            s_y: True next state probabilities
-            s_y_pred: Predicted next state probabilities
-            v_true: True value (computed from environment)
-            v_pred_for_all_states: Predicted values for all one-hot encoded states (num_states, value_dim)
-            s_x: Current state probabilities (for diversity/entropy regularization)
-            epoch: Current training epoch (for scheduling)
-            max_epochs: Total training epochs (for scheduling)
+            s_y: True state probabilities
+            s_y_pred: Predicted state probabilities
+            v_true: True values
+            v_pred_for_all_states: Predicted values for all states
+            s_x: Current state probabilities (for entropy calculation)
+            embed_x: Current embeddings (for VICReg)
+            embed_y: Target embeddings (for VICReg)
+            epoch: Current epoch (for scheduling)
+            max_epochs: Total epochs (for scheduling)
+        
+        Returns:
+            Tuple of (total_loss, state_loss, value_loss, 0.0, entropy_loss, batch_entropy, individual_entropy,
+                     vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance)
         """
 
-        # dimension checking
         expected_dims = {
             'mse': None,  # Can handle any dimension
             'angular': 2,  # Must be 2D for sin/cos
@@ -261,6 +105,7 @@ class StableDRMLoss(nn.Module):
                     f"Value loss type '{self.value_loss_type}' expects {expected_dim}D values, "
                     f"but got {actual_dim}D. Check if value_method matches value_loss_type."
                 )
+
         # Add small epsilon to avoid log(0)
         epsilon = 1e-8
         
@@ -286,100 +131,53 @@ class StableDRMLoss(nn.Module):
         # Value loss calculation based on type
         value_loss = self._calculate_expected_value_loss(
             s_y_pred, v_pred_for_all_states, v_true, 
-            loss_type=self.value_loss_type, value_method=self.value_method
+            loss_type=self.value_loss_type, value_type=self.value_method
         )
         
-        # Correlation-based diversity
-        diversity_loss = torch.tensor(0.0, device=s_y.device)
-
         # Calculate batch and individual entropy metrics
         batch_entropy = torch.tensor(0.0, device=s_y.device)
         individual_entropy = torch.tensor(0.0, device=s_y.device)
+        entropy_loss = torch.tensor(0.0, device=s_y.device)
         
         if s_x is not None:
-            # always calculate for tracking
-            diversity_loss = self.state_diversity(s_x)
             batch_entropy = self.batch_entropy(s_x)
             individual_entropy = self.individual_entropy(s_x)
-            batch_weight = 0.8 # hard coded
-            individual_weight = 0.2 # hard coded
-            entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
+            if self.use_entropy_reg:
+                batch_weight = 0.8 # hard coded
+                individual_weight = 0.2 # hard coded
+                entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
         
         # VICReg loss (only if embeddings provided)
-        if embed_x is not None and embed_y is not None:
-            vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance = self._vicreg_loss(
+        vicreg_total = torch.tensor(0.0, device=s_y.device)
+        vicreg_invariance = torch.tensor(0.0, device=s_y.device)
+        vicreg_variance = torch.tensor(0.0, device=s_y.device)
+        vicreg_covariance = torch.tensor(0.0, device=s_y.device)
+        
+        if embed_x is not None and embed_y is not None and self.use_vicreg:
+            vicreg_invariance, vicreg_variance, vicreg_covariance = self._compute_vicreg_loss(
                 embed_x, embed_y, epoch, max_epochs
             )
+            vicreg_total = (self.vicreg_lambda * vicreg_invariance + 
+                           self.vicreg_mu * vicreg_variance + 
+                           self.vicreg_nu * vicreg_covariance)
         
-        # Combined loss
-        total_loss = (
-            self.state_loss_weight * state_loss + 
-            self.value_loss_weight * value_loss +
-            self.diversity_weight * diversity_loss + # only when enabled
-            self.current_entropy_weight * entropy_loss + # only when enabled
-            self.vicreg_weight * vicreg_total # only when enabled
-        )
+        # Combine losses
+        total_loss = (self.state_loss_weight * state_loss + 
+                     self.value_loss_weight * value_loss + 
+                     self.current_entropy_weight * entropy_loss +
+                     self.vicreg_weight * vicreg_total)
         
-        # Return loss components, entropy metrics, vicreg components
-        return (total_loss, state_loss, value_loss, diversity_loss, entropy_loss, 
-                batch_entropy, individual_entropy,
+        return (total_loss, state_loss, value_loss,  
+                entropy_loss, batch_entropy, individual_entropy,
                 vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance)
-    
-    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse", value_method='none'):
-        """
-        Calculate expected value loss under the predicted state distribution.
-        
-        Args:
-            s_y_pred: Predicted next state probabilities (batch_size, num_states)
-            v_pred_for_all_states: Values for all one-hot states (num_states, value_dim)
-            v_true: True value (batch_size, value_dim)
-            loss_type: Type of loss to use ("mse", "angular", "binary_cross_entropy")
-            
-        Returns:
-            Expected value loss
-        """
-        # First, calculate the expected value under the predicted distribution
-        # Expected value: sum_i P(state_i) * value(state_i)
-        # Shape: (batch_size, value_dim)
-        expected_v_pred = torch.matmul(s_y_pred, v_pred_for_all_states)
-        
-        # Now calculate the loss based on type
-        if loss_type == "mse":
-            raw_mse = torch.mean((expected_v_pred - v_true) ** 2)
-            # Apply scaling based on value type
-            if value_method == "identity":
-                return raw_mse / v_true.shape[-1]  # Scale by number of dimensions
-            else:
-                return raw_mse  # No scaling for market_share, etc.
-        elif loss_type == "angular":
-            # Use angular MSE loss for stability
-            value_loss = self._circular_mse_loss(expected_v_pred, v_true)
-        elif loss_type == "binary_cross_entropy":
-            # Binary cross entropy for binary predictions
-            value_loss = self._binary_cross_entropy_loss(expected_v_pred, v_true)
-        else:
-            raise ValueError(f"Unknown value loss type: {loss_type}")
-        
-        return value_loss
-    
-    def update_diversity_weight(self, epoch, max_epochs):
-        """Gradually decrease diversity weight as training progresses"""
-        if not self.use_diversity_loss:
-            return 0.0  # Return zero if diversity loss is disabled
-            
-        # Decay to minimum weight by 60% of training
-        progress = min(1.0, epoch / (0.6 * max_epochs))
-        self.current_diversity_weight = self.initial_diversity_weight - progress * (
-            self.initial_diversity_weight - self.min_diversity_weight)
-        return self.current_diversity_weight
     
     def update_entropy_weight(self, epoch, max_epochs):
         """Gradually decrease entropy weight as training progresses"""
         
         if not self.use_entropy_decay:
-            return self.current_entropy_weight # Don't think this if will be needed
+            return self.current_entropy_weight
         
-        # Decay to minimum weight by 20% of training
+        # Decay to minimum weight by entropy_decay_proportion of training
         progress = min(1.0, epoch / (self.entropy_decay_proportion * max_epochs))
         self.current_entropy_weight = self.initial_entropy_weight - progress * (
             self.initial_entropy_weight - self.min_entropy_weight)
@@ -420,20 +218,111 @@ class StableDRMLoss(nn.Module):
             state_probs: Batch of state probability distributions (batch_size, num_states)
         
         Returns:
-            Average normalized entropy across samples (0.0 to 1.0)
+            Average normalized entropy across batch (0.0 to 1.0)
         """
+        # Add small epsilon to prevent log(0)
         eps = 1e-10
         state_probs = torch.clamp(state_probs, eps, 1.0)
         
-        # Calculate entropy for each sample
-        num_states = state_probs.size(1)
-        max_entropy = torch.log(torch.tensor(float(num_states), device=state_probs.device))
-        
-        # Calculate entropy for each sample: -sum(p_i * log(p_i))
-        sample_entropies = -torch.sum(state_probs * torch.log(state_probs), dim=1)
+        # Calculate entropy for each sample in the batch
+        individual_entropies = -torch.sum(state_probs * torch.log(state_probs), dim=1)
         
         # Normalize by maximum possible entropy
-        normalized_entropies = sample_entropies / max_entropy
+        num_states = state_probs.size(1)
+        max_entropy = torch.log(torch.tensor(float(num_states), device=state_probs.device))
+        normalized_entropies = individual_entropies / max_entropy
         
         # Return average across batch
         return torch.mean(normalized_entropies)
+    
+    def _kl_div_loss(self, s_y, s_y_pred):
+        """KL divergence loss"""
+        # KL divergence: sum(s_y * log(s_y / s_y_pred))
+        kl_loss = torch.sum(s_y * torch.log(s_y / s_y_pred), dim=1)
+        return torch.mean(kl_loss)
+    
+    def _cross_entropy_loss(self, s_y, s_y_pred):
+        """Cross entropy loss"""
+        # Cross entropy: -sum(s_y * log(s_y_pred))
+        ce_loss = -torch.sum(s_y * torch.log(s_y_pred), dim=1)
+        return torch.mean(ce_loss)
+    
+    def _mse_loss(self, s_y, s_y_pred):
+        """Mean squared error loss"""
+        mse_loss = torch.mean((s_y - s_y_pred) ** 2, dim=1)
+        return torch.mean(mse_loss)
+    
+    def _js_div_loss(self, s_y, s_y_pred):
+        """Jensen-Shannon divergence loss"""
+        # JS divergence: 0.5 * (KL(s_y || M) + KL(s_y_pred || M))
+        # where M = 0.5 * (s_y + s_y_pred)
+        M = 0.5 * (s_y + s_y_pred)
+        kl1 = torch.sum(s_y * torch.log(s_y / M), dim=1)
+        kl2 = torch.sum(s_y_pred * torch.log(s_y_pred / M), dim=1)
+        js_loss = 0.5 * (kl1 + kl2)
+        return torch.mean(js_loss)
+    
+    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse", value_type=None):
+        """Calculate value loss based on expected value computation"""
+        # Compute expected value: sum over states of (state_prob * value_for_state)
+        expected_v_pred = torch.matmul(s_y_pred, v_pred_for_all_states)  # <-- REVERT TO THIS
+        
+        if loss_type == "mse":
+            value_loss = F.mse_loss(expected_v_pred, v_true)
+        elif loss_type == "angular":
+            value_loss = self._circular_mse_loss(expected_v_pred, v_true)
+        elif loss_type == "binary_cross_entropy":
+            value_loss = self._binary_cross_entropy_loss(expected_v_pred, v_true)
+        else:
+            raise ValueError(f"Unknown value loss type: {loss_type}")
+        return value_loss
+    
+    def _circular_mse_loss(self, pred, true):
+        """MSE loss for circular/angular values"""
+        # Handle circular nature of angles
+        diff = pred - true
+        # Wrap differences to [-pi, pi]
+        diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+        return torch.mean(diff ** 2)
+    
+    def _binary_cross_entropy_loss(self, pred, true):
+        """Binary cross entropy loss"""
+        return F.binary_cross_entropy_with_logits(pred, true)
+    
+    def _compute_vicreg_loss(self, embed_x, embed_y, epoch, max_epochs):
+        """Compute VICReg loss components"""
+        batch_size, embed_dim = embed_x.shape
+        
+        # Invariance loss (MSE between representations)
+        invariance_loss = F.mse_loss(embed_x, embed_y)
+        
+        # Apply invariance scheduling if enabled
+        if self.vicreg_invariance_schedule:
+            # Gradually reduce invariance weight as training progresses
+            schedule_factor = max(0.1, 1.0 - (epoch / max_epochs))
+            invariance_loss = invariance_loss * schedule_factor
+        
+        # Variance loss (encourage variance to be close to target)
+        def variance_loss_fn(embeddings):
+            std = torch.sqrt(embeddings.var(dim=0) + self.vicreg_epsilon)
+            target = torch.full_like(std, self.vicreg_variance_target)
+            return F.mse_loss(std, target)
+        
+        variance_x = variance_loss_fn(embed_x)
+        variance_y = variance_loss_fn(embed_y)
+        variance_loss = (variance_x + variance_y) / 2
+        
+        # Covariance loss (decorrelate features)
+        def covariance_loss_fn(embeddings):
+            batch_size = embeddings.size(0)
+            embeddings = embeddings - embeddings.mean(dim=0, keepdim=True)
+            cov_matrix = torch.mm(embeddings.t(), embeddings) / (batch_size - 1)
+            # Zero out diagonal (we don't want to penalize variance)
+            cov_matrix = cov_matrix.fill_diagonal_(0)
+            return cov_matrix.pow(2).sum() / embed_dim
+        
+        covariance_x = covariance_loss_fn(embed_x)
+        covariance_y = covariance_loss_fn(embed_y)
+        covariance_loss = (covariance_x + covariance_y) / 2
+        
+        return invariance_loss, variance_loss, covariance_loss

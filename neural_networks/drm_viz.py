@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import math
 import pandas as pd
+
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -19,7 +20,6 @@ import tempfile
 import shutil
 import imageio
 
-from pathlib import Path
 
 
 # Define project root at the module level
@@ -42,6 +42,7 @@ from data_generation.simulations.grid import tangent_transformation
 NOTE: Important, don't get confused with the layout of the grid. It is in a coordinate system. 
 [0, 0] is bottom left, not like with typical numpy array top left! Same applies in higher dimensions.
 """
+
 def plot_training_curves(history, save_path=None, state_loss_type=None):
     """Plot training and validation loss curves"""
     plt.figure(figsize=(15, 10))
@@ -79,34 +80,51 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
     plt.legend()
     plt.grid(True)
     
-    # Plot combined regularization losses in fourth panel
+    # Plot batch entropy and entropy weight with dual y-axes in fourth panel
     plt.subplot(2, 2, 4)
     
-    # Plot diversity loss if it exists
-    if 'train_div_loss' in history and any(v != 0 for v in history['train_div_loss']):
-        plt.plot(history['train_div_loss'], label='Train Diversity Loss', linestyle='-')
-        plt.plot(history['val_div_loss'], label='Val Diversity Loss', linestyle='-')
+    # Create first y-axis for batch entropy
+    ax1 = plt.gca()
     
-    # Plot entropy loss if it exists
-    if 'train_entropy_loss' in history and any(v != 0 for v in history['train_entropy_loss']):
-        plt.plot(history['train_entropy_loss'], label='Train Entropy Loss', linestyle='--')
-        plt.plot(history['val_entropy_loss'], label='Val Entropy Loss', linestyle='--')
+    # Plot batch entropy if it exists
+    if 'train_batch_entropy' in history and len(history['train_batch_entropy']) > 0:
+        line1 = ax1.plot(history['train_batch_entropy'], 'b-', label='Train Batch Entropy')
+        if 'val_batch_entropy' in history and len(history['val_batch_entropy']) > 0:
+            line2 = ax1.plot(history['val_batch_entropy'], 'b--', label='Val Batch Entropy')
     
-    # Set title based on what's being displayed
-    if ('train_div_loss' in history and any(v != 0 for v in history['train_div_loss']) and
-        'train_entropy_loss' in history and any(v != 0 for v in history['train_entropy_loss'])):
-        plt.title('Regularization Losses')
-    elif 'train_div_loss' in history and any(v != 0 for v in history['train_div_loss']):
-        plt.title('Diversity Loss')
-    elif 'train_entropy_loss' in history and any(v != 0 for v in history['train_entropy_loss']):
-        plt.title('Entropy Loss')
-    else:
-        plt.title('Regularization Losses (None Active)')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Batch Entropy (Higher = More Uniform)', color='b')
+    ax1.tick_params(axis='y', labelcolor='b')
+    ax1.set_ylim(0, 1)  # Entropy is normalized to [0, 1]
+    ax1.grid(True, alpha=0.3)
     
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
+    # Create second y-axis for entropy weight
+    ax2 = ax1.twinx()
+    
+    # Plot entropy weight if it exists
+    if 'train_entropy_weight' in history and len(history['train_entropy_weight']) > 0:
+        line3 = ax2.plot(history['train_entropy_weight'], 'r-', label='Entropy Weight', linewidth=2)
+    
+    ax2.set_ylabel('Entropy Loss Weight', color='r')
+    ax2.tick_params(axis='y', labelcolor='r')
+    
+    # Add combined legend
+    lines = []
+    labels = []
+    if 'train_batch_entropy' in history and len(history['train_batch_entropy']) > 0:
+        lines.extend([plt.Line2D([0], [0], color='b', linestyle='-')])
+        labels.extend(['Train Batch Entropy'])
+        if 'val_batch_entropy' in history and len(history['val_batch_entropy']) > 0:
+            lines.extend([plt.Line2D([0], [0], color='b', linestyle='--')])
+            labels.extend(['Val Batch Entropy'])
+    if 'train_entropy_weight' in history and len(history['train_entropy_weight']) > 0:
+        lines.extend([plt.Line2D([0], [0], color='r', linestyle='-')])
+        labels.extend(['Entropy Weight'])
+    
+    if lines:
+        ax1.legend(lines, labels, loc='upper right')
+    
+    plt.title('Batch Entropy & Entropy Weight')
     
     plt.tight_layout()
     
@@ -815,6 +833,7 @@ def analyze_discrete_state_transitions(model, control_values, device='cpu', syst
         model: Trained DRM model
         control_values: List of control values to analyze
         device: Device for computation
+        system_type: Type of system for control formatting
     
     Returns:
         Dictionary of transition matrices for each control value
@@ -832,14 +851,21 @@ def analyze_discrete_state_transitions(model, control_values, device='cpu', syst
     results = {}
     
     for control_value in control_values:
-        # For saddle systems, always use one-hot encoding
+        # Handle different control formats based on system type
         if system_type == 'saddle_system':
             # For categorical controls, create one-hot encoding
             control_batch = torch.zeros((num_states, control_dim), dtype=torch.float32, device=device)
             control_batch[:, control_value] = 1.0
         else:
-            # For continuous controls, use scalar value
-            control_batch = torch.full((num_states, 1), control_value, dtype=torch.float32, device=device)
+            # For continuous controls, handle both scalar and multi-dimensional cases
+            if isinstance(control_value, (list, tuple, np.ndarray)):
+                # Multi-dimensional control (e.g., social_tipping with [b, c, f, g])
+                control_tensor = torch.tensor(control_value, dtype=torch.float32, device=device)
+                # Expand to batch size: (num_states, control_dim)
+                control_batch = control_tensor.unsqueeze(0).expand(num_states, -1)
+            else:
+                # Scalar control (e.g., tech_substitution)
+                control_batch = torch.full((num_states, control_dim), control_value, dtype=torch.float32, device=device)
         
         # Predict next state with error checking
         with torch.no_grad():
@@ -853,9 +879,16 @@ def analyze_discrete_state_transitions(model, control_values, device='cpu', syst
                 row_sums = next_state_probs.sum(dim=1, keepdim=True)
                 next_state_probs = next_state_probs / torch.clamp(row_sums, min=1e-10)
         
-        # Store transition matrix
+        # Convert to numpy for analysis
         transition_matrix = next_state_probs.cpu().numpy()
-        results[control_value] = transition_matrix
+        
+        # Use a string representation of the control for the key
+        if isinstance(control_value, (list, tuple, np.ndarray)):
+            control_key = f"Control_{len(results)}"  # Simple numbering for multi-dim controls
+        else:
+            control_key = control_value
+            
+        results[control_key] = transition_matrix
     
     return results
 
@@ -1236,104 +1269,7 @@ def visualize_model_architecture(model, output_path):
         dot.render(fallback_path, format='png', cleanup=True)
         print(f"Fallback visualization saved to {fallback_path}.png")
         return fallback_path + '.png'
-    
-def plot_regulization_metrics(history, test_metrics, save_path=None):
-    """
-    Plot state diversity, batch entropy, individual entropy, and entropy loss curves.
-    
-    Args:
-        history: Dictionary containing training history with metrics
-        test_metrics: Dictionary containing test metrics
-        save_path: Path to save the visualization
-    
-    Returns:
-        fig: The figure object
-    """
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    
-    # Flatten axes for easier iteration
-    axes = axes.flatten()
-    
-    # Define metrics to plot
-    metrics = [
-        {
-            'name': 'State Diversity',
-            'train_key': 'train_div_loss',
-            'val_key': 'val_div_loss',
-            'test_key': 'test_div_loss',
-            'title': 'State Diversity Loss',
-            'ylabel': 'Loss'
-        },
-        {
-            'name': 'Batch Entropy',
-            'train_key': 'train_batch_entropy',
-            'val_key': 'val_batch_entropy',
-            'test_key': 'test_batch_entropy',
-            'title': 'Batch Entropy (Higher = More Uniform State Usage)',
-            'ylabel': 'Normalized Entropy'
-        },
-        {
-            'name': 'Individual Entropy',
-            'train_key': 'train_individual_entropy',
-            'val_key': 'val_individual_entropy',
-            'test_key': 'test_individual_entropy',
-            'title': 'Individual Entropy (Lower = More Discrete States)',
-            'ylabel': 'Normalized Entropy'
-        },
-        {
-            'name': 'Entropy Loss',
-            'train_key': 'train_entropy_loss',
-            'val_key': 'val_entropy_loss',
-            'test_key': 'test_entropy_loss',
-            'title': 'Entropy Loss',
-            'ylabel': 'Loss'
-        }
-    ]
-    
-    # Plot each metric
-    for i, metric in enumerate(metrics):
-        ax = axes[i]
-        
-        # Plot training curve
-        if metric['train_key'] in history and len(history[metric['train_key']]) > 0:
-            ax.plot(history[metric['train_key']], label='Train', color='blue')
-        
-        # Plot validation curve
-        if metric['val_key'] in history and len(history[metric['val_key']]) > 0:
-            ax.plot(history[metric['val_key']], label='Validation', color='orange')
-        
-        # Add test result as horizontal line
-        if metric['test_key'] in test_metrics:
-            test_value = test_metrics[metric['test_key']]
-            ax.axhline(y=test_value, color='red', linestyle='--', 
-                      label=f'Test ({test_value:.4f})')
-        
-        # Add labels and grid
-        ax.set_title(metric['title'])
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel(metric['ylabel'])
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        # Set y-limits for entropy metrics to [0, 1] range
-        if 'entropy' in metric['name'].lower() and 'loss' not in metric['name'].lower():
-            ax.set_ylim(0, 1)
-    
-    plt.tight_layout()
-    
-    # Save the figure if a path is provided
-    if save_path:
-        plt.savefig(save_path, dpi=100, bbox_inches='tight')
-        print(f"Saved entropy metrics visualization to {save_path}")
-    
-    return fig
 
-
-    import torch
-import numpy as np
-import graphviz
-import os
-from pathlib import Path
 
 def analyze_mdp_from_model(model, control_values=None, device='cpu'):
     """
