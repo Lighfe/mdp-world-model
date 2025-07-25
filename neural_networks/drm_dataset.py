@@ -304,7 +304,79 @@ class SaddleSystemDataset(BaseDataset):
             values[:, saddle_idx] = (signed_dist >= 0).astype(float)
         
         return torch.tensor(values, dtype=torch.float32)
+
+
+class SocialTippingDataset(BaseDataset):
+    """Dataset for social tipping system"""
     
+    def __init__(self, db_path, value_method='abs_distance'):
+        self.value_method = value_method
+        super().__init__(db_path)
+        self._validate_samples()
+    
+    def __getitem__(self, idx):
+        required_columns = ['x0', 'x1', 'c0', 'c1', 'c2', 'c3', 'y0', 'y1']
+        for col in required_columns:
+            if not hasattr(self.table.c, col):
+                raise ValueError(f"Required column '{col}' not found in table")
+        
+        # SQLAlchemy query for this index (column-specific selection like SaddleSystemDataset)
+        with Session(self.engine) as session:
+            query = select(
+                self.table.c.x0, 
+                self.table.c.x1, 
+                self.table.c.c0,
+                self.table.c.c1,
+                self.table.c.c2,
+                self.table.c.c3,
+                self.table.c.y0, 
+                self.table.c.y1
+            ).offset(idx).limit(1)
+            
+            result = session.execute(query).fetchone()
+            
+        if result is None:
+            raise IndexError(f"Index {idx} out of bounds")
+        
+        # Extract data (direct unpacking like SaddleSystemDataset)
+        x0, x1, c0, c1, c2, c3, y0, y1 = result
+        
+        # Convert to tensors
+        x = torch.tensor([x0, x1], dtype=torch.float32)
+        c = torch.tensor([c0, c1, c2, c3], dtype=torch.float32)
+        y = torch.tensor([y0, y1], dtype=torch.float32)
+        
+        # Calculate v_true using next state y (to be consistent with naming)
+        v_true = self.f_v(np.array([y0, y1]))
+        
+        # Check for NaN values and replace with zeros
+        x = torch.nan_to_num(x, nan=0.0)
+        c = torch.nan_to_num(c, nan=0.0)
+        y = torch.nan_to_num(y, nan=0.0)
+        v_true = torch.nan_to_num(v_true, nan=0.0)
+        
+        return x, c, y, v_true
+    
+    def f_v(self, state):
+        """Calculate value function for social tipping system"""
+        if isinstance(state, (tuple, list)):
+            state = np.array(state)
+
+        if state.ndim == 1:
+            x0, x1 = state
+        else:
+            raise ValueError("Input must be a tuple or array of two values")
+        
+        if self.value_method == 'abs_distance':
+            # Absolute distance between x0 and x1 (first and second dimensions)
+            distance = abs(x0 - x1)
+            return torch.tensor([distance], dtype=torch.float32)
+        elif self.value_method == 'identity':
+            # Return the 2D state as-is (no transformation)
+            return torch.tensor([x0, x1], dtype=torch.float32)
+        else:
+            raise NotImplementedError(f"Method '{self.value_method}' is not implemented for social tipping system.")
+
 
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
@@ -313,7 +385,7 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     Create training, validation, test, and optionally probing data loaders
     
     Args:
-        system_type: Type of system ('tech_substitution' or 'saddle_system')
+        system_type: Type of system ('tech_substitution', 'saddle_system', or 'social_tipping')
         db_path: Path to the SQLite database
         batch_size: Batch size for training
         val_size: Number of samples to use for validation
@@ -344,6 +416,8 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
         dataset = TechSubstitutionDataset(db_path, value_method=value_method)
     elif system_type == 'saddle_system':
         dataset = SaddleSystemDataset(db_path, value_method=value_method)
+    elif system_type == 'social_tipping':
+        dataset = SocialTippingDataset(db_path, value_method=value_method)
     else:
         raise ValueError(f"Unknown system type: {system_type}")
     
@@ -467,3 +541,4 @@ def get_saddle_configuration(db_path, verbose=True):
     except Exception as e:
         print(f"Error extracting saddle configuration: {e}")
         return None
+    

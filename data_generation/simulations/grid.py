@@ -498,3 +498,34 @@ def negative_log_transformation(x0, alpha=0.5):
             return (np.log(2) * alpha / x0) * (ratio**(alpha - 1)) * np.exp(- np.log(2) * (ratio)**alpha)
     
     return (negative_log_transformation, inverse_negative_log_transformation, negative_log_transformation_derivative)
+
+def identity_transformation():
+    """
+    Generates the identity transformation z = x (no transformation), 
+    its inverse (also identity), and its derivative (always 1).
+    
+    This transformation leaves the input space unchanged, mapping x-space to x-space directly.
+    Useful when no coordinate transformation is desired.
+    
+    Returns:
+        tuple: A tuple containing three functions:
+            - identity_transform (function): Returns input unchanged (z = x).
+            - inverse_identity_transform (function): Returns input unchanged (x = z).
+            - identity_transform_derivative (function): Returns 1 (derivative of x is 1).
+    """
+    
+    def identity_transform(x):
+        # Maps x to z where z = x (no change)
+        return x
+    
+    identity_transform.parameters = {}
+    
+    def inverse_identity_transform(z):
+        # Maps z to x where x = z (no change)
+        return z
+    
+    def identity_transform_derivative(x):
+        # Derivative of z = x is dz/dx = 1
+        return 1.0
+    
+    return (identity_transform, inverse_identity_transform, identity_transform_derivative)

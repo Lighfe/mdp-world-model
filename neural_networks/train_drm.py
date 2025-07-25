@@ -30,7 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # NOTE: absolute imports from project root
 # Import application-specific modules
 from neural_networks.system_registry import SystemType, get_system_config, get_transformation
-from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset, get_saddle_configuration
+from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset, SocialTippingDataset, get_saddle_configuration
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe, initialize_model_weights
 from neural_networks.drm_viz import (
@@ -335,24 +335,24 @@ def train_drm_model(db_path,
                     output_dir="./neural_networks/output",
                     run_id=None,
                     seed=42,
-                    val_size=2000,
-                    test_size=2000, 
+                    val_size=1000,
+                    test_size=1000, 
                     probing_size=None,
                     batch_size=64, 
                     epochs=100,
-                    learning_rate=1e-4, 
+                    learning_rate=1e-5, 
                     num_states=4,
-                    hidden_dim=128,
+                    hidden_dim=32,
                     checkpoint_every=25,
-                    state_loss_weight=0.5, 
+                    state_loss_weight=1.0, 
                     value_loss_weight=1.5,
-                    predictor_type='bilinear',
+                    predictor_type='standard',
                     value_method=None,
                     value_loss_type=None,
                     use_lr_scheduler=False,
                     scheduler_type='cosine',
                     use_warmup=False,
-                    warmup_epochs=5,
+                    warmup_epochs=10,
                     min_lr=1e-5,
                     use_gumbel=False,
                     initial_temp=5.0,
@@ -362,7 +362,7 @@ def train_drm_model(db_path,
                     use_entropy_decay=True,
                     entropy_decay_proportion=0.2,
                     use_target_encoder=False,
-                    ema_decay=0.996,
+                    ema_decay=0.9,
                     use_state_diversity=False,
                     diversity_weight=1.0,
                     state_loss_type="kl_div",
@@ -1221,7 +1221,28 @@ def train_drm_model(db_path,
     elif system_type == 'saddle_system':
         # For categorical controls (derived from data loader)
         control_values = list(range(control_dim)) #all categorical options
+    elif system_type == 'social_tipping':
+        # For continuous controls, extract unique control combinations from the actual data
+        unique_controls = set()
         
+        # Sample from the dataset to find unique control combinations
+        for x, c, y, v_true in train_loader:
+            for i in range(c.shape[0]):  # For each sample in the batch
+                # Round to avoid floating point precision issues
+                control_tuple = tuple(round(val, 3) for val in c[i].cpu().numpy())
+                unique_controls.add(control_tuple)
+            
+            # Break after a few batches to avoid scanning the whole dataset
+            if len(unique_controls) >= 4:  # Max possible actions
+                break
+        
+        # Convert back to list format
+        control_values = [list(ctrl) for ctrl in unique_controls]
+        
+        print(f"Found {len(control_values)} unique control combinations for social_tipping analysis")
+        for i, ctrl in enumerate(control_values):
+            print(f"  Control {i+1}: {ctrl}")
+
     else:
         raise ValueError(f"Unknown system type: {system_type}")
 
@@ -1259,11 +1280,11 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--num_states', type=int, default=4, help='Number of discrete states')
-    parser.add_argument('--hidden_dim', type=int, default=128, help='Hidden dimension size')
+    parser.add_argument('--hidden_dim', type=int, default=32, help='Hidden dimension size')
     parser.add_argument('--state_loss_weight', type=float, default=1.0, help='Stateloss weight')
     parser.add_argument('--value_loss_weight', type=float, default=3.0, help='Value loss weight')
 
-    parser.add_argument('--predictor_type', type=str, default='control_gate', 
+    parser.add_argument('--predictor_type', type=str, default='standard', 
                         choices=['standard', 'control_gate', 'bilinear'],
                         help='Type of predictor to use (standard, control_gate or bilinear)')
 
@@ -1273,33 +1294,33 @@ if __name__ == "__main__":
                         default='cosine', help='Type of learning rate scheduler to use')
     parser.add_argument('--use_warmup', action='store_true', 
                         help='Use learning rate warmup')
-    parser.add_argument('--warmup_epochs', type=int, default=5, 
+    parser.add_argument('--warmup_epochs', type=int, default=10, 
                         help='Number of epochs for warmup')
     parser.add_argument('--min_lr', type=float, default=1e-5, 
                         help='Minimum learning rate')
     
     parser.add_argument('--use_gumbel', action='store_true', 
                         help='Use Gumbel softmax for state encoding')
-    parser.add_argument('--initial_temp', type=float, default=5.0,
+    parser.add_argument('--initial_temp', type=float, default=3.0,
                         help='Initial temperature for Gumbel softmax')
-    parser.add_argument('--min_temp', type=float, default=0.1,
+    parser.add_argument('--min_temp', type=float, default=0.5,
                         help='Minimum temperature for Gumbel softmax')
     
     parser.add_argument('--use_entropy_reg', action='store_true', 
                     help='Use entropy regularization to prevent state collapse')
-    parser.add_argument('--entropy_weight', type=float, default=5.0,
+    parser.add_argument('--entropy_weight', type=float, default=1.0,
                         help='Weight for entropy regularization loss')
     parser.add_argument('--use_entropy_decay', action='store_true', 
                         help='Decay entropy regularization weight during training')
     parser.add_argument('--no_entropy_decay', dest='use_entropy_decay', action='store_false',
                         help='Keep entropy regularization weight constant')
     parser.set_defaults(use_entropy_decay=True)  # Default is to use entropy decay
-    parser.add_argument('--entropy_decay_proportion', type=float, default=0.2,
+    parser.add_argument('--entropy_decay_proportion', type=float, default=0.5,
                     help='Proportion of training after which entropy weight reaches minimum (0.2 = 20%%)')
     
     parser.add_argument('--use_target_encoder', action='store_true',
                     help='Use target encoder with EMA updates')
-    parser.add_argument('--ema_decay', type=float, default=0.996,
+    parser.add_argument('--ema_decay', type=float, default=0.9,
                     help='EMA decay rate for target encoder (higher = slower updates)')
     
     parser.add_argument('--use_state_diversity', action='store_true',
@@ -1320,9 +1341,9 @@ if __name__ == "__main__":
 
     # System-specific parameters
     parser.add_argument('--value_method', type=str, default=None, help='Which value function should be used (system-specific)')
-    parser.add_argument('--system_type', type=str, required=True, 
-                choices=['tech_substitution', 'saddle_system'],
-                help='Type of dynamical system to train on')
+    parser.add_argument('--system-type', type=str, required=True,
+                        choices=['tech_substitution', 'saddle_system', 'social_tipping'],
+                        help='Type of dynamical system to train on')
 
     # Randomness control
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')

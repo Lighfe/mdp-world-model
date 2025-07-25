@@ -1,10 +1,11 @@
 from enum import Enum
 import torch
-from data_generation.simulations.grid import tangent_transformation, logistic_transformation
+from data_generation.simulations.grid import tangent_transformation, logistic_transformation, identity_transformation
 
 class SystemType(Enum):
     TECH_SUBSTITUTION = 'tech_substitution'
     SADDLE_SYSTEM = 'saddle_system'
+    SOCIAL_TIPPING = 'social_tipping'
 
 SYSTEM_CONFIGS = {
     'tech_substitution': {
@@ -61,6 +62,32 @@ SYSTEM_CONFIGS = {
             'angle': lambda values: (torch.atan2(values[:, 0], values[:, 1]) * 180 / torch.pi) % 360,
             'identity': lambda values: values[:, 0] + values[:, 1]  # Sum of transformed components
         }
+    },
+    'social_tipping': {
+        'control_format': 'continuous',
+        'control_dim': 4,  # b, c, f, g parameters
+        'value_methods': ['abs_distance', 'identity'],
+        'default_value_method': 'abs_distance',
+        'value_activation': {
+            'abs_distance': 'relu',  # Non-negative distance values
+            'identity': None  # No activation for identity
+        },
+        'value_dim': {
+            'abs_distance': 1,  # Single distance value
+            'identity': 2  # 2D state as-is
+        },
+        'default_value_loss': {
+            'abs_distance': 'mse',
+            'identity': 'mse'
+        },
+        'transformation': {
+            'type': 'logistic',
+            'params': {'k': 0.5, 'x_0': 0.0}
+        },
+        'value_sorting_functions': {
+            'abs_distance': lambda values: values[:, 0],  # Single distance value, sort directly
+            'identity': lambda values: values[:, 0] + values[:, 1]  # Sum of x0 + x1 for sorting
+        }
     }
 }
 
@@ -95,6 +122,8 @@ def get_transformation(system_type: SystemType):
     elif trans_config['type'] == 'logistic':
         params = trans_config['params']
         return logistic_transformation(params)
+    elif trans_config['type'] == 'identity':
+        return identity_transformation()
     else:
         raise ValueError(f"Unknown transformation type: {trans_config['type']}")
     
