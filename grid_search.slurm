@@ -4,13 +4,13 @@
 #SBATCH --qos=gpushort
 #SBATCH --time=1:30:00
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=20  # All 20 combinations in parallel
+#SBATCH --ntasks-per-node=10  # 10 tasks for 10 datasets
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
 #SBATCH --mem=8G
 #SBATCH --output=log/social_tipping_%A_%a_%t.out
 #SBATCH --error=log/social_tipping_%A_%a_%t.err
-#SBATCH --array=1-4  # 4 seeds
+#SBATCH --array=1-8  # 4 seeds × 2 num_states = 8 arrays
 
 # Print job info
 echo "Job started at $(date)"
@@ -48,23 +48,16 @@ DATASETS=(
     "social_tipping_default_tall.db"
 )
 
-# Create all combinations (10 datasets × 2 num_states = 20 combinations)
-ALL_COMBINATIONS=()
-for DATASET in "${DATASETS[@]}"; do
-    for NUM_STATES in 4 8; do
-        ALL_COMBINATIONS+=("${DATASET}:${NUM_STATES}")
-    done
-done
+# Calculate seed and num_states from array ID
+# Array 1,2: seed=1; Array 3,4: seed=2; Array 5,6: seed=3; Array 7,8: seed=4
+SEED=$(( ((SLURM_ARRAY_TASK_ID - 1) / 2) + 1 ))
 
-# Get the combination for this process
-COMBINATION=${ALL_COMBINATIONS[$SLURM_PROCID]}
-IFS=':' read -r DATASET NUM_STATES <<< "$COMBINATION"
-
-# Seed is the same for all processes in this array job
-SEED=$SLURM_ARRAY_TASK_ID
-
-# Database path
-DB_PATH="datasets/results/$DATASET"
+# Odd arrays: num_states=4; Even arrays: num_states=8
+if [ $((SLURM_ARRAY_TASK_ID % 2)) -eq 1 ]; then
+    NUM_STATES=4
+else
+    NUM_STATES=8
+fi
 
 # Fixed parameters
 SYSTEM_TYPE="social_tipping"
@@ -81,28 +74,30 @@ TEST_SIZE=1000
 ENTROPY_DECAY_PROPORTION=0.5
 ENCODER_INIT_METHOD="he"
 
+# Get the dataset for this specific task (SLURM_PROCID 0-9)
+DATASET="${DATASETS[$SLURM_PROCID]}"
+DB_PATH="datasets/results/$DATASET"
+
 echo "========================================================"
-echo "Social Tipping Test - Array $SLURM_ARRAY_TASK_ID (seed=$SEED), Process $SLURM_PROCID"
+echo "Social Tipping Test - Array $SLURM_ARRAY_TASK_ID, Process $SLURM_PROCID"
 echo "Dataset: $DATASET"
-echo "Num States: $NUM_STATES"
 echo "Seed: $SEED"
-echo "Running 1 of 20 parallel combinations in this array job"
+echo "Num States: $NUM_STATES"
+echo "This process handles 1 of 10 datasets"
 echo "========================================================"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Start GPU monitoring in background (only for process 0 to avoid conflicts)
+# Start GPU monitoring (only for process 0 to avoid conflicts)
 if [ $SLURM_PROCID -eq 0 ]; then
     nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv --loop=30 > "log/gpu_usage_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log" &
     GPU_MONITOR_PID=$!
 fi
 
 echo "------------------------------------------------------------"
-echo "Process $SLURM_PROCID - Running configuration:"
-echo "Dataset: $DATASET"
-echo "Num States: $NUM_STATES"
-echo "Seed: $SEED"
+echo "Process $SLURM_PROCID - Running dataset: $DATASET"
+echo "Num States: $NUM_STATES, Seed: $SEED"
 echo "Started at: $(date)"
 
 # Create descriptive run name
@@ -141,9 +136,9 @@ echo "Running command: $CMD"
 eval $CMD
 
 if [ $? -eq 0 ]; then
-    echo "✓ Process $SLURM_PROCID successfully completed at $(date)"
+    echo "✓ Process $SLURM_PROCID ($DATASET) completed successfully at $(date)"
 else
-    echo "✗ Process $SLURM_PROCID failed at $(date)"
+    echo "✗ Process $SLURM_PROCID ($DATASET) failed at $(date)"
 fi
 
 # Stop GPU monitoring (only if this process started it)
