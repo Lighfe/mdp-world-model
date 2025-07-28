@@ -608,7 +608,7 @@ def analyze_state_assignment_evolution(df, output_path=None):
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Dominant State (%)')
         ax.set_title('Dominant State Assignments Over Training')
-        ax.legend()
+        ax.legend(loc='upper right')
         ax.grid(True, alpha=0.4)
         
         # 2. Assignment sharpness over time (with distribution)
@@ -671,159 +671,6 @@ def analyze_state_assignment_evolution(df, output_path=None):
         'num_states': num_states
     }
 
-def analyze_state_transitions(model, 
-                              transformations,
-                              control_values=None,
-                              z_bounds=[(0, 1), (0, 1)],
-                              num_points=1000,
-                              assignment_method='argmax',
-                              device='cpu'):
-    """
-    Analyze state transitions for different control values.
-    
-    Args:
-        model: Trained DRM model
-        transformations: List of transformation functions
-        control_values: List of control values to analyze
-        z_bounds: Bounds for z-space
-        num_points: Number of points in each dimension
-        assignment_method: 'argmax' or 'soft'
-        device: Device for computation
-    
-    Returns:
-        Dictionary of transition matrices for each control value
-    """
-    # Move model to device
-    model = model.to(device)
-    model.eval()
-    
-    # Unpack transformations
-    _, inverse_transforms, _ = zip(*transformations)
-    
-    # Create grid in z-space avoiding the z=1 boundary point
-    epsilon = 1e-5  # Small adjustment to avoid exactly z=1
-    z1 = np.linspace(z_bounds[0][0], z_bounds[0][1] - epsilon, num_points)
-    z2 = np.linspace(z_bounds[1][0], z_bounds[1][1] - epsilon, num_points)
-    Z1, Z2 = np.meshgrid(z1, z2)
-    
-    # Flatten grid
-    z1_flat = Z1.flatten()
-    z2_flat = Z2.flatten()
-    
-    # Transform to x-space (original space)
-    x1_flat = np.array([inverse_transforms[0](z) for z in z1_flat])
-    x2_flat = np.array([inverse_transforms[1](z) for z in z2_flat])
-    
-    # Prepare input for model
-    x_batch = torch.tensor(np.column_stack((x1_flat, x2_flat)), dtype=torch.float32).to(device)
-    
-    # Get current state probabilities 
-    with torch.no_grad():
-        current_state_probs = model.get_state_probs(x_batch, training=False)
-        
-        # Check for NaN and stabilize if needed
-        if torch.isnan(current_state_probs).any():
-            print("WARNING: NaN values detected in current state probabilities!")
-            current_state_probs = torch.nan_to_num(current_state_probs, nan=0.0)
-            # Renormalize
-            row_sums = current_state_probs.sum(dim=1, keepdim=True)
-            current_state_probs = current_state_probs / torch.clamp(row_sums, min=1e-10)
-    
-    num_states = current_state_probs.shape[1]
-    results = {}
-    
-    # Debug info
-    print(f"Min/max state probabilities: {torch.min(current_state_probs).item()}, {torch.max(current_state_probs).item()}")
-    
-    # Clamp values for stability
-    current_state_probs = torch.clamp(current_state_probs, min=1e-10, max=1.0)
-    
-    # Determine state assignments based on chosen method
-    if assignment_method == 'argmax':
-        # Assign each point to its most likely state
-        state_assignments = torch.argmax(current_state_probs, dim=1).cpu().numpy()
-    elif assignment_method == 'soft':
-        # For soft, we'll handle differently
-        state_assignments = None
-    else:
-        raise ValueError(f"Unknown assignment method: {assignment_method}")
-    
-    # Debug assignments
-    if state_assignments is not None:
-        unique_assignments = np.unique(state_assignments)
-        print(f"Unique state assignments: {unique_assignments}")
-        assignment_counts = np.bincount(state_assignments, minlength=num_states)
-        print(f"Assignment counts: {assignment_counts}")
-    
-    for control_value in control_values:
-        # Prepare control tensor
-        control_batch = torch.full((x_batch.shape[0], 1), control_value, dtype=torch.float32).to(device)
-        
-        # Predict next state with error checking
-        with torch.no_grad():
-            # FIXED: Pass state and control separately to predict_next_state
-            next_state_probs = model.predict_next_state(current_state_probs, control_batch)
-            
-            # Check for NaN
-            if torch.isnan(next_state_probs).any():
-                print("WARNING: NaN detected in next_state_probs!")
-                next_state_probs = torch.nan_to_num(next_state_probs, nan=0.0)
-                # Renormalize
-                row_sums = next_state_probs.sum(dim=1, keepdim=True)
-                next_state_probs = next_state_probs / torch.clamp(row_sums, min=1e-10)
-        
-        # Move to CPU for analysis
-        next_state_probs = next_state_probs.cpu()
-        current_state_probs_cpu = current_state_probs.cpu()
-        
-        # Initialize transition matrix
-        transition_matrix = np.zeros((num_states, num_states))
-        
-        try:
-            if assignment_method == 'soft':
-                # Soft assignment - use outer products weighted by current state probability
-                for i in range(x_batch.shape[0]):
-                    current_probs = current_state_probs_cpu[i].numpy()
-                    next_probs = next_state_probs[i].numpy()
-                    
-                    # For each possible current state, distribute its probability to next states
-                    for current_state in range(num_states):
-                        transition_matrix[current_state] += current_probs[current_state] * next_probs
-                
-                # Normalize rows
-                row_sums = transition_matrix.sum(axis=1, keepdims=True)
-                transition_matrix = np.divide(transition_matrix, row_sums, 
-                                           out=np.zeros_like(transition_matrix), 
-                                           where=row_sums!=0)
-            else:
-                # Hard assignment - group points by their assigned state
-                for state in range(num_states):
-                    # Get indices of points assigned to this state
-                    state_indices = np.where(state_assignments == state)[0]
-                    
-                    if len(state_indices) > 0:
-                        # Get the average predicted next state distribution for these points
-                        avg_next_state = torch.mean(next_state_probs[state_indices], dim=0).numpy()
-                        transition_matrix[state] = avg_next_state
-                    else:
-                        print(f"Warning: No points assigned to state {state+1}")
-                        # Fill with uniform distribution for stability
-                        transition_matrix[state] = np.ones(num_states) / num_states
-            
-            # Ensure rows sum to 1
-            row_sums = transition_matrix.sum(axis=1, keepdims=True)
-            transition_matrix = np.divide(transition_matrix, row_sums, 
-                                       out=np.zeros_like(transition_matrix), 
-                                       where=row_sums!=0)
-            
-        except Exception as e:
-            print(f"Error computing transition matrix: {e}")
-            # Provide a fallback uniform transition matrix
-            transition_matrix = np.ones((num_states, num_states)) / num_states
-        
-        results[control_value] = transition_matrix
-    
-    return results
 
 def analyze_discrete_state_transitions(model, control_values, device='cpu', system_type=None):
     """
@@ -884,7 +731,7 @@ def analyze_discrete_state_transitions(model, control_values, device='cpu', syst
         
         # Use a string representation of the control for the key
         if isinstance(control_value, (list, tuple, np.ndarray)):
-            control_key = f"Control_{len(results)}"  # Simple numbering for multi-dim controls
+            control_key = tuple(control_value)  # Use tuple instead of string
         else:
             control_key = control_value
             
@@ -893,33 +740,47 @@ def analyze_discrete_state_transitions(model, control_values, device='cpu', syst
     return results
 
 def visualize_transition_matrices(transition_matrices, control_values, output_path=None):
-
     """
     Visualize transition matrices as heatmaps.
-    
     Args:
         transition_matrices: Dictionary of transition matrices
         control_values: List of control values used
         output_path: Path to save the visualization
-    
     Returns:
         Figure object
     """
-    num_states = transition_matrices[control_values[0]].shape[0]
+    
+    # Helper function to convert control values to dictionary keys
+    def get_control_key(control_value):
+        if isinstance(control_value, (list, tuple, np.ndarray)):
+            return tuple(control_value)
+        else:
+            return control_value
+    
+    # Get number of states from first control
+    first_control_key = get_control_key(control_values[0])
+    num_states = transition_matrices[first_control_key].shape[0]
     
     # Create heatmaps
     fig, axes = plt.subplots(1, len(control_values), figsize=(len(control_values)*6, 5))
     if len(control_values) == 1:
         axes = [axes]
-    
+        
     for i, control in enumerate(control_values):
         ax = axes[i]
-        matrix = transition_matrices[control]
+        control_key = get_control_key(control)  # Convert to proper key format
+        matrix = transition_matrices[control_key]
         
-        sns.heatmap(matrix, annot=True, fmt=".2f", cmap="Blues", 
-                  vmin=0, vmax=1, ax=ax, cbar=True)
-        
-        ax.set_title(f"Transition Probabilities (c={control})")
+        sns.heatmap(matrix, annot=True, fmt=".2f", cmap="Blues",
+                   vmin=0, vmax=1, ax=ax, cbar=True)
+        # Format control value for display
+        if isinstance(control, (list, tuple, np.ndarray)):
+            # Convert to regular Python list and round for readability
+            control_display = [round(float(x), 3) for x in control]
+        else:
+            control_display = control
+            
+        ax.set_title(f"Transition Probabilities (c={control_display})")
         ax.set_xlabel("Next State")
         ax.set_ylabel("Current State")
         ax.set_xticklabels([f"S{j+1}" for j in range(num_states)])
@@ -937,12 +798,19 @@ def visualize_transition_matrices(transition_matrices, control_values, output_pa
     
     # Print transition matrices as tables
     for control in control_values:
-        matrix = transition_matrices[control]
-        df = pd.DataFrame(matrix, 
-                       index=[f"State {i+1}" for i in range(num_states)],
-                       columns=[f"State {i+1}" for i in range(num_states)])
+        control_key = get_control_key(control)  # Convert to proper key format
+        matrix = transition_matrices[control_key]
         
-        print(f"\nTransition Probabilities for c={control}:")
+        # Format control value for display
+        if isinstance(control, (list, tuple, np.ndarray)):
+            control_display = [round(float(x), 3) for x in control]
+        else:
+            control_display = control
+            
+        df = pd.DataFrame(matrix,
+                         index=[f"State {i+1}" for i in range(num_states)],
+                         columns=[f"State {i+1}" for i in range(num_states)])
+        print(f"\nTransition Probabilities for c={control_display}:")
         print(df.round(3))
     
     return fig

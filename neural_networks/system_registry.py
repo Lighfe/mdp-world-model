@@ -35,6 +35,10 @@ SYSTEM_CONFIGS = {
         'value_sorting_functions': {
             'market_share': lambda values: values[:, 0],  # Single value, sort directly
             'identity': lambda values: values[:, 1]  / values[:, 0] # similar to angle / market share sorting
+        },
+        'visualization_bounds': {
+            'x_space': [(0, 1e6), (0, 1e6)],  # Could be [(0, np.inf), (0, np.inf)] 
+            'description': 'Large range to capture tangent transformation behavior'
         }
     },
     'saddle_system': {
@@ -61,6 +65,10 @@ SYSTEM_CONFIGS = {
         'value_sorting_functions': {
             'angle': lambda values: (torch.atan2(values[:, 0], values[:, 1]) * 180 / torch.pi) % 360,
             'identity': lambda values: values[:, 0] + values[:, 1]  # Sum of transformed components
+        },
+        'visualization_bounds': {
+            'x_space': [(-5, 5), (-5, 5)],
+            'description': 'Symmetric range around logistic transformation center'
         }
     },
     'social_tipping': {
@@ -87,6 +95,10 @@ SYSTEM_CONFIGS = {
         'value_sorting_functions': {
             'abs_distance': lambda values: values[:, 0],  # Single distance value, sort directly
             'identity': lambda values: values[:, 0] + values[:, 1]  # Sum of x0 + x1 for sorting
+        },
+        'visualization_bounds': {
+            'x_space': [(0, 1), (0, 1)],  # Or could be z_space bounds?
+            'description': 'Unit square for social tipping dynamics'
         }
     }
 }
@@ -146,3 +158,18 @@ def get_value_sorting_function(system_type: SystemType, value_method: str):
         raise ValueError(f"No sorting function for value method '{value_method}' in {system_type.value}")
     
     return config['value_sorting_functions'][value_method]
+
+
+def get_visualization_bounds(system_type: SystemType, bound_type='x_space'):
+    """
+    Get visualization bounds for a system type
+    
+    Args:
+        system_type: System type enum
+        bound_type: 'x_space' for original coordinates
+    
+    Returns:
+        List of (min, max) tuples for each dimension
+    """
+    config = SYSTEM_CONFIGS[system_type.value]
+    return config['visualization_bounds'][bound_type]

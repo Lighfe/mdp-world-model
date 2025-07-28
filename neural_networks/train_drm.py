@@ -29,12 +29,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # NOTE: absolute imports from project root
 # Import application-specific modules
-from neural_networks.system_registry import SystemType, get_system_config, get_transformation
+from neural_networks.system_registry import SystemType, get_system_config, get_transformation, get_visualization_bounds
 from neural_networks.drm_dataset import create_data_loaders, TechSubstitutionDataset, SaddleSystemDataset, SocialTippingDataset, get_saddle_configuration
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe, initialize_model_weights
 from neural_networks.drm_viz import (
-    visualize_state_space, analyze_state_transitions, analyze_discrete_state_transitions, 
+    visualize_state_space, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
     plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
     create_state_viz_from_data, analyze_state_assignment_evolution
@@ -139,6 +139,7 @@ def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_si
                     if state_mask.sum() > 0:
                         state_preds = binary_preds[state_mask]
                         state_targets = targets_device[state_mask]
+                        # All halfspace value match = state correctly learned
                         state_acc = (state_preds == state_targets).all(dim=1).float().mean()
                         state_accuracies.append(state_acc.item())
                 
@@ -618,7 +619,7 @@ def train_drm_model(db_path,
             device=device,
             num_states=num_states,
             system_type=system_type,
-            bounds=[(-5, 5), (-5, 5)],
+            bounds=get_visualization_bounds(SystemType[system_type.upper()]),
             epoch=0,  # Epoch 0
             softmax_temp=1.0
         )
@@ -739,7 +740,7 @@ def train_drm_model(db_path,
                     device=device,
                     num_states=num_states,
                     system_type=system_type,
-                    bounds=[(-5, 5), (-5, 5)],
+                    bounds=get_visualization_bounds(SystemType[system_type.upper()]),
                     epoch=0.1,  # Special epoch 0.1
                     softmax_temp=1.0
                 )
@@ -755,7 +756,7 @@ def train_drm_model(db_path,
                         device=device,
                         num_states=num_states,
                         system_type=system_type,
-                        bounds=[(-5, 5), (-5, 5)]
+                        bounds=get_visualization_bounds(SystemType[system_type.upper()])
                     )
                     print(f"Saved early state visualization to {state_vis_path}")
                 except Exception as e:
@@ -899,7 +900,7 @@ def train_drm_model(db_path,
                 system_type=system_type,
                 # TODO add point and line?
                 # TODO: move bounds to argparser
-                bounds=[(-5, 5), (-5, 5)]
+                bounds=get_visualization_bounds(SystemType[system_type.upper()])
             )
         
         # Collect state assignment data
@@ -911,7 +912,7 @@ def train_drm_model(db_path,
                 device=device,
                 num_states=num_states,
                 system_type=system_type,
-                bounds=[(-5, 5), (-5, 5)] if points_config else None,
+                bounds=get_visualization_bounds(SystemType[system_type.upper()]),
                 epoch=epoch+1,
                 softmax_temp=1.0  # Standard visualization temperature
             )
@@ -1190,7 +1191,7 @@ def train_drm_model(db_path,
         points=points_config['points'] if points_config else None,
         angles_degrees=points_config['angles_degrees'] if points_config else None,
         # TODO: move bounds to argparser
-        bounds=[(-5, 5), (-5, 5)] if points_config else None
+        bounds=get_visualization_bounds(SystemType[system_type.upper()])
     )
 
     # Analyze and visualize state transitions with argmax assignment
