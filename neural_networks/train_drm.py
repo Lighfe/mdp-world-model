@@ -337,6 +337,71 @@ def extract_state_assignment_data(model, device, num_states,
     
     return df
 
+def create_optimizer_with_bias_exclusion(model, optimizer_type, learning_rate, weight_decay):
+    """
+    Create optimizer with weight decay and bias exclusion (following I-JEPA approach)
+    """
+    if optimizer_type == 'adamw' and weight_decay > 0:
+        # Separate parameter groups: regular weights vs bias/layernorm
+        param_groups = [
+            {
+                'params': [p for n, p in model.named_parameters() 
+                          if ('bias' not in n) and (len(p.shape) != 1)],
+                'weight_decay': weight_decay
+            },
+            {
+                'params': [p for n, p in model.named_parameters() 
+                          if ('bias' in n) or (len(p.shape) == 1)],
+                'weight_decay': 0.0  # No weight decay for bias/layernorm
+            }
+        ]
+        optimizer = optim.AdamW(param_groups, lr=learning_rate)
+        print(f"Using AdamW optimizer with weight_decay={weight_decay} (bias excluded)")
+    
+    elif optimizer_type == 'adamw':
+        # AdamW without weight decay
+        optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.0)
+        print(f"Using AdamW optimizer without weight decay")
+    
+    else:  # adam
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        print(f"Using Adam optimizer")
+    
+    return optimizer
+
+def create_scheduler(optimizer, scheduler_type, epochs, warmup_epochs, use_warmup, min_lr, restart_period, restart_mult):
+    """
+    Create learning rate scheduler
+    """
+    if scheduler_type == 'fixed':
+        # No scheduler - constant learning rate
+        print("Using fixed learning rate (no scheduling)")
+        return None
+
+    
+    elif scheduler_type == 'warm_restarts':
+        # WarmRestarts - starts after warmup period
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=restart_period,
+            T_mult=restart_mult,
+            eta_min=min_lr
+        )
+        print(f"Using CosineAnnealingWarmRestarts scheduler (T_0: {restart_period}, T_mult: {restart_mult}, min_lr: {min_lr:.2e})")
+    
+    else:  # cosine
+        T_max = epochs - warmup_epochs if use_warmup else epochs
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, T_max),
+            eta_min=min_lr
+        )
+        print(f"Using CosineAnnealingLR scheduler (T_max: {T_max}, min_lr: {min_lr:.2e})")
+    
+    return lr_scheduler
+
+
+
 def train_drm_model(db_path, 
                     system_type,
                     output_dir="./neural_networks/output",
@@ -347,7 +412,7 @@ def train_drm_model(db_path,
                     probing_size=None,
                     batch_size=64, 
                     epochs=100,
-                    learning_rate=1e-5, 
+                    learning_rate=5e-5, 
                     num_states=4,
                     hidden_dim=32,
                     checkpoint_every=25,
@@ -356,11 +421,9 @@ def train_drm_model(db_path,
                     predictor_type='standard',
                     value_method=None,
                     value_loss_type=None,
-                    use_lr_scheduler=False,
-                    scheduler_type='cosine',
                     use_warmup=False,
                     warmup_epochs=10,
-                    min_lr=1e-5,
+                    min_lr=5e-6,
                     use_gumbel=False,
                     initial_temp=5.0,
                     min_temp=0.1,
@@ -380,7 +443,12 @@ def train_drm_model(db_path,
                     vicreg_nu=1.0,
                     vicreg_variance_target=0.4,
                     vicreg_invariance_schedule=True,
-                    encoder_init_method="xavier_uniform"
+                    encoder_init_method="he",
+                    optimizer_type='adam',
+                    scheduler_type='cosine',
+                    weight_decay=0.0,
+                    restart_period=20,
+                    restart_mult=1
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -555,35 +623,21 @@ def train_drm_model(db_path,
         vicreg_variance_target=vicreg_variance_target,
         vicreg_invariance_schedule=vicreg_invariance_schedule
     )
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
+
+    optimizer = create_optimizer_with_bias_exclusion(
+        model, optimizer_type, learning_rate, weight_decay)
+
     # Setup learning rate scheduling if enabled
     if use_warmup:
-        # If warmup is enabled, start with a lower learning rate
+        # Start with lower learning rate for warmup
         for param_group in optimizer.param_groups:
-            param_group['lr'] = learning_rate * 0.1  # Start at 10% of base learning rate
+            param_group['lr'] = learning_rate * 0.1
         print(f"Using warmup for first {warmup_epochs} epochs (starting LR: {learning_rate * 0.1:.2e})")
-    
-    # Create scheduler if enabled
-    lr_scheduler = None
-    if use_lr_scheduler:
-        if scheduler_type == 'plateau':
-            lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, 
-                mode='min', 
-                factor=0.5,
-                patience=5,
-                min_lr=min_lr
-            )
-            print(f"Using ReduceLROnPlateau scheduler (min_lr: {min_lr:.2e})")
-        else:  # cosine
-            T_max = epochs - warmup_epochs if use_warmup else epochs
-            lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=max(1, T_max),  # Ensure T_max is at least 1
-                eta_min=min_lr
-            )
-            print(f"Using CosineAnnealingLR scheduler (T_max: {T_max}, min_lr: {min_lr:.2e})")
+
+    # Create scheduler
+    lr_scheduler = create_scheduler(
+        optimizer, scheduler_type, epochs, warmup_epochs, 
+        use_warmup, min_lr, restart_period, restart_mult)
 
     # Add gradient clipping
     max_grad_norm = 1.0
@@ -988,19 +1042,13 @@ def train_drm_model(db_path,
 
         # TODO look at learning rate scheduling 
         # Apply learning rate scheduler after validation
-        if use_lr_scheduler and (not use_warmup or epoch >= warmup_epochs):
-            if scheduler_type == 'plateau':
-                old_lr = optimizer.param_groups[0]['lr']
-                lr_scheduler.step(val_loss)
-                new_lr = optimizer.param_groups[0]['lr']
-                if old_lr != new_lr:
-                    print(f"Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
-            else:  # cosine
-                        lr_scheduler.step()
-        
-        # Print current learning rate
+        if lr_scheduler is not None and (not use_warmup or epoch >= warmup_epochs):
+            lr_scheduler.step()
+            
+        # Always print current LR for debugging
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Current learning rate: {current_lr:.2e}")
+        
             
         # Save checkpoint every N epochs
         if (epoch + 1) % checkpoint_every == 0 or (epoch+1) == 10:
@@ -1316,29 +1364,25 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', type=str, default='neural_networks/output', help='Directory to save outputs')
     parser.add_argument('--run_id', type=str, default=None, 
                     help='Custom run ID for this training run (default: timestamp)')
-    parser.add_argument('--val_size', type=int, default=2000, help='Number of validation samples')
-    parser.add_argument('--test_size', type=int, default=2000, help='Number of test samples')
+    parser.add_argument('--val_size', type=int, default=1000, help='Number of validation samples')
+    parser.add_argument('--test_size', type=int, default=1000, help='Number of test samples')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=5e-5, help='Learning rate')
     parser.add_argument('--num_states', type=int, default=4, help='Number of discrete states')
     parser.add_argument('--hidden_dim', type=int, default=32, help='Hidden dimension size')
     parser.add_argument('--state_loss_weight', type=float, default=1.0, help='Stateloss weight')
-    parser.add_argument('--value_loss_weight', type=float, default=3.0, help='Value loss weight')
+    parser.add_argument('--value_loss_weight', type=float, default=2.0, help='Value loss weight')
 
     parser.add_argument('--predictor_type', type=str, default='standard', 
                         choices=['standard', 'control_gate', 'bilinear'],
                         help='Type of predictor to use (standard, control_gate or bilinear)')
 
-    parser.add_argument('--use_lr_scheduler', action='store_true', 
-                        help='Use learning rate scheduler')
-    parser.add_argument('--scheduler_type', type=str, choices=['plateau', 'cosine'], 
-                        default='cosine', help='Type of learning rate scheduler to use')
     parser.add_argument('--use_warmup', action='store_true', 
                         help='Use learning rate warmup')
     parser.add_argument('--warmup_epochs', type=int, default=10, 
                         help='Number of epochs for warmup')
-    parser.add_argument('--min_lr', type=float, default=1e-5, 
+    parser.add_argument('--min_lr', type=float, default=5e-6, 
                         help='Minimum learning rate')
     
     parser.add_argument('--use_gumbel', action='store_true', 
@@ -1409,6 +1453,18 @@ if __name__ == "__main__":
                     choices=['xavier_uniform', 'xavier_normal', 'chaos', 'chaos2', 'he'],
                     help='Initialization method for encoder layers')
     
+    parser.add_argument('--optimizer', type=str, choices=['adam', 'adamw'], 
+                    default='adam', help='Optimizer type')
+    parser.add_argument('--weight_decay', type=float, default=0.0, 
+                        help='Weight decay (only used with AdamW)')
+    parser.add_argument('--restart_period', type=int, default=20, 
+                        help='T_0 for warm restarts scheduler')
+    parser.add_argument('--restart_mult', type=int, default=1, 
+                        help='T_mult for warm restarts (1=fixed period, 2=doubling)')
+    parser.add_argument('--scheduler_type', type=str, 
+                    choices=['cosine', 'warm_restarts', 'fixed'], 
+                    default='cosine', help='Type of learning rate scheduler to use')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -1449,8 +1505,6 @@ if __name__ == "__main__":
         value_loss_weight=args.value_loss_weight,
         predictor_type=args.predictor_type,
         value_method=args.value_method,
-        use_lr_scheduler=args.use_lr_scheduler,
-        scheduler_type=args.scheduler_type,
         use_warmup=args.use_warmup,
         warmup_epochs=args.warmup_epochs,
         min_lr=args.min_lr,
@@ -1473,5 +1527,10 @@ if __name__ == "__main__":
         vicreg_nu=args.vicreg_nu,
         vicreg_variance_target=args.vicreg_variance_target,
         vicreg_invariance_schedule=args.vicreg_invariance_schedule,
-        encoder_init_method=args.encoder_init_method
+        encoder_init_method=args.encoder_init_method,
+        optimizer_type=args.optimizer,
+        scheduler_type=args.scheduler_type,
+        weight_decay=args.weight_decay,
+        restart_period=args.restart_period,
+        restart_mult=args.restart_mult, 
     )
