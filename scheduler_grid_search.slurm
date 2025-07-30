@@ -99,7 +99,7 @@ BASE_CMD="python -u neural_networks/train_drm.py $DB_PATH \
     --predictor_type=standard \
     --val_size=1000 \
     --test_size=1000 \
-    --probing-size=2000 \
+    --probing_size=2000 \
     --entropy_decay_proportion=0.5 \
     --use_warmup \
     --warmup_epochs=10 \

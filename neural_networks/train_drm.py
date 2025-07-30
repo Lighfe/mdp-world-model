@@ -1606,7 +1606,7 @@ if __name__ == "__main__":
 
     # System-specific parameters
     parser.add_argument('--value_method', type=str, default=None, help='Which value function should be used (system-specific)')
-    parser.add_argument('--system-type', type=str, required=True,
+    parser.add_argument('--system_type', type=str, required=True,
                         choices=['tech_substitution', 'saddle_system', 'social_tipping'],
                         help='Type of dynamical system to train on')
 
@@ -1632,7 +1632,7 @@ if __name__ == "__main__":
                     help='Target standard deviation for VICReg variance term')
     parser.add_argument('--vicreg_invariance_schedule', action='store_true',
                     help='Gradually reduce VICReg invariance weight over training')
-    parser.add_argument('--probing-size', type=int, default=None,
+    parser.add_argument('--probing_size', type=int, default=None,
                     help='Number of samples to reserve for layer probing (default: None)')
     
     parser.add_argument('--encoder_init_method', type=str, default='xavier_uniform',
