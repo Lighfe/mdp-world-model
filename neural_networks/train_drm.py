@@ -41,11 +41,6 @@ from neural_networks.drm_viz import (
     create_gif_from_frames, create_state_evolution_analysis
 )
 
-from drm_analytics import (
-    extract_and_calculate_metrics, 
-    save_state_visualization_frame
-)
-
 
 def set_all_seeds(seed):
     """Set seeds for reproducibility"""
@@ -400,6 +395,195 @@ def create_scheduler(optimizer, scheduler_type, epochs, warmup_epochs, use_warmu
     
     return lr_scheduler
 
+def calculate_epoch_metrics(grid_points, state_probs, epoch, num_states, 
+                          prev_dominant_states=None, grid_size=100):
+    """
+    Calculate all state assignment metrics for a single epoch.
+    
+    Args:
+        grid_points: np.array of shape (grid_size^2, 2) - the x1, x2 coordinates
+        state_probs: np.array of shape (grid_size^2, num_states) - state probabilities
+        epoch: current epoch number
+        num_states: number of discrete states
+        prev_dominant_states: np.array from previous epoch for stability calculation
+        grid_size: grid size for reshaping
+    
+    Returns:
+        dict: All metrics for this epoch
+    """
+    
+    # Basic info
+    metrics = {'epoch': epoch}
+    
+    # 1. State usage (how often each state is dominant)
+    dominant_states = np.argmax(state_probs, axis=1)
+    
+    for state_idx in range(num_states):
+        usage = np.mean(dominant_states == state_idx)
+        metrics[f'state_{state_idx}_usage'] = usage
+    
+    # 2. Mean probabilities per state
+    for state_idx in range(num_states):
+        mean_prob = np.mean(state_probs[:, state_idx])
+        metrics[f'state_{state_idx}_mean'] = mean_prob
+    
+    # 3. Sharpness: per-grid-point entropy (discreteness measure)
+    # Calculate entropy per grid point: -sum(p * log(p)) for each row
+    per_point_entropy = -np.sum(state_probs * np.log(state_probs + 1e-8), axis=1)
+    metrics['sharpness_mean'] = np.mean(per_point_entropy)
+    metrics['sharpness_std'] = np.std(per_point_entropy)
+    
+    # 4. Stability metrics (if we have previous epoch data)
+    if prev_dominant_states is not None:
+        # Dominant state stability: % of points keeping same dominant state
+        same_dominant = np.mean(dominant_states == prev_dominant_states) * 100
+        metrics['dominant_stability'] = same_dominant
+        
+        # Note: For probability stability, we'd need previous state_probs
+        # For now, we'll skip this or store prev_state_probs too if needed
+    
+    return metrics, dominant_states
+
+def save_state_visualization_frame(grid_points, state_probs, epoch, num_states, 
+                                 output_dir, run_id, bounds, grid_size=100):
+    """
+    Save a single visualization frame for this epoch.
+    
+    Args:
+        grid_points: np.array of shape (grid_size^2, 2)
+        state_probs: np.array of shape (grid_size^2, num_states)
+        epoch: current epoch number
+        num_states: number of states
+        output_dir: directory to save frame (unique per run)
+        run_id: run identifier  
+        bounds: [(x1_min, x1_max), (x2_min, x2_max)]
+        grid_size: grid size for reshaping
+    
+    Returns:
+        str: path to saved frame
+    """
+    import tempfile
+    
+    # Calculate grid layout
+    cols_per_row = 2
+    rows = (num_states + cols_per_row - 1) // cols_per_row
+    
+    fig, axes = plt.subplots(rows, cols_per_row, figsize=(12, 6*rows))
+    if rows == 1:
+        axes = axes.reshape(1, -1)
+    
+    for state_idx in range(num_states):
+        row_idx = state_idx // cols_per_row
+        col_idx = state_idx % cols_per_row
+        ax = axes[row_idx, col_idx]
+        
+        # Reshape probabilities to grid
+        state_grid = state_probs[:, state_idx].reshape(grid_size, grid_size)
+        
+        # Create heatmap
+        im = ax.imshow(state_grid, extent=[bounds[0][0], bounds[0][1], 
+                                          bounds[1][0], bounds[1][1]], 
+                      origin='lower', cmap='viridis', vmin=0, vmax=1, 
+                      aspect='auto', interpolation='bilinear')
+        
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        ax.set_title(f'State {state_idx + 1}')
+        ax.grid(True, alpha=0.3)
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('State Assignment Strength')
+    
+    # Hide unused subplots
+    for idx in range(num_states, rows * cols_per_row):
+        row_idx = idx // cols_per_row
+        col_idx = idx % cols_per_row
+        axes[row_idx, col_idx].set_visible(False)
+    
+    # Overall title
+    fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
+    plt.tight_layout()
+    
+    # SAFE FILE SAVING
+    # Temp files are created in each run's unique output_dir (no conflicts!)
+    final_filename = f"state_frame_epoch_{epoch}.png"
+    output_dir = Path(output_dir)
+    final_path = output_dir / final_filename
+    
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Use atomic write with temp file in the SAME directory
+    # Since output_dir is unique per run (from SLURM), no collision risk
+    with tempfile.NamedTemporaryFile(
+        dir=output_dir,  # Safe: each run has unique output_dir
+        suffix='.tmp', 
+        delete=False
+    ) as temp_file:
+        temp_path = Path(temp_file.name)
+    
+    try:
+        # Save to temporary file first
+        plt.savefig(temp_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        # Atomically move to final location
+        temp_path.rename(final_path)
+        
+    except Exception as e:
+        # Clean up temp file on error
+        if temp_path.exists():
+            temp_path.unlink()
+        raise e
+    
+    return str(final_path)
+
+def extract_and_calculate_metrics(model, device, num_states, system_type, 
+                                bounds=None, grid_size=100, epoch=None,
+                                prev_dominant_states=None):
+    """
+    Extract state assignments and immediately calculate metrics.
+    
+    This replaces the extract_state_assignment_data + metric calculation pipeline.
+    
+    Args:
+        model: DRM model
+        device: PyTorch device
+        num_states: number of discrete states
+        system_type: system type string for bounds lookup
+        bounds: visualization bounds (if None, will get from system registry)
+        grid_size: grid size for visualization
+        epoch: current epoch
+        prev_dominant_states: previous epoch's dominant states for stability
+    
+    Returns:
+        tuple: (metrics_dict, dominant_states, grid_points, state_probs)
+    """
+    
+    # Get proper bounds if not provided
+    if bounds is None:
+        bounds = get_visualization_bounds(SystemType[system_type.upper()])
+    
+    # Generate grid points
+    x_range = np.linspace(bounds[0][0], bounds[0][1], grid_size)
+    y_range = np.linspace(bounds[1][0], bounds[1][1], grid_size)
+    xx, yy = np.meshgrid(x_range, y_range)
+    grid_points = np.column_stack([xx.ravel(), yy.ravel()])
+    
+    # Get model predictions
+    model.eval()
+    with torch.no_grad():
+        obs_tensor = torch.FloatTensor(grid_points).to(device)
+        state_probs = model.get_state_probs(obs_tensor, training=False, soft=True)
+        state_probs = state_probs.cpu().numpy()
+    
+    # Calculate metrics immediately
+    metrics, dominant_states = calculate_epoch_metrics(
+        grid_points, state_probs, epoch, num_states, prev_dominant_states, grid_size
+    )
+    
+    return metrics, dominant_states, grid_points, state_probs
 
 
 def train_drm_model(db_path, 
