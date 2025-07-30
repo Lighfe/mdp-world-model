@@ -812,9 +812,6 @@ def train_drm_model(db_path,
 
     # Setup learning rate scheduling if enabled
     if use_warmup:
-        # Start with lower learning rate for warmup
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = learning_rate * 0.1
         print(f"Using warmup for first {warmup_epochs} epochs (starting LR: {learning_rate * 0.1:.2e})")
 
     # Create scheduler
@@ -895,6 +892,10 @@ def train_drm_model(db_path,
         if use_gumbel:
             current_temp = model.update_temperature(epoch, epochs)
             print(f"Epoch {epoch+1}/{epochs} - Gumbel temperature: {current_temp:.4f}")
+
+        # Always print current LR for debugging
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Current learning rate: {current_lr:.2e}")
 
         # Handle warmup if enabled
         if use_warmup and epoch < warmup_epochs:
@@ -1229,10 +1230,6 @@ def train_drm_model(db_path,
         # Apply learning rate scheduler after validation
         if lr_scheduler is not None and (not use_warmup or epoch >= warmup_epochs):
             lr_scheduler.step()
-            
-        # Always print current LR for debugging
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f"Current learning rate: {current_lr:.2e}")
         
             
         # Save checkpoint every N epochs
