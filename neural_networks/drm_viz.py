@@ -336,341 +336,129 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
    plt.close(fig)
    return fig, axes
 
-def create_state_viz_from_data(df, output_path=None, epochs=None, epoch_frequency=None, 
-                               create_gif=False, gif_duration=0.5, figsize=(12, 10)):
+def create_state_evolution_analysis(all_metrics, output_path, num_states):
     """
-    Create state space visualizations from DataFrame data.
+    Create the analysis plot from collected metrics.
     
     Args:
-        df: DataFrame with state assignment data (from extract_state_assignment_data)
-        output_path: Base path for saving (without extension)
-        epochs: List of specific epochs to plot, or None for all
-        epoch_frequency: Plot every nth epoch, or None to use epochs parameter
-        create_gif: If True, create animated GIF for multiple epochs
-        gif_duration: Duration per frame in GIF (seconds)
-        figsize: Figure size for plots
+        all_metrics: list of metric dicts from all epochs
+        output_path: path to save analysis plot
+        num_states: number of states
     
     Returns:
-        dict: Dictionary with information about created files
+        dict: analysis results
     """
-    
-    # Get available epochs
-    if 'epoch' in df.columns:
-        available_epochs = sorted(df['epoch'].unique())
-    else:
-        available_epochs = [None]  # Single epoch case
-    
-    # Determine which epochs to plot
-    if epochs is not None:
-        epochs_to_plot = [e for e in epochs if e in available_epochs]
-    elif epoch_frequency is not None:
-        epochs_to_plot = available_epochs[::epoch_frequency]
-    else:
-        epochs_to_plot = available_epochs
-    
-    if not epochs_to_plot:
-        raise ValueError("No valid epochs found to plot")
-    
-    # Get metadata from DataFrame attributes
-    grid_size = df.attrs.get('grid_size', int(np.sqrt(len(df) // len(epochs_to_plot))))
-    bounds = df.attrs.get('bounds', [(-5, 5), (-5, 5)])
-    num_states = df.attrs.get('num_states', 4)
-    
-    created_files = []
-    temp_files = []  # For GIF creation
-    temp_dir = None
-    
-    # Create temp directory if creating GIF
-    if create_gif and len(epochs_to_plot) > 1:
-        temp_dir = tempfile.mkdtemp()
-    
-    try:
-        for epoch in epochs_to_plot:
-            # Filter data for this epoch
-            if epoch is not None:
-                epoch_df = df[df['epoch'] == epoch].copy()
-                epoch_suffix = f"_epoch_{epoch}"
-            else:
-                epoch_df = df.copy()
-                epoch_suffix = ""
-            
-            if len(epoch_df) == 0:
-                continue
-                
-            # Determine subplot layout based on number of states
-            if num_states <= 4:
-                nrows, ncols = 2, 2
-            elif num_states <= 6:
-                nrows, ncols = 2, 3
-            elif num_states <= 9:
-                nrows, ncols = 3, 3
-            elif num_states <= 12:
-                nrows, ncols = 3, 4
-            else:
-                nrows, ncols = 4, 4  # Max 4x4 grid, limit to 16 states
-            
-            # Adjust figure size based on layout
-            fig_width = ncols * (figsize[0] / 2)
-            fig_height = nrows * (figsize[1] / 2)
-            
-            # Create the visualization
-            fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height))
-            if nrows * ncols == 1:
-                axes = [axes]
-            else:
-                axes = axes.ravel()
-            
-            # Get grid coordinates
-            x1_vals = epoch_df['x1'].values.reshape(grid_size, grid_size)
-            x2_vals = epoch_df['x2'].values.reshape(grid_size, grid_size)
-            
-            # Plot each state
-            for state_idx in range(min(num_states, nrows * ncols)):
-                ax = axes[state_idx]
-                
-                # Get state probabilities and reshape to grid
-                state_col = f'state_{state_idx}_prob'
-                if state_col in epoch_df.columns:
-                    state_probs = epoch_df[state_col].values.reshape(grid_size, grid_size)
-                else:
-                    # Fallback: create empty grid
-                    state_probs = np.zeros((grid_size, grid_size))
-                
-                # Create heatmap
-                im = ax.imshow(state_probs, extent=[bounds[0][0], bounds[0][1], 
-                                                   bounds[1][0], bounds[1][1]], 
-                              origin='lower', cmap='viridis', vmin=0, vmax=1, 
-                              aspect='auto', interpolation='bilinear')
-                
-                # Styling
-                ax.set_xlabel('x1')
-                ax.set_ylabel('x2')
-                ax.set_title(f'State {state_idx + 1}')
-                ax.grid(True, alpha=0.3)
-                
-                # Add colorbar
-                cbar = plt.colorbar(im, ax=ax)
-                cbar.set_label('State Assignment Strength')
-            
-            # Hide unused subplots
-            for idx in range(num_states, len(axes)):
-                axes[idx].set_visible(False)
-            
-            # Overall title
-            if epoch is not None:
-                fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
-            else:
-                fig.suptitle('State Space Visualization', fontsize=14)
-            
-            plt.tight_layout()
-            
-            # Save or store for GIF
-            if create_gif and len(epochs_to_plot) > 1:
-                temp_path = os.path.join(temp_dir, f"state_viz_epoch_{epoch}.png")
-                plt.savefig(temp_path, dpi=150, bbox_inches='tight')
-                temp_files.append(temp_path)
-                plt.close()
-            elif output_path:
-                file_path = f"{output_path}{epoch_suffix}.png"
-                plt.savefig(file_path, dpi=150, bbox_inches='tight')
-                created_files.append(file_path)
-                plt.close()
-            else:
-                plt.show()
-        
-        # Create GIF if requested
-        if create_gif and len(temp_files) > 1 and output_path:
-            try:
-                gif_path = f"{output_path}_animation.gif"
-                
-                with imageio.get_writer(gif_path, mode='I', duration=gif_duration) as writer:
-                    for temp_file in temp_files:
-                        image = imageio.imread(temp_file)
-                        writer.append_data(image)
-                
-                created_files.append(gif_path)
-                print(f"Created GIF with {len(temp_files)} frames: {gif_path}")
-                
-            except ImportError:
-                print("Warning: imageio not available for GIF creation")
-                print("Individual PNG files saved instead")
-                
-                # If GIF creation fails, save individual files instead
-                if output_path:
-                    for i, temp_file in enumerate(temp_files):
-                        final_path = f"{output_path}_frame_{i:03d}.png"
-                        shutil.copy2(temp_file, final_path)
-                        created_files.append(final_path)
-    
-    finally:
-        # Clean up temp directory
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-    
-    return {
-        'created_files': created_files,
-        'epochs_plotted': epochs_to_plot,
-        'num_files': len(created_files)
-    }
-
-
-def analyze_state_assignment_evolution(df, output_path=None):
-    """
-    Analyze how state assignments change over training epochs.
-    
-    Args:
-        df: DataFrame with state assignment data across epochs
-        output_path: Path to save analysis plot
-    
-    Returns:
-        dict: Analysis results
-    """
-
-    # Paul Tol's muted color scheme for colorblind accessibility
-    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
-    
-    if 'epoch' not in df.columns:
-        print("No epoch information found in DataFrame")
+    if not all_metrics:
         return {}
     
-    epochs = sorted(df['epoch'].unique())
-    num_states = df.attrs.get('num_states', 4)
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
     
-    # Calculate metrics per epoch
-    metrics = []
-    for i, epoch in enumerate(epochs):
-        epoch_df = df[df['epoch'] == epoch]
-        
-        epoch_metrics = {'epoch': epoch}
-        
-        # State usage (how often each state is dominant)
-        state_usage = epoch_df['dominant_state'].value_counts(normalize=True)
-        for state_idx in range(num_states):
-            epoch_metrics[f'state_{state_idx}_usage'] = state_usage.get(state_idx, 0.0)
-        
-        # Mean probabilities per state
-        for state_idx in range(num_states):
-            state_col = f'state_{state_idx}_prob'
-            if state_col in epoch_df.columns:
-                mean_prob = epoch_df[state_col].mean()  
-                epoch_metrics[f'state_{state_idx}_mean'] = mean_prob
-        
-        # Sharpness: per-grid-point entropy
-        state_prob_cols = [f'state_{i}_prob' for i in range(num_states) if f'state_{i}_prob' in epoch_df.columns]
-        if state_prob_cols:
-            state_probs = epoch_df[state_prob_cols].values
-            # Calculate entropy per grid point: -sum(p * log(p)) for each row
-            per_point_entropy = -np.sum(state_probs * np.log(state_probs + 1e-8), axis=1)
-            epoch_metrics['sharpness_mean'] = np.mean(per_point_entropy)
-            epoch_metrics['sharpness_std'] = np.std(per_point_entropy)
-        
-        # Stability metrics (require previous epoch)
-        if i > 0:
-            prev_epoch = epochs[i-1]
-            prev_epoch_df = df[df['epoch'] == prev_epoch]
-            
-            # Ensure same ordering
-            epoch_df_sorted = epoch_df.sort_values('grid_idx')
-            prev_epoch_df_sorted = prev_epoch_df.sort_values('grid_idx')
-            
-            if len(epoch_df_sorted) == len(prev_epoch_df_sorted):
-                # Dominant state stability: % of points keeping same dominant state
-                current_dominant = epoch_df_sorted['dominant_state'].values
-                prev_dominant = prev_epoch_df_sorted['dominant_state'].values
-                same_dominant = np.mean(current_dominant == prev_dominant) * 100
-                epoch_metrics['dominant_stability'] = same_dominant
-                
-                # Probability change stability: average change converted to stability %
-                current_probs = epoch_df_sorted[state_prob_cols].values
-                prev_probs = prev_epoch_df_sorted[state_prob_cols].values
-                avg_prob_change = np.mean(np.abs(current_probs - prev_probs))
-                # Convert to stability percentage (lower change = higher stability)
-                prob_stability = (1 - min(avg_prob_change * 2, 1.0)) * 100  # Scale factor 2 to make it more sensitive
-                epoch_metrics['probability_stability'] = prob_stability
-        
-        metrics.append(epoch_metrics)
-    
-    metrics_df = pd.DataFrame(metrics)
+    # Convert to arrays for plotting
+    epochs = [m['epoch'] for m in all_metrics]
     
     # Create analysis plots (2x2 layout)
-    if output_path:
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        
-        # 1. State usage over time
-        ax = axes[0, 0]
-        for state_idx in range(num_states):
-            usage_col = f'state_{state_idx}_usage'
-            if usage_col in metrics_df.columns:
-                color = tol_muted[state_idx % len(tol_muted)]
-                ax.plot(metrics_df['epoch'], metrics_df[usage_col] * 100, 
-                       label=f'State {state_idx + 1}', marker='o', 
-                       markersize=3, linewidth=1.5, color=color)
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Dominant State (%)')
-        ax.set_title('Dominant State Assignments Over Training')
-        ax.legend(loc='upper right')
-        ax.grid(True, alpha=0.4)
-        
-        # 2. Assignment sharpness over time (with distribution)
-        ax = axes[0, 1]
-        if 'sharpness_mean' in metrics_df.columns:
-            epochs_arr = metrics_df['epoch'].values
-            mean_sharpness = metrics_df['sharpness_mean'].values
-            std_sharpness = metrics_df['sharpness_std'].values
-            
-            # Plot mean line
-            ax.plot(epochs_arr, mean_sharpness, color='blue', linewidth=2, label='Mean')
-            # Plot standard deviation as shaded area
-            ax.fill_between(epochs_arr, 
-                           mean_sharpness - std_sharpness,
-                           mean_sharpness + std_sharpness,
-                           alpha=0.3, color='blue', label='± 1 std')
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Per-Point Entropy (Sharpness)')
-        ax.set_title('Assignment Sharpness Over Training\n(Lower = More Discrete)')
-        ax.legend()
-        ax.grid(True, alpha=0.4)
-        
-        # 3. Mean probabilities per state
-        ax = axes[1, 0]
-        for state_idx in range(num_states):
-            mean_col = f'state_{state_idx}_mean' 
-            if mean_col in metrics_df.columns:
-                color = tol_muted[state_idx % len(tol_muted)]
-                ax.plot(metrics_df['epoch'], metrics_df[mean_col], 
-                       label=f'State {state_idx + 1}', marker='o', 
-                       markersize=3, linewidth=1.5, color=color)
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Mean Probability')
-        ax.set_title('Average State Assignment Strength')
-        ax.grid(True, alpha=0.4)
-        
-        # 4. Stability metrics (both on same scale)
-        ax = axes[1, 1]
-        if 'dominant_stability' in metrics_df.columns:
-            # Remove first epoch (no stability data)
-            stability_df = metrics_df.dropna(subset=['dominant_stability'])
-            ax.plot(stability_df['epoch'], stability_df['dominant_stability'], 
-            color='#AA4499', marker='o', linewidth=2, label='Dominant State Stability')  # Purple
-            ax.plot(stability_df['epoch'], stability_df['probability_stability'], 
-            color='#DDDDDD', marker='^', linewidth=2, label='Probability Stability')    # Gray
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Stability (%)')
-        ax.set_title('Assignment Stability Between Epochs')
-        ax.legend()
-        ax.grid(True, alpha=0.4)
-        ax.set_ylim(50, 100)  # Both are percentages
-        
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close()
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # 1. State usage over time
+    ax = axes[0, 0]
+    for state_idx in range(num_states):
+        usage_values = [m.get(f'state_{state_idx}_usage', 0) * 100 for m in all_metrics]
+        color = tol_muted[state_idx % len(tol_muted)]
+        ax.plot(epochs, usage_values, label=f'State {state_idx + 1}', 
+               marker='o', linewidth=2, color=color)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Dominant State (%)')
+    ax.set_title('Dominant State Assignments Over Training')
+    ax.legend()
+    ax.grid(True, alpha=0.4)
+    
+    # 2. Assignment sharpness over time
+    ax = axes[0, 1]
+    sharpness_mean = [m.get('sharpness_mean', 0) for m in all_metrics]
+    sharpness_std = [m.get('sharpness_std', 0) for m in all_metrics]
+    
+    ax.plot(epochs, sharpness_mean, color='blue', linewidth=2, label='Mean')
+    ax.fill_between(epochs, 
+                   np.array(sharpness_mean) - np.array(sharpness_std),
+                   np.array(sharpness_mean) + np.array(sharpness_std),
+                   alpha=0.3, color='blue', label='± 1 std')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Per-Point Entropy (Sharpness)')
+    ax.set_title('Assignment Sharpness Over Training\n(Lower = More Discrete)')
+    ax.legend()
+    ax.grid(True, alpha=0.4)
+    
+    # 3. Mean probabilities per state
+    ax = axes[1, 0]
+    for state_idx in range(num_states):
+        mean_values = [m.get(f'state_{state_idx}_mean', 0) for m in all_metrics]
+        color = tol_muted[state_idx % len(tol_muted)]
+        ax.plot(epochs, mean_values, label=f'State {state_idx + 1}', 
+               marker='o', linewidth=2, color=color)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Mean Probability')
+    ax.set_title('Average State Assignment Strength')
+    ax.grid(True, alpha=0.4)
+    
+    # 4. Stability metrics
+    ax = axes[1, 1]
+    stability_epochs = []
+    dominant_stability = []
+    
+    for m in all_metrics:
+        if 'dominant_stability' in m:
+            stability_epochs.append(m['epoch'])
+            dominant_stability.append(m['dominant_stability'])
+    
+    if stability_epochs:
+        ax.plot(stability_epochs, dominant_stability, 
+               color='#AA4499', marker='o', linewidth=2, label='Dominant State Stability')
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Stability (%)')
+    ax.set_title('Assignment Stability Between Epochs')
+    ax.legend()
+    ax.grid(True, alpha=0.4)
+    ax.set_ylim(50, 100)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
     
     return {
-        'metrics_df': metrics_df,
-        'epochs_analyzed': len(epochs),
+        'epochs_analyzed': len(all_metrics),
         'num_states': num_states
     }
 
+def create_gif_from_frames(frame_paths, output_path, gif_duration=250):
+    """
+    Create GIF from saved frame paths.
+    
+    Args:
+        frame_paths: list of paths to frame images
+        output_path: path for output GIF (without extension)
+        gif_duration: duration per frame in milliseconds
+    
+    Returns:
+        str: path to created GIF
+    """
+    try:
+        import imageio
+        
+        gif_path = f"{output_path}_animation.gif"
+        
+        with imageio.get_writer(gif_path, mode='I', duration=gif_duration/1000.0) as writer:
+            for frame_path in frame_paths:
+                image = imageio.imread(frame_path)
+                writer.append_data(image)
+        
+        print(f"Created GIF with {len(frame_paths)} frames: {gif_path}")
+        return gif_path
+        
+    except ImportError:
+        print("Warning: imageio not available for GIF creation")
+        return None
 
 def analyze_discrete_state_transitions(model, control_values, device='cpu', system_type=None):
     """
@@ -1139,6 +927,8 @@ def visualize_model_architecture(model, output_path):
         return fallback_path + '.png'
 
 
+### NOTE: NO LONGER IN USE
+
 def analyze_mdp_from_model(model, control_values=None, device='cpu'):
     """
     Analyze MDP representation from a trained DRM model using one-hot encoding
@@ -1363,3 +1153,341 @@ def plot_vicreg_metrics(history, test_metrics, vicreg_weights, save_path=None):
         print(f"Saved VICReg metrics visualization to {save_path}")
     
     return fig
+
+### NOTE: DEPRECATED
+
+def create_state_viz_from_data(df, output_path=None, epochs=None, epoch_frequency=None, 
+                               create_gif=False, gif_duration=0.5, figsize=(12, 10)):
+    """
+    NOTE: DEPRECATED
+    Create state space visualizations from DataFrame data.
+    
+    Args:
+        df: DataFrame with state assignment data (from extract_state_assignment_data)
+        output_path: Base path for saving (without extension)
+        epochs: List of specific epochs to plot, or None for all
+        epoch_frequency: Plot every nth epoch, or None to use epochs parameter
+        create_gif: If True, create animated GIF for multiple epochs
+        gif_duration: Duration per frame in GIF (seconds)
+        figsize: Figure size for plots
+    
+    Returns:
+        dict: Dictionary with information about created files
+    """
+    
+    # Get available epochs
+    if 'epoch' in df.columns:
+        available_epochs = sorted(df['epoch'].unique())
+    else:
+        available_epochs = [None]  # Single epoch case
+    
+    # Determine which epochs to plot
+    if epochs is not None:
+        epochs_to_plot = [e for e in epochs if e in available_epochs]
+    elif epoch_frequency is not None:
+        epochs_to_plot = available_epochs[::epoch_frequency]
+    else:
+        epochs_to_plot = available_epochs
+    
+    if not epochs_to_plot:
+        raise ValueError("No valid epochs found to plot")
+    
+    # Get metadata from DataFrame attributes
+    grid_size = df.attrs.get('grid_size', int(np.sqrt(len(df) // len(epochs_to_plot))))
+    bounds = df.attrs.get('bounds', [(-5, 5), (-5, 5)])
+    num_states = df.attrs.get('num_states', 4)
+    
+    created_files = []
+    temp_files = []  # For GIF creation
+    temp_dir = None
+    
+    # Create temp directory if creating GIF
+    if create_gif and len(epochs_to_plot) > 1:
+        temp_dir = tempfile.mkdtemp()
+    
+    try:
+        for epoch in epochs_to_plot:
+            # Filter data for this epoch
+            if epoch is not None:
+                epoch_df = df[df['epoch'] == epoch].copy()
+                epoch_suffix = f"_epoch_{epoch}"
+            else:
+                epoch_df = df.copy()
+                epoch_suffix = ""
+            
+            if len(epoch_df) == 0:
+                continue
+                
+            # Determine subplot layout based on number of states
+            if num_states <= 4:
+                nrows, ncols = 2, 2
+            elif num_states <= 6:
+                nrows, ncols = 2, 3
+            elif num_states <= 9:
+                nrows, ncols = 3, 3
+            elif num_states <= 12:
+                nrows, ncols = 3, 4
+            else:
+                nrows, ncols = 4, 4  # Max 4x4 grid, limit to 16 states
+            
+            # Adjust figure size based on layout
+            fig_width = ncols * (figsize[0] / 2)
+            fig_height = nrows * (figsize[1] / 2)
+            
+            # Create the visualization
+            fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height))
+            if nrows * ncols == 1:
+                axes = [axes]
+            else:
+                axes = axes.ravel()
+            
+            # Get grid coordinates
+            x1_vals = epoch_df['x1'].values.reshape(grid_size, grid_size)
+            x2_vals = epoch_df['x2'].values.reshape(grid_size, grid_size)
+            
+            # Plot each state
+            for state_idx in range(min(num_states, nrows * ncols)):
+                ax = axes[state_idx]
+                
+                # Get state probabilities and reshape to grid
+                state_col = f'state_{state_idx}_prob'
+                if state_col in epoch_df.columns:
+                    state_probs = epoch_df[state_col].values.reshape(grid_size, grid_size)
+                else:
+                    # Fallback: create empty grid
+                    state_probs = np.zeros((grid_size, grid_size))
+                
+                # Create heatmap
+                im = ax.imshow(state_probs, extent=[bounds[0][0], bounds[0][1], 
+                                                   bounds[1][0], bounds[1][1]], 
+                              origin='lower', cmap='viridis', vmin=0, vmax=1, 
+                              aspect='auto', interpolation='bilinear')
+                
+                # Styling
+                ax.set_xlabel('x1')
+                ax.set_ylabel('x2')
+                ax.set_title(f'State {state_idx + 1}')
+                ax.grid(True, alpha=0.3)
+                
+                # Add colorbar
+                cbar = plt.colorbar(im, ax=ax)
+                cbar.set_label('State Assignment Strength')
+            
+            # Hide unused subplots
+            for idx in range(num_states, len(axes)):
+                axes[idx].set_visible(False)
+            
+            # Overall title
+            if epoch is not None:
+                fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
+            else:
+                fig.suptitle('State Space Visualization', fontsize=14)
+            
+            plt.tight_layout()
+            
+            # Save or store for GIF
+            if create_gif and len(epochs_to_plot) > 1:
+                temp_path = os.path.join(temp_dir, f"state_viz_epoch_{epoch}.png")
+                plt.savefig(temp_path, dpi=150, bbox_inches='tight')
+                temp_files.append(temp_path)
+                plt.close()
+            elif output_path:
+                file_path = f"{output_path}{epoch_suffix}.png"
+                plt.savefig(file_path, dpi=150, bbox_inches='tight')
+                created_files.append(file_path)
+                plt.close()
+            else:
+                plt.show()
+        
+        # Create GIF if requested
+        if create_gif and len(temp_files) > 1 and output_path:
+            try:
+                gif_path = f"{output_path}_animation.gif"
+                
+                with imageio.get_writer(gif_path, mode='I', duration=gif_duration) as writer:
+                    for temp_file in temp_files:
+                        image = imageio.imread(temp_file)
+                        writer.append_data(image)
+                
+                created_files.append(gif_path)
+                print(f"Created GIF with {len(temp_files)} frames: {gif_path}")
+                
+            except ImportError:
+                print("Warning: imageio not available for GIF creation")
+                print("Individual PNG files saved instead")
+                
+                # If GIF creation fails, save individual files instead
+                if output_path:
+                    for i, temp_file in enumerate(temp_files):
+                        final_path = f"{output_path}_frame_{i:03d}.png"
+                        shutil.copy2(temp_file, final_path)
+                        created_files.append(final_path)
+    
+    finally:
+        # Clean up temp directory
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+    
+    return {
+        'created_files': created_files,
+        'epochs_plotted': epochs_to_plot,
+        'num_files': len(created_files)
+    }
+
+def analyze_state_assignment_evolution(df, output_path=None):
+    """
+    NOTE: DEPRECATED!
+    Analyze how state assignments change over training epochs.
+    
+    Args:
+        df: DataFrame with state assignment data across epochs
+        output_path: Path to save analysis plot
+    
+    Returns:
+        dict: Analysis results
+    """
+
+    # Paul Tol's muted color scheme for colorblind accessibility
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    if 'epoch' not in df.columns:
+        print("No epoch information found in DataFrame")
+        return {}
+    
+    epochs = sorted(df['epoch'].unique())
+    num_states = df.attrs.get('num_states', 4)
+    
+    # Calculate metrics per epoch
+    metrics = []
+    for i, epoch in enumerate(epochs):
+        epoch_df = df[df['epoch'] == epoch]
+        
+        epoch_metrics = {'epoch': epoch}
+        
+        # State usage (how often each state is dominant)
+        state_usage = epoch_df['dominant_state'].value_counts(normalize=True)
+        for state_idx in range(num_states):
+            epoch_metrics[f'state_{state_idx}_usage'] = state_usage.get(state_idx, 0.0)
+        
+        # Mean probabilities per state
+        for state_idx in range(num_states):
+            state_col = f'state_{state_idx}_prob'
+            if state_col in epoch_df.columns:
+                mean_prob = epoch_df[state_col].mean()  
+                epoch_metrics[f'state_{state_idx}_mean'] = mean_prob
+        
+        # Sharpness: per-grid-point entropy
+        state_prob_cols = [f'state_{i}_prob' for i in range(num_states) if f'state_{i}_prob' in epoch_df.columns]
+        if state_prob_cols:
+            state_probs = epoch_df[state_prob_cols].values
+            # Calculate entropy per grid point: -sum(p * log(p)) for each row
+            per_point_entropy = -np.sum(state_probs * np.log(state_probs + 1e-8), axis=1)
+            epoch_metrics['sharpness_mean'] = np.mean(per_point_entropy)
+            epoch_metrics['sharpness_std'] = np.std(per_point_entropy)
+        
+        # Stability metrics (require previous epoch)
+        if i > 0:
+            prev_epoch = epochs[i-1]
+            prev_epoch_df = df[df['epoch'] == prev_epoch]
+            
+            # Ensure same ordering
+            epoch_df_sorted = epoch_df.sort_values('grid_idx')
+            prev_epoch_df_sorted = prev_epoch_df.sort_values('grid_idx')
+            
+            if len(epoch_df_sorted) == len(prev_epoch_df_sorted):
+                # Dominant state stability: % of points keeping same dominant state
+                current_dominant = epoch_df_sorted['dominant_state'].values
+                prev_dominant = prev_epoch_df_sorted['dominant_state'].values
+                same_dominant = np.mean(current_dominant == prev_dominant) * 100
+                epoch_metrics['dominant_stability'] = same_dominant
+                
+                # Probability change stability: average change converted to stability %
+                current_probs = epoch_df_sorted[state_prob_cols].values
+                prev_probs = prev_epoch_df_sorted[state_prob_cols].values
+                avg_prob_change = np.mean(np.abs(current_probs - prev_probs))
+                # Convert to stability percentage (lower change = higher stability)
+                prob_stability = (1 - min(avg_prob_change * 2, 1.0)) * 100  # Scale factor 2 to make it more sensitive
+                epoch_metrics['probability_stability'] = prob_stability
+        
+        metrics.append(epoch_metrics)
+    
+    metrics_df = pd.DataFrame(metrics)
+    
+    # Create analysis plots (2x2 layout)
+    if output_path:
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        
+        # 1. State usage over time
+        ax = axes[0, 0]
+        for state_idx in range(num_states):
+            usage_col = f'state_{state_idx}_usage'
+            if usage_col in metrics_df.columns:
+                color = tol_muted[state_idx % len(tol_muted)]
+                ax.plot(metrics_df['epoch'], metrics_df[usage_col] * 100, 
+                       label=f'State {state_idx + 1}', marker='o', 
+                       markersize=3, linewidth=1.5, color=color)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Dominant State (%)')
+        ax.set_title('Dominant State Assignments Over Training')
+        ax.legend(loc='upper right')
+        ax.grid(True, alpha=0.4)
+        
+        # 2. Assignment sharpness over time (with distribution)
+        ax = axes[0, 1]
+        if 'sharpness_mean' in metrics_df.columns:
+            epochs_arr = metrics_df['epoch'].values
+            mean_sharpness = metrics_df['sharpness_mean'].values
+            std_sharpness = metrics_df['sharpness_std'].values
+            
+            # Plot mean line
+            ax.plot(epochs_arr, mean_sharpness, color='blue', linewidth=2, label='Mean')
+            # Plot standard deviation as shaded area
+            ax.fill_between(epochs_arr, 
+                           mean_sharpness - std_sharpness,
+                           mean_sharpness + std_sharpness,
+                           alpha=0.3, color='blue', label='± 1 std')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Per-Point Entropy (Sharpness)')
+        ax.set_title('Assignment Sharpness Over Training\n(Lower = More Discrete)')
+        ax.legend()
+        ax.grid(True, alpha=0.4)
+        
+        # 3. Mean probabilities per state
+        ax = axes[1, 0]
+        for state_idx in range(num_states):
+            mean_col = f'state_{state_idx}_mean' 
+            if mean_col in metrics_df.columns:
+                color = tol_muted[state_idx % len(tol_muted)]
+                ax.plot(metrics_df['epoch'], metrics_df[mean_col], 
+                       label=f'State {state_idx + 1}', marker='o', 
+                       markersize=3, linewidth=1.5, color=color)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Mean Probability')
+        ax.set_title('Average State Assignment Strength')
+        ax.grid(True, alpha=0.4)
+        
+        # 4. Stability metrics (both on same scale)
+        ax = axes[1, 1]
+        if 'dominant_stability' in metrics_df.columns:
+            # Remove first epoch (no stability data)
+            stability_df = metrics_df.dropna(subset=['dominant_stability'])
+            ax.plot(stability_df['epoch'], stability_df['dominant_stability'], 
+            color='#AA4499', marker='o', linewidth=2, label='Dominant State Stability')  # Purple
+            ax.plot(stability_df['epoch'], stability_df['probability_stability'], 
+            color='#DDDDDD', marker='^', linewidth=2, label='Probability Stability')    # Gray
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Stability (%)')
+        ax.set_title('Assignment Stability Between Epochs')
+        ax.legend()
+        ax.grid(True, alpha=0.4)
+        ax.set_ylim(50, 100)  # Both are percentages
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    
+    return {
+        'metrics_df': metrics_df,
+        'epochs_analyzed': len(epochs),
+        'num_states': num_states
+    }

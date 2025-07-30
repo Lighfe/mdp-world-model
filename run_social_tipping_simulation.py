@@ -230,7 +230,7 @@ if __name__ == "__main__":
 # Hypothesis is that this will better learn with mix of delta_t
 #python run_social_tipping_simulation.py --db-name "social_tipping_default_tmedium.db" --actions default --delta-t 7.27 21.81
 #python run_social_tipping_simulation.py --db-name "social_tipping_default_tsmallhigh.db" --actions default --delta-t 2.181 58.887
-#python run_social_tipping_simulation.py --db-name "social_tipping_default_tsmallhigh.db" --actions default --delta-t 2.181 7.27 21.81 58.887
+#python run_social_tipping_simulation.py --db-name "social_tipping_default_tall.db" --actions default --delta-t 2.181 7.27 21.81 58.887
 
 
 # test multi actions
@@ -238,4 +238,4 @@ if __name__ == "__main__":
 #python run_social_tipping_simulation.py --db-name "social_tipping_default_subsidy_t58.db" --actions default subsidy --delta-t 58.887
 
 # test multi actions multi delta_t
-#python run_social_tipping_simulation.py --db-name "social_tipping_default_tsmallhigh.db" --actions default subsidy --delta-t 2.181 7.27 21.81 58.887
+#python run_social_tipping_simulation.py --db-name "social_tipping_default__subsidy_tall.db" --actions default subsidy --delta-t 2.181 7.27 21.81 58.887

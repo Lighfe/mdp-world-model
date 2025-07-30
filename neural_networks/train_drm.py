@@ -37,14 +37,13 @@ from neural_networks.drm_viz import (
     visualize_state_space, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
     plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
-    create_state_viz_from_data, analyze_state_assignment_evolution
+    create_state_viz_from_data, analyze_state_assignment_evolution,
+    create_gif_from_frames, create_state_evolution_analysis
 )
 
 from drm_analytics import (
     extract_and_calculate_metrics, 
-    save_state_visualization_frame,
-    create_gif_from_frames,
-    create_state_evolution_analysis
+    save_state_visualization_frame
 )
 
 
@@ -1222,7 +1221,7 @@ def train_drm_model(db_path,
         'mu': vicreg_mu, 
         'nu': vicreg_nu
     }
-    plot_vicreg_metrics(history, test_metrics, vicreg_weights, os.path.join(output_dir, f"vicreg_metrics_{run_id}.png"))
+    # plot_vicreg_metrics(history, test_metrics, vicreg_weights, os.path.join(output_dir, f"vicreg_metrics_{run_id}.png"))
 
     # Visualize Modl Architecture
     #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
