@@ -4,6 +4,8 @@ from pathlib import Path
 import re
 import os
 import sys
+import matplotlib.pyplot as plt
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -16,7 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe
 
-from neural_networks.train_drm import run_layer_probing 
+from neural_networks.train_drm import run_layer_probing
+from neural_networks.system_registry import SystemType, get_visualization_bounds
 
 
 def analyze_experiment_results(base_dir, group_by=None, metrics=None, aggregate_seeds=False):
@@ -412,33 +415,320 @@ def batch_layer_probing(base_output_dir, probing_size=5000, device='cuda', overw
 # Usage example:
 # results_df = batch_layer_probing("neural_networks/output/multi_saddle_probing", probing_size=5000)
 
-
-# Usage examples:
-if __name__ == "__main__":
-    # Your specific question - average test_state_loss by value_method
-    results = analyze_experiment_results(
-        "neural_networks/output/saddle_datasets_double", 
-        group_by="value_method", 
-        metrics="test_state_loss"
-    )
-    print("Average test_state_loss by value_method:")
-    print(results)
+def calculate_epoch_metrics(grid_points, state_probs, epoch, num_states, 
+                          prev_dominant_states=None, grid_size=100):
+    """
+    Calculate all state assignment metrics for a single epoch.
     
-    # Aggregate over seeds and group by value_method
-    results_seeds = analyze_experiment_results(
-        "neural_networks/output/saddle_datasets_double", 
-        group_by="value_method", 
-        metrics="test_state_loss",
-        aggregate_seeds=True
-    )
-    print("\nAverage test_state_loss by value_method (aggregated over seeds):")
-    print(results_seeds)
+    Args:
+        grid_points: np.array of shape (grid_size^2, 2) - the x1, x2 coordinates
+        state_probs: np.array of shape (grid_size^2, num_states) - state probabilities
+        epoch: current epoch number
+        num_states: number of discrete states
+        prev_dominant_states: np.array from previous epoch for stability calculation
+        grid_size: grid size for reshaping
     
-    # Get full dataframe to explore
-    full_df = analyze_experiment_results(
-        "neural_networks/output/saddle_datasets_double"
+    Returns:
+        dict: All metrics for this epoch
+    """
+    
+    # Basic info
+    metrics = {'epoch': epoch}
+    
+    # 1. State usage (how often each state is dominant)
+    dominant_states = np.argmax(state_probs, axis=1)
+    
+    for state_idx in range(num_states):
+        usage = np.mean(dominant_states == state_idx)
+        metrics[f'state_{state_idx}_usage'] = usage
+    
+    # 2. Mean probabilities per state
+    for state_idx in range(num_states):
+        mean_prob = np.mean(state_probs[:, state_idx])
+        metrics[f'state_{state_idx}_mean'] = mean_prob
+    
+    # 3. Sharpness: per-grid-point entropy (discreteness measure)
+    # Calculate entropy per grid point: -sum(p * log(p)) for each row
+    per_point_entropy = -np.sum(state_probs * np.log(state_probs + 1e-8), axis=1)
+    metrics['sharpness_mean'] = np.mean(per_point_entropy)
+    metrics['sharpness_std'] = np.std(per_point_entropy)
+    
+    # 4. Stability metrics (if we have previous epoch data)
+    if prev_dominant_states is not None:
+        # Dominant state stability: % of points keeping same dominant state
+        same_dominant = np.mean(dominant_states == prev_dominant_states) * 100
+        metrics['dominant_stability'] = same_dominant
+        
+        # Note: For probability stability, we'd need previous state_probs
+        # For now, we'll skip this or store prev_state_probs too if needed
+    
+    return metrics, dominant_states
+
+
+def save_state_visualization_frame(grid_points, state_probs, epoch, num_states, 
+                                 output_dir, run_id, bounds, grid_size=100):
+    """
+    Save a single visualization frame for this epoch.
+    
+    Args:
+        grid_points: np.array of shape (grid_size^2, 2)
+        state_probs: np.array of shape (grid_size^2, num_states)
+        epoch: current epoch number
+        num_states: number of states
+        output_dir: directory to save frame (unique per run)
+        run_id: run identifier  
+        bounds: [(x1_min, x1_max), (x2_min, x2_max)]
+        grid_size: grid size for reshaping
+    
+    Returns:
+        str: path to saved frame
+    """
+    import tempfile
+    
+    # Calculate grid layout
+    cols_per_row = 2
+    rows = (num_states + cols_per_row - 1) // cols_per_row
+    
+    fig, axes = plt.subplots(rows, cols_per_row, figsize=(12, 6*rows))
+    if rows == 1:
+        axes = axes.reshape(1, -1)
+    
+    for state_idx in range(num_states):
+        row_idx = state_idx // cols_per_row
+        col_idx = state_idx % cols_per_row
+        ax = axes[row_idx, col_idx]
+        
+        # Reshape probabilities to grid
+        state_grid = state_probs[:, state_idx].reshape(grid_size, grid_size)
+        
+        # Create heatmap
+        im = ax.imshow(state_grid, extent=[bounds[0][0], bounds[0][1], 
+                                          bounds[1][0], bounds[1][1]], 
+                      origin='lower', cmap='viridis', vmin=0, vmax=1, 
+                      aspect='auto', interpolation='bilinear')
+        
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        ax.set_title(f'State {state_idx + 1}')
+        ax.grid(True, alpha=0.3)
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('State Assignment Strength')
+    
+    # Hide unused subplots
+    for idx in range(num_states, rows * cols_per_row):
+        row_idx = idx // cols_per_row
+        col_idx = idx % cols_per_row
+        axes[row_idx, col_idx].set_visible(False)
+    
+    # Overall title
+    fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
+    plt.tight_layout()
+    
+    # SAFE FILE SAVING
+    # Temp files are created in each run's unique output_dir (no conflicts!)
+    final_filename = f"state_frame_epoch_{epoch}.png"
+    output_dir = Path(output_dir)
+    final_path = output_dir / final_filename
+    
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Use atomic write with temp file in the SAME directory
+    # Since output_dir is unique per run (from SLURM), no collision risk
+    with tempfile.NamedTemporaryFile(
+        dir=output_dir,  # Safe: each run has unique output_dir
+        suffix='.tmp', 
+        delete=False
+    ) as temp_file:
+        temp_path = Path(temp_file.name)
+    
+    try:
+        # Save to temporary file first
+        plt.savefig(temp_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        # Atomically move to final location
+        temp_path.rename(final_path)
+        
+    except Exception as e:
+        # Clean up temp file on error
+        if temp_path.exists():
+            temp_path.unlink()
+        raise e
+    
+    return str(final_path)
+
+
+def create_gif_from_frames(frame_paths, output_path, gif_duration=250):
+    """
+    Create GIF from saved frame paths.
+    
+    Args:
+        frame_paths: list of paths to frame images
+        output_path: path for output GIF (without extension)
+        gif_duration: duration per frame in milliseconds
+    
+    Returns:
+        str: path to created GIF
+    """
+    try:
+        import imageio
+        
+        gif_path = f"{output_path}_animation.gif"
+        
+        with imageio.get_writer(gif_path, mode='I', duration=gif_duration/1000.0) as writer:
+            for frame_path in frame_paths:
+                image = imageio.imread(frame_path)
+                writer.append_data(image)
+        
+        print(f"Created GIF with {len(frame_paths)} frames: {gif_path}")
+        return gif_path
+        
+    except ImportError:
+        print("Warning: imageio not available for GIF creation")
+        return None
+
+
+def create_state_evolution_analysis(all_metrics, output_path, num_states):
+    """
+    Create the analysis plot from collected metrics.
+    
+    Args:
+        all_metrics: list of metric dicts from all epochs
+        output_path: path to save analysis plot
+        num_states: number of states
+    
+    Returns:
+        dict: analysis results
+    """
+    if not all_metrics:
+        return {}
+    
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    # Convert to arrays for plotting
+    epochs = [m['epoch'] for m in all_metrics]
+    
+    # Create analysis plots (2x2 layout)
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # 1. State usage over time
+    ax = axes[0, 0]
+    for state_idx in range(num_states):
+        usage_values = [m.get(f'state_{state_idx}_usage', 0) * 100 for m in all_metrics]
+        color = tol_muted[state_idx % len(tol_muted)]
+        ax.plot(epochs, usage_values, label=f'State {state_idx + 1}', 
+               marker='o', linewidth=2, color=color)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Dominant State (%)')
+    ax.set_title('Dominant State Assignments Over Training')
+    ax.legend()
+    ax.grid(True, alpha=0.4)
+    
+    # 2. Assignment sharpness over time
+    ax = axes[0, 1]
+    sharpness_mean = [m.get('sharpness_mean', 0) for m in all_metrics]
+    sharpness_std = [m.get('sharpness_std', 0) for m in all_metrics]
+    
+    ax.plot(epochs, sharpness_mean, color='blue', linewidth=2, label='Mean')
+    ax.fill_between(epochs, 
+                   np.array(sharpness_mean) - np.array(sharpness_std),
+                   np.array(sharpness_mean) + np.array(sharpness_std),
+                   alpha=0.3, color='blue', label='± 1 std')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Per-Point Entropy (Sharpness)')
+    ax.set_title('Assignment Sharpness Over Training\n(Lower = More Discrete)')
+    ax.legend()
+    ax.grid(True, alpha=0.4)
+    
+    # 3. Mean probabilities per state
+    ax = axes[1, 0]
+    for state_idx in range(num_states):
+        mean_values = [m.get(f'state_{state_idx}_mean', 0) for m in all_metrics]
+        color = tol_muted[state_idx % len(tol_muted)]
+        ax.plot(epochs, mean_values, label=f'State {state_idx + 1}', 
+               marker='o', linewidth=2, color=color)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Mean Probability')
+    ax.set_title('Average State Assignment Strength')
+    ax.grid(True, alpha=0.4)
+    
+    # 4. Stability metrics
+    ax = axes[1, 1]
+    stability_epochs = []
+    dominant_stability = []
+    
+    for m in all_metrics:
+        if 'dominant_stability' in m:
+            stability_epochs.append(m['epoch'])
+            dominant_stability.append(m['dominant_stability'])
+    
+    if stability_epochs:
+        ax.plot(stability_epochs, dominant_stability, 
+               color='#AA4499', marker='o', linewidth=2, label='Dominant State Stability')
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Stability (%)')
+    ax.set_title('Assignment Stability Between Epochs')
+    ax.legend()
+    ax.grid(True, alpha=0.4)
+    ax.set_ylim(50, 100)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    return {
+        'epochs_analyzed': len(all_metrics),
+        'num_states': num_states
+    }
+
+
+def extract_and_calculate_metrics(model, device, num_states, system_type, 
+                                bounds=None, grid_size=100, epoch=None,
+                                prev_dominant_states=None):
+    """
+    Extract state assignments and immediately calculate metrics.
+    
+    This replaces the extract_state_assignment_data + metric calculation pipeline.
+    
+    Args:
+        model: DRM model
+        device: PyTorch device
+        num_states: number of discrete states
+        system_type: system type string for bounds lookup
+        bounds: visualization bounds (if None, will get from system registry)
+        grid_size: grid size for visualization
+        epoch: current epoch
+        prev_dominant_states: previous epoch's dominant states for stability
+    
+    Returns:
+        tuple: (metrics_dict, dominant_states, grid_points, state_probs)
+    """
+    
+    # Get proper bounds if not provided
+    if bounds is None:
+        bounds = get_visualization_bounds(SystemType[system_type.upper()])
+    
+    # Generate grid points
+    x_range = np.linspace(bounds[0][0], bounds[0][1], grid_size)
+    y_range = np.linspace(bounds[1][0], bounds[1][1], grid_size)
+    xx, yy = np.meshgrid(x_range, y_range)
+    grid_points = np.column_stack([xx.ravel(), yy.ravel()])
+    
+    # Get model predictions
+    model.eval()
+    with torch.no_grad():
+        obs_tensor = torch.FloatTensor(grid_points).to(device)
+        state_probs = model.get_state_probs(obs_tensor, training=False, soft=True)
+        state_probs = state_probs.cpu().numpy()
+    
+    # Calculate metrics immediately
+    metrics, dominant_states = calculate_epoch_metrics(
+        grid_points, state_probs, epoch, num_states, prev_dominant_states, grid_size
     )
-    print(f"\nFull dataset shape: {full_df.shape}")
-    print(f"Available columns: {full_df.columns.tolist()}")
-
-
+    
+    return metrics, dominant_states, grid_points, state_probs

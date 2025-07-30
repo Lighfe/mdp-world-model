@@ -40,6 +40,14 @@ from neural_networks.drm_viz import (
     create_state_viz_from_data, analyze_state_assignment_evolution
 )
 
+from drm_analytics import (
+    extract_and_calculate_metrics, 
+    save_state_visualization_frame,
+    create_gif_from_frames,
+    create_state_evolution_analysis
+)
+
+
 def set_all_seeds(seed):
     """Set seeds for reproducibility"""
     torch.manual_seed(seed)
@@ -602,28 +610,44 @@ def train_drm_model(db_path,
         "val_vicreg_total": [],
         "val_vicreg_invariance": [],
         "val_vicreg_variance": [],
-        "val_vicreg_covariance": []
+        "val_vicreg_covariance": [],
+        "state_metrics": []
     }
 
-    # Initialize state assignment data collection 
-    state_assignment_data = []
+    # Initialize state metrics collection (replace state_assignment_data)
     collect_every_n_epochs = 2
     collect_initial = True  
-    collect_early_batches = 50
+    collect_early_batches = 20
+    visualization_frames = []  # Store frame paths for GIF
+    prev_dominant_states = None  # For stability calculation
 
     # COLLECTION RIGHT AFTER INITIALIZATION (EPOCH 0)
     if collect_initial:
         print("Collecting initial state assignments (epoch 0)...")
-        epoch_0_data = extract_state_assignment_data(
+        bounds = get_visualization_bounds(SystemType[system_type.upper()])
+        
+        metrics, dominant_states, grid_points, state_probs = extract_and_calculate_metrics(
             model=model,
             device=device,
             num_states=num_states,
             system_type=system_type,
-            bounds=get_visualization_bounds(SystemType[system_type.upper()]),
-            epoch=0,  # Epoch 0
-            softmax_temp=1.0
+            bounds=bounds,
+            epoch=0,
+            prev_dominant_states=None
         )
-        state_assignment_data.append(epoch_0_data)
+        
+        # Store metrics
+        history["state_metrics"].append(metrics)
+        
+        # Save visualization frame
+        frame_path = save_state_visualization_frame(
+            grid_points, state_probs, epoch=0, num_states=num_states,
+            output_dir=output_dir, run_id=run_id, bounds=bounds
+        )
+        visualization_frames.append(frame_path)
+        
+        # Keep dominant states for next epoch's stability calculation
+        prev_dominant_states = dominant_states
 
     
     # Start training loop
@@ -735,18 +759,33 @@ def train_drm_model(db_path,
             if epoch == 0 and batch_idx == collect_early_batches:
                 print(f"Collecting early state assignments (epoch 0.1, after {collect_early_batches} batches)...")
                 model.eval()  # Switch to eval mode for collection
-                epoch_01_data = extract_state_assignment_data(
+                
+                bounds = get_visualization_bounds(SystemType[system_type.upper()])
+                
+                metrics, dominant_states, grid_points, state_probs = extract_and_calculate_metrics(
                     model=model,
                     device=device,
                     num_states=num_states,
                     system_type=system_type,
-                    bounds=get_visualization_bounds(SystemType[system_type.upper()]),
-                    epoch=0.1,  # Special epoch 0.1
-                    softmax_temp=1.0
+                    bounds=bounds,
+                    epoch=0.1,
+                    prev_dominant_states=prev_dominant_states
                 )
-                state_assignment_data.append(epoch_01_data)
-
-                # Visualize the state space
+                
+                # Store metrics
+                history["state_metrics"].append(metrics)
+                
+                # Save visualization frame
+                frame_path = save_state_visualization_frame(
+                    grid_points, state_probs, epoch=0.1, num_states=num_states,
+                    output_dir=output_dir, run_id=run_id, bounds=bounds
+                )
+                visualization_frames.append(frame_path)
+                
+                # Update for stability calculation
+                prev_dominant_states = dominant_states
+                
+                # Keep the existing early state visualization code if you want
                 try:
                     state_vis_path = os.path.join(output_dir, f"states_after_batch{batch_idx}_{run_id}.png")
                     visualize_state_space(
@@ -756,13 +795,13 @@ def train_drm_model(db_path,
                         device=device,
                         num_states=num_states,
                         system_type=system_type,
-                        bounds=get_visualization_bounds(SystemType[system_type.upper()])
+                        bounds=bounds
                     )
                     print(f"Saved early state visualization to {state_vis_path}")
                 except Exception as e:
                     print(f"Warning: Failed to create early state visualization: {e}")
 
-                model.train() # set back to train mode
+                model.train()  # set back to train mode
         
         # Average training losses
         num_batches = len(train_loader)
@@ -884,7 +923,7 @@ def train_drm_model(db_path,
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
 
 
-        if epoch == 20 or epoch == 50:
+        if epoch == 10 or epoch == 50:
 
             # Visualize the state space
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
@@ -905,19 +944,48 @@ def train_drm_model(db_path,
         
         # Collect state assignment data
         if (epoch % collect_every_n_epochs == 0) or (epoch in (0, 1, 2, 3)):
-            print(f"Collecting state assignment data for epoch {epoch}...")
+            print(f"Collecting state assignment metrics for epoch {epoch+1}...")
             
-            epoch_data = extract_state_assignment_data(
+            bounds = get_visualization_bounds(SystemType[system_type.upper()])
+            
+            metrics, dominant_states, grid_points, state_probs = extract_and_calculate_metrics(
                 model=model,
                 device=device,
                 num_states=num_states,
                 system_type=system_type,
-                bounds=get_visualization_bounds(SystemType[system_type.upper()]),
+                bounds=bounds,
                 epoch=epoch+1,
-                softmax_temp=1.0  # Standard visualization temperature
+                prev_dominant_states=prev_dominant_states
             )
             
-            state_assignment_data.append(epoch_data)
+            # Store metrics
+            history["state_metrics"].append(metrics)
+            
+            # Save visualization frame
+            frame_path = save_state_visualization_frame(
+                grid_points, state_probs, epoch=epoch+1, num_states=num_states,
+                output_dir=output_dir, run_id=run_id, bounds=bounds
+            )
+            visualization_frames.append(frame_path)
+            
+            # Update for next epoch's stability calculation
+            prev_dominant_states = dominant_states
+
+            # Keep the existing state space visualization if you want
+            try:
+                state_vis_path = os.path.join(output_dir, f"states_epoch{epoch+1}_{run_id}.png")
+                visualize_state_space(
+                    model=model,
+                    output_path=state_vis_path,
+                    transformations=[transformation, transformation],
+                    device=device,
+                    num_states=num_states,
+                    system_type=system_type,
+                    bounds=bounds
+                )
+                print(f"Saved state visualization to {state_vis_path}")
+            except Exception as e:
+                print(f"Warning: Failed to create state visualization: {e}")
 
         # TODO look at learning rate scheduling 
         # Apply learning rate scheduler after validation
@@ -948,33 +1016,35 @@ def train_drm_model(db_path,
             }, checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
 
-    # After training, combine all epoch data
-    if state_assignment_data:
-        print("Combining state assignment data from all epochs...")
-        combined_df = pd.concat(state_assignment_data, ignore_index=True)
+    # After training, create visualizations and analysis from collected metrics
+    if history["state_metrics"]:
+        print("Creating state evolution analysis and GIF...")
         
-        # Save the data
-        data_path = os.path.join(output_dir, f"state_assignment_data_{run_id}.pkl")
-        with open(data_path, 'wb') as f:
-            pickle.dump(combined_df, f)
-        print(f"Saved state assignment data to {data_path}")
-
-        # TODO: Remove gif later
-        # create GIF of evolution
-        gif_result = create_state_viz_from_data(
-                df=combined_df,
-                output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
-                epoch_frequency=1,
-                create_gif=True,
-                gif_duration=250
-            )
-        print(f"Created state evolution GIF")
-
-        # Create analysis of state assignment evolution
+        # Create state evolution analysis plot
         analysis_path = os.path.join(output_dir, f"state_evolution_analysis_{run_id}.png")
-        analysis_result = analyze_state_assignment_evolution(combined_df, analysis_path)
+        analysis_result = create_state_evolution_analysis(
+            all_metrics=history["state_metrics"],
+            output_path=analysis_path,
+            num_states=num_states
+        )
         print(f"Created state evolution analysis: {analysis_path}")
         
+        # Create GIF from collected frames
+        if len(visualization_frames) > 1:
+            gif_path = create_gif_from_frames(
+                frame_paths=visualization_frames,
+                output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
+                gif_duration=250
+            )
+            if gif_path:
+                print(f"Created state evolution GIF: {gif_path}")
+
+    # Optional: Clean up individual frame files to save space
+    for frame_path in visualization_frames:
+        try:
+            os.remove(frame_path)
+        except:
+            pass    
 
 
     # Final evaluation on test set
@@ -1204,24 +1274,15 @@ def train_drm_model(db_path,
         # For categorical controls (derived from data loader)
         control_values = list(range(control_dim)) #all categorical options
     elif system_type == 'social_tipping':
-        # For continuous controls, extract unique control combinations from the actual data
-        unique_controls = set()
+        # Use all possible control combinations for analysis
+        control_values = [
+            [0.6, 0.65, 0.65, 0.65],   # default
+            [0.65, 0.65, 0.65, 0.65],  # subsidy  
+            [0.6, 0.6, 0.65, 0.65],    # tax
+            [0.6, 0.65, 0.65, 0.6]     # campaign
+        ]
         
-        # Sample from the dataset to find unique control combinations
-        for x, c, y, v_true in train_loader:
-            for i in range(c.shape[0]):  # For each sample in the batch
-                # Round to avoid floating point precision issues
-                control_tuple = tuple(round(val, 3) for val in c[i].cpu().numpy())
-                unique_controls.add(control_tuple)
-            
-            # Break after a few batches to avoid scanning the whole dataset
-            if len(unique_controls) >= 4:  # Max possible actions
-                break
-        
-        # Convert back to list format
-        control_values = [list(ctrl) for ctrl in unique_controls]
-        
-        print(f"Found {len(control_values)} unique control combinations for social_tipping analysis")
+        print(f"Using all possible control combinations for social_tipping analysis")
         for i, ctrl in enumerate(control_values):
             print(f"  Control {i+1}: {ctrl}")
 
