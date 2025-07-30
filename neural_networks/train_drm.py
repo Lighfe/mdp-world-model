@@ -515,17 +515,16 @@ def save_state_visualization_frame(grid_points, state_probs, epoch, num_states,
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Use atomic write with temp file in the SAME directory
-    # Since output_dir is unique per run (from SLURM), no collision risk
     with tempfile.NamedTemporaryFile(
-        dir=output_dir,  # Safe: each run has unique output_dir
-        suffix='.tmp', 
+        dir=output_dir,
+        suffix='.tmp',  # ← Keep .tmp for proper atomic operations
         delete=False
     ) as temp_file:
         temp_path = Path(temp_file.name)
     
     try:
-        # Save to temporary file first
-        plt.savefig(temp_path, dpi=150, bbox_inches='tight')
+        # Save to temporary file first - explicitly specify PNG format
+        plt.savefig(temp_path, format='png', dpi=150, bbox_inches='tight')  # ← Add format='png'
         plt.close()
         
         # Atomically move to final location
