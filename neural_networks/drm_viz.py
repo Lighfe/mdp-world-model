@@ -85,45 +85,32 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
     
     # Create first y-axis for batch entropy
     ax1 = plt.gca()
-    
+
     # Plot batch entropy if it exists
     if 'train_batch_entropy' in history and len(history['train_batch_entropy']) > 0:
-        line1 = ax1.plot(history['train_batch_entropy'], 'b-', label='Train Batch Entropy')
+        ax1.plot(history['train_batch_entropy'], 'b-', label='Train Batch Entropy')
         if 'val_batch_entropy' in history and len(history['val_batch_entropy']) > 0:
-            line2 = ax1.plot(history['val_batch_entropy'], 'b--', label='Val Batch Entropy')
-    
+            ax1.plot(history['val_batch_entropy'], 'b--', label='Val Batch Entropy')
+
     ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Batch Entropy (Higher = More Uniform)', color='b')
-    ax1.tick_params(axis='y', labelcolor='b')
-    ax1.set_ylim(0, 1)  # Entropy is normalized to [0, 1]
+    ax1.set_ylabel('Batch Entropy (Higher = More Uniform)')  # Remove color='b'
+    ax1.set_ylim(0, 1)
     ax1.grid(True, alpha=0.3)
-    
+
     # Create second y-axis for entropy weight
     ax2 = ax1.twinx()
-    
+
     # Plot entropy weight if it exists
     if 'train_entropy_weight' in history and len(history['train_entropy_weight']) > 0:
-        line3 = ax2.plot(history['train_entropy_weight'], 'r-', label='Entropy Weight', linewidth=2)
-    
-    ax2.set_ylabel('Entropy Loss Weight', color='r')
-    ax2.tick_params(axis='y', labelcolor='r')
-    
-    # Add combined legend
-    lines = []
-    labels = []
-    if 'train_batch_entropy' in history and len(history['train_batch_entropy']) > 0:
-        lines.extend([plt.Line2D([0], [0], color='b', linestyle='-')])
-        labels.extend(['Train Batch Entropy'])
-        if 'val_batch_entropy' in history and len(history['val_batch_entropy']) > 0:
-            lines.extend([plt.Line2D([0], [0], color='b', linestyle='--')])
-            labels.extend(['Val Batch Entropy'])
-    if 'train_entropy_weight' in history and len(history['train_entropy_weight']) > 0:
-        lines.extend([plt.Line2D([0], [0], color='r', linestyle='-')])
-        labels.extend(['Entropy Weight'])
-    
-    if lines:
-        ax1.legend(lines, labels, loc='upper right')
-    
+        ax2.plot(history['train_entropy_weight'], 'r-', label='Entropy Weight', linewidth=2)
+
+    ax2.set_ylabel('Entropy Loss Weight')  # Remove color='r'
+
+    # Combine legends properly
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+
     plt.title('Batch Entropy & Entropy Weight')
     
     plt.tight_layout()

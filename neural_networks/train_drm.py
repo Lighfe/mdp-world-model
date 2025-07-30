@@ -654,6 +654,7 @@ def train_drm_model(db_path,
         "train_vicreg_invariance": [],
         "train_vicreg_variance": [],
         "train_vicreg_covariance": [],
+        "train_entropy_weight": [],
         "val_loss": [],
         "val_state_loss": [],
         "val_value_loss": [],
@@ -737,6 +738,7 @@ def train_drm_model(db_path,
         # TODO: maybe move this to the loss function
         if loss_fn.use_entropy_reg:
             entropy_weight = loss_fn.update_entropy_weight(epoch, epochs)
+            history["train_entropy_weight"].append(entropy_weight)
             decay_status = "decaying" if loss_fn.use_entropy_decay else "constant"
             print(f"Epoch {epoch+1}/{epochs} - Entropy weight: {entropy_weight:.4f} ({decay_status})")
         
