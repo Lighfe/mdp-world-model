@@ -38,9 +38,9 @@ from neural_networks.drm_viz import (
     visualize_transition_matrices, visualize_model_architecture, 
     plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
     create_state_viz_from_data, analyze_state_assignment_evolution,
-    create_gif_from_frames, create_state_evolution_analysis
+    create_gif_from_frames, create_state_evolution_analysis,
+    save_state_data_frame, create_gif_from_data_frames
 )
-
 
 def set_all_seeds(seed):
     """Set seeds for reproducibility"""
@@ -444,99 +444,36 @@ def calculate_epoch_metrics(grid_points, state_probs, epoch, num_states,
     
     return metrics, dominant_states
 
-def save_state_visualization_frame(grid_points, state_probs, epoch, num_states, 
-                                 output_dir, run_id, bounds, grid_size=100):
+def save_state_data_frame(grid_points, state_probs, epoch, num_states, 
+                         output_dir, run_id, bounds, grid_size=100):
     """
-    Save a single visualization frame for this epoch.
-    
-    Args:
-        grid_points: np.array of shape (grid_size^2, 2)
-        state_probs: np.array of shape (grid_size^2, num_states)
-        epoch: current epoch number
-        num_states: number of states
-        output_dir: directory to save frame (unique per run)
-        run_id: run identifier  
-        bounds: [(x1_min, x1_max), (x2_min, x2_max)]
-        grid_size: grid size for reshaping
-    
-    Returns:
-        str: path to saved frame
+    Save lightweight state data instead of PNG frame.
     """
-    import tempfile
+    import pickle
     
-    # Calculate grid layout
-    cols_per_row = 2
-    rows = (num_states + cols_per_row - 1) // cols_per_row
+    # Create lightweight data structure
+    frame_data = {
+        'grid_points': grid_points,
+        'state_probs': state_probs,
+        'epoch': epoch,
+        'num_states': num_states,
+        'bounds': bounds,
+        'grid_size': grid_size,
+        'run_id': run_id
+    }
     
-    fig, axes = plt.subplots(rows, cols_per_row, figsize=(12, 6*rows))
-    if rows == 1:
-        axes = axes.reshape(1, -1)
-    
-    for state_idx in range(num_states):
-        row_idx = state_idx // cols_per_row
-        col_idx = state_idx % cols_per_row
-        ax = axes[row_idx, col_idx]
-        
-        # Reshape probabilities to grid
-        state_grid = state_probs[:, state_idx].reshape(grid_size, grid_size)
-        
-        # Create heatmap
-        im = ax.imshow(state_grid, extent=[bounds[0][0], bounds[0][1], 
-                                          bounds[1][0], bounds[1][1]], 
-                      origin='lower', cmap='viridis', vmin=0, vmax=1, 
-                      aspect='auto', interpolation='bilinear')
-        
-        ax.set_xlabel('x1')
-        ax.set_ylabel('x2')
-        ax.set_title(f'State {state_idx + 1}')
-        ax.grid(True, alpha=0.3)
-        
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label('State Assignment Strength')
-    
-    # Hide unused subplots
-    for idx in range(num_states, rows * cols_per_row):
-        row_idx = idx // cols_per_row
-        col_idx = idx % cols_per_row
-        axes[row_idx, col_idx].set_visible(False)
-    
-    # Overall title
-    fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
-    plt.tight_layout()
-    
-    # SAFE FILE SAVING
-    # Temp files are created in each run's unique output_dir (no conflicts!)
-    final_filename = f"state_frame_epoch_{epoch}.png"
+    # Save as pickle file (much faster than PNG)
+    data_filename = f"state_data_epoch_{epoch}_{run_id}.pkl"
     output_dir = Path(output_dir)
-    final_path = output_dir / final_filename
+    data_path = output_dir / data_filename
     
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Use atomic write with temp file in the SAME directory
-    with tempfile.NamedTemporaryFile(
-        dir=output_dir,
-        suffix='.tmp',  # ← Keep .tmp for proper atomic operations
-        delete=False
-    ) as temp_file:
-        temp_path = Path(temp_file.name)
+    with open(data_path, 'wb') as f:
+        pickle.dump(frame_data, f)
     
-    try:
-        # Save to temporary file first - explicitly specify PNG format
-        plt.savefig(temp_path, format='png', dpi=150, bbox_inches='tight')  # ← Add format='png'
-        plt.close()
-        
-        # Atomically move to final location
-        temp_path.rename(final_path)
-        
-    except Exception as e:
-        # Clean up temp file on error
-        if temp_path.exists():
-            temp_path.unlink()
-        raise e
-    
-    return str(final_path)
+    return str(data_path)
 
 def extract_and_calculate_metrics(model, device, num_states, system_type, 
                                 bounds=None, grid_size=100, epoch=None,
@@ -711,7 +648,7 @@ def train_drm_model(db_path,
             batch_size=batch_size,
             val_size=val_size, 
             test_size=test_size,
-            probing_size=probing_size,  # Add this
+            probing_size=probing_size,
             seed=seed
         )
     else:
@@ -873,12 +810,12 @@ def train_drm_model(db_path,
         # Store metrics
         history["state_metrics"].append(metrics)
         
-        # Save visualization frame
-        frame_path = save_state_visualization_frame(
+        # Save lightweight data frame
+        data_frame_path = save_state_data_frame(
             grid_points, state_probs, epoch=0, num_states=num_states,
             output_dir=output_dir, run_id=run_id, bounds=bounds
         )
-        visualization_frames.append(frame_path)
+        visualization_frames.append(data_frame_path)
         
         # Keep dominant states for next epoch's stability calculation
         prev_dominant_states = dominant_states
@@ -993,54 +930,6 @@ def train_drm_model(db_path,
                 import traceback
                 traceback.print_exc()
                 continue
-
-            # EARLY BATCH COLLECTION (EPOCH 0.1)
-            if epoch == 0 and batch_idx == collect_early_batches:
-                print(f"Collecting early state assignments (epoch 0.1, after {collect_early_batches} batches)...")
-                model.eval()  # Switch to eval mode for collection
-                
-                bounds = get_visualization_bounds(SystemType[system_type.upper()])
-                
-                metrics, dominant_states, grid_points, state_probs = extract_and_calculate_metrics(
-                    model=model,
-                    device=device,
-                    num_states=num_states,
-                    system_type=system_type,
-                    bounds=bounds,
-                    epoch=0.1,
-                    prev_dominant_states=prev_dominant_states
-                )
-                
-                # Store metrics
-                history["state_metrics"].append(metrics)
-                
-                # Save visualization frame
-                frame_path = save_state_visualization_frame(
-                    grid_points, state_probs, epoch=0.1, num_states=num_states,
-                    output_dir=output_dir, run_id=run_id, bounds=bounds
-                )
-                visualization_frames.append(frame_path)
-                
-                # Update for stability calculation
-                prev_dominant_states = dominant_states
-                
-                # Keep the existing early state visualization code if you want
-                try:
-                    state_vis_path = os.path.join(output_dir, f"states_after_batch{batch_idx}_{run_id}.png")
-                    visualize_state_space(
-                        model=model,
-                        output_path=state_vis_path,
-                        transformations=[transformation, transformation],
-                        device=device,
-                        num_states=num_states,
-                        system_type=system_type,
-                        bounds=bounds
-                    )
-                    print(f"Saved early state visualization to {state_vis_path}")
-                except Exception as e:
-                    print(f"Warning: Failed to create early state visualization: {e}")
-
-                model.train()  # set back to train mode
         
         # Average training losses
         num_batches = len(train_loader)
@@ -1200,33 +1089,17 @@ def train_drm_model(db_path,
             # Store metrics
             history["state_metrics"].append(metrics)
             
-            # Save visualization frame
-            frame_path = save_state_visualization_frame(
+            # Save lightweight data frame (not PNG!)
+            data_frame_path = save_state_data_frame(
                 grid_points, state_probs, epoch=epoch+1, num_states=num_states,
                 output_dir=output_dir, run_id=run_id, bounds=bounds
             )
-            visualization_frames.append(frame_path)
+            visualization_frames.append(data_frame_path)
             
             # Update for next epoch's stability calculation
             prev_dominant_states = dominant_states
 
-            # Keep the existing state space visualization if you want
-            try:
-                state_vis_path = os.path.join(output_dir, f"states_epoch{epoch+1}_{run_id}.png")
-                visualize_state_space(
-                    model=model,
-                    output_path=state_vis_path,
-                    transformations=[transformation, transformation],
-                    device=device,
-                    num_states=num_states,
-                    system_type=system_type,
-                    bounds=bounds
-                )
-                print(f"Saved state visualization to {state_vis_path}")
-            except Exception as e:
-                print(f"Warning: Failed to create state visualization: {e}")
 
-        # TODO look at learning rate scheduling 
         # Apply learning rate scheduler after validation
         if lr_scheduler is not None and (not use_warmup or epoch >= warmup_epochs):
             lr_scheduler.step()
@@ -1258,22 +1131,24 @@ def train_drm_model(db_path,
         )
         print(f"Created state evolution analysis: {analysis_path}")
         
-        # Create GIF from collected frames
-        if len(visualization_frames) > 1:
-            gif_path = create_gif_from_frames(
-                frame_paths=visualization_frames,
-                output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
-                gif_duration=250
-            )
-            if gif_path:
-                print(f"Created state evolution GIF: {gif_path}")
+    # Create GIF from collected data frames
+    if len(visualization_frames) > 1:
+        gif_path = create_gif_from_data_frames(
+            data_frame_paths=visualization_frames,
+            output_path=os.path.join(output_dir, f"state_evolution_{run_id}"),
+            gif_duration=250
+        )
+        if gif_path:
+            print(f"Created state evolution GIF: {gif_path}")
 
-    # Optional: Clean up individual frame files to save space
-    for frame_path in visualization_frames:
+    # Clean up individual data frame files to save space
+    for data_frame_path in visualization_frames:
         try:
-            os.remove(frame_path)
-        except:
-            pass    
+            os.remove(data_frame_path)
+            print(f"Cleaned up data frame: {os.path.basename(data_frame_path)}")
+        except Exception as e:
+            print(f"Warning: Could not clean up {data_frame_path}: {e}")
+            pass   
 
 
     # Final evaluation on test set

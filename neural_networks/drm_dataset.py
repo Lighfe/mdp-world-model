@@ -380,7 +380,8 @@ class SocialTippingDataset(BaseDataset):
 
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
-                       test_size=1000, probing_size=None, seed=42, value_method=None):
+                       test_size=1000, probing_size=None, seed=42, value_method=None,
+                       num_workers=2):
     """
     Create training, validation, test, and optionally probing data loaders
     
@@ -463,26 +464,38 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     train_loader = DataLoader(
         dataset, 
         batch_size=batch_size,
-        sampler=SubsetRandomSampler(train_indices, generator=generator)
+        sampler=SubsetRandomSampler(train_indices, generator=generator),
+        num_workers=num_workers,  
+        pin_memory=True,  # For GPU transfer efficiency
+        persistent_workers=True if num_workers > 0 else False  # Keep workers alive
     )
     
     val_loader = DataLoader(
         dataset,
         batch_size=batch_size,
-        sampler=SubsetRandomSampler(val_indices, generator=generator)
+        sampler=SubsetRandomSampler(val_indices, generator=generator),
+        num_workers=num_workers,  
+        pin_memory=True,  # For GPU transfer efficiency
+        persistent_workers=True if num_workers > 0 else False  # Keep workers alive
     )
     
     test_loader = DataLoader(
         dataset,
         batch_size=batch_size,
-        sampler=SubsetRandomSampler(test_indices, generator=generator)
+        sampler=SubsetRandomSampler(test_indices, generator=generator),
+        num_workers=num_workers,  
+        pin_memory=True,  # For GPU transfer efficiency
+        persistent_workers=True if num_workers > 0 else False  # Keep workers alive
     )
     
     if probing_size is not None:
         probing_loader = DataLoader(
             dataset,
             batch_size=batch_size,
-            sampler=SubsetRandomSampler(probing_indices, generator=generator)
+            sampler=SubsetRandomSampler(probing_indices, generator=generator),
+            num_workers=num_workers,  
+            pin_memory=True,  # For GPU transfer efficiency
+            persistent_workers=True if num_workers > 0 else False  # Keep workers alive
         )
         return train_loader, val_loader, test_loader, probing_loader
     else:

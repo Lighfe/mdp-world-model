@@ -36,7 +36,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
 # Test configuration
-DATASET_NUM=10
+DATASET_NUM=1
 SCHEDULER="cosine_aggressive"
 OPTIMIZER="adamw"
 

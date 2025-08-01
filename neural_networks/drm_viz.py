@@ -19,6 +19,8 @@ from collections import defaultdict
 import tempfile
 import shutil
 import imageio
+import pickle
+import io
 
 
 
@@ -418,34 +420,99 @@ def create_state_evolution_analysis(all_metrics, output_path, num_states):
         'num_states': num_states
     }
 
-def create_gif_from_frames(frame_paths, output_path, gif_duration=250):
+
+def create_gif_from_data_frames(data_frame_paths, output_path, gif_duration=250):
     """
-    Create GIF from saved frame paths.
-    
-    Args:
-        frame_paths: list of paths to frame images
-        output_path: path for output GIF (without extension)
-        gif_duration: duration per frame in milliseconds
-    
-    Returns:
-        str: path to created GIF
+    Create GIF from saved data frame paths instead of PNG paths.
     """
     try:
-        import imageio
         
         gif_path = f"{output_path}_animation.gif"
         
         with imageio.get_writer(gif_path, mode='I', duration=gif_duration/1000.0) as writer:
-            for frame_path in frame_paths:
-                image = imageio.imread(frame_path)
-                writer.append_data(image)
+            for data_path in data_frame_paths:
+                # Load data frame
+                with open(data_path, 'rb') as f:
+                    frame_data = pickle.load(f)
+                
+                # Create visualization from data
+                png_data = create_png_from_frame_data(frame_data)
+                writer.append_data(png_data)
         
-        print(f"Created GIF with {len(frame_paths)} frames: {gif_path}")
+        print(f"Created GIF with {len(data_frame_paths)} frames: {gif_path}")
         return gif_path
         
     except ImportError:
         print("Warning: imageio not available for GIF creation")
         return None
+    except Exception as e:
+        print(f"Warning: Failed to create GIF: {e}")
+        return None
+
+def create_png_from_frame_data(frame_data):
+    """
+    Create PNG image data from frame data dict.
+    """
+    grid_points = frame_data['grid_points']
+    state_probs = frame_data['state_probs']
+    epoch = frame_data['epoch']
+    num_states = frame_data['num_states']
+    bounds = frame_data['bounds']
+    grid_size = frame_data['grid_size']
+    
+    # Calculate grid layout
+    cols_per_row = 2
+    rows = (num_states + cols_per_row - 1) // cols_per_row
+    
+    fig, axes = plt.subplots(rows, cols_per_row, figsize=(12, 6*rows))
+    if rows == 1:
+        axes = axes.reshape(1, -1)
+    
+    for state_idx in range(num_states):
+        row_idx = state_idx // cols_per_row
+        col_idx = state_idx % cols_per_row
+        ax = axes[row_idx, col_idx]
+        
+        # Reshape probabilities to grid
+        state_grid = state_probs[:, state_idx].reshape(grid_size, grid_size)
+        
+        # Create heatmap
+        im = ax.imshow(state_grid, extent=[bounds[0][0], bounds[0][1], 
+                                          bounds[1][0], bounds[1][1]], 
+                      origin='lower', cmap='viridis', vmin=0, vmax=1, 
+                      aspect='auto', interpolation='bilinear')
+        
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        ax.set_title(f'State {state_idx + 1}')
+        ax.grid(True, alpha=0.3)
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('State Assignment Strength')
+    
+    # Hide unused subplots
+    for idx in range(num_states, rows * cols_per_row):
+        row_idx = idx // cols_per_row
+        col_idx = idx % cols_per_row
+        axes[row_idx, col_idx].set_visible(False)
+    
+    # Overall title
+    fig.suptitle(f'State Space Visualization - Epoch {epoch}', fontsize=14)
+    plt.tight_layout()
+    
+    # Convert to image data instead of saving to file
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    
+    # Read image data
+    image_data = imageio.imread(buf)
+    
+    plt.close()
+    buf.close()
+    
+    return image_data
 
 def analyze_discrete_state_transitions(model, control_values, device='cpu', system_type=None):
     """
@@ -1478,3 +1545,32 @@ def analyze_state_assignment_evolution(df, output_path=None):
         'epochs_analyzed': len(epochs),
         'num_states': num_states
     }
+
+def create_gif_from_frames(frame_paths, output_path, gif_duration=250):
+    """
+    Create GIF from saved frame paths.
+    
+    Args:
+        frame_paths: list of paths to frame images
+        output_path: path for output GIF (without extension)
+        gif_duration: duration per frame in milliseconds
+    
+    Returns:
+        str: path to created GIF
+    """
+    try:
+        import imageio
+        
+        gif_path = f"{output_path}_animation.gif"
+        
+        with imageio.get_writer(gif_path, mode='I', duration=gif_duration/1000.0) as writer:
+            for frame_path in frame_paths:
+                image = imageio.imread(frame_path)
+                writer.append_data(image)
+        
+        print(f"Created GIF with {len(frame_paths)} frames: {gif_path}")
+        return gif_path
+        
+    except ImportError:
+        print("Warning: imageio not available for GIF creation")
+        return None
