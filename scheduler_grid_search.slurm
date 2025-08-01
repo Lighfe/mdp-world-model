@@ -8,10 +8,10 @@
 #SBATCH --ntasks-per-node=10
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=24G
 #SBATCH --output=log/scheduler_grid_%A_%a.out
 #SBATCH --error=log/scheduler_grid_%A_%a.err
-#SBATCH --array=1-80  # 10 datasets × 4 schedulers × 2 optimizers
+#SBATCH --array=1-64  # 8 configs × 8 seeds (datasets parallelized within each)
 
 echo "========================================================"
 echo "SCHEDULER GRID SEARCH - Array $SLURM_ARRAY_TASK_ID"
@@ -34,12 +34,13 @@ source activate mdp-world-model
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
-# Calculate dataset and configuration from array ID
-# 80 arrays total = 10 datasets × 8 configs per dataset
-DATASET_NUM=$(( ((SLURM_ARRAY_TASK_ID - 1) / 8) + 1 ))
-CONFIG_ID=$(( ((SLURM_ARRAY_TASK_ID - 1) % 8) + 1 ))
+# Calculate config and seed from array ID
+# 64 arrays total = 8 configs × 8 seeds
+CONFIG_ID=$(( ((SLURM_ARRAY_TASK_ID - 1) / 8) + 1 ))
+SEED_ID=$(( ((SLURM_ARRAY_TASK_ID - 1) % 8) + 1 ))
+SEED=$((SEED_ID + 10))  # Seeds 11-18
 
-# Define scheduler configurations
+# Define scheduler configurations (8 total combinations)
 case $CONFIG_ID in
     1) SCHEDULER="fixed"; OPTIMIZER="adam" ;;
     2) SCHEDULER="fixed"; OPTIMIZER="adamw" ;;
@@ -51,21 +52,13 @@ case $CONFIG_ID in
     8) SCHEDULER="warm_restarts"; OPTIMIZER="adamw" ;;
 esac
 
-# Dataset path
-DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
-
 echo "Configuration for Array $SLURM_ARRAY_TASK_ID:"
-echo "  Dataset: multi_saddle_${DATASET_NUM}.db"
+echo "  Config ID: $CONFIG_ID"
 echo "  Scheduler: $SCHEDULER"
 echo "  Optimizer: $OPTIMIZER"
-echo "  Seeds: 11-20 (10 seeds in parallel)"
-echo "  Epochs: 100 then 200 (sequential)"
-
-# Verify dataset exists
-if [ ! -f "$DB_PATH" ]; then
-    echo "ERROR: Dataset not found: $DB_PATH"
-    exit 1
-fi
+echo "  Seed: $SEED"
+echo "  Datasets: 1-10 (parallelized across tasks)"
+echo "  Epochs: 100 then 150 (sequential)"
 
 # Create output directory
 OUTPUT_DIR="neural_networks/output/scheduler_grid"
@@ -75,18 +68,19 @@ mkdir -p "$OUTPUT_DIR"
 nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv --loop=30 > "log/gpu_usage_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log" &
 GPU_MONITOR_PID=$!
 
-# Create training script for parallel execution
+# Create training script for parallel execution over datasets
 TRAINING_SCRIPT="grid_train_${SLURM_ARRAY_TASK_ID}.sh"
 cat > "$TRAINING_SCRIPT" << 'EOF'
 #!/bin/bash
 
-# Get task ID (0-9) and calculate seed (11-20)
+# CRITICAL: Define variables INSIDE heredoc to avoid scoping issues
 TASK_ID=$SLURM_PROCID
-SEED=$((TASK_ID + 11))
+DATASET_NUM=$((TASK_ID + 1))  # Datasets 1-10
+DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
 
 export PYTHONUNBUFFERED=1
 
-echo "[Task $TASK_ID] Starting Array $SLURM_ARRAY_TASK_ID with seed $SEED at $(date)"
+echo "[Task $TASK_ID] Starting Array $SLURM_ARRAY_TASK_ID with dataset $DATASET_NUM at $(date)"
 
 # Base command arguments - all fixed settings
 BASE_CMD="python -u neural_networks/train_drm.py $DB_PATH \
@@ -141,51 +135,56 @@ case $OPTIMIZER in
         ;;
 esac
 
-echo "[Task $TASK_ID] Config: $SCHEDULER + $OPTIMIZER"
+echo "[Task $TASK_ID] Config: $SCHEDULER + $OPTIMIZER, Dataset: $DATASET_NUM"
+
+# Verify dataset exists
+if [ ! -f "$DB_PATH" ]; then
+    echo "[Task $TASK_ID] ERROR: Dataset not found: $DB_PATH"
+    exit 1
+fi
 
 # Run epochs=100
 RUN_ID="ms${DATASET_NUM}_${SCHEDULER}_${OPTIMIZER}_epochs100_seed${SEED}"
-echo "[Task $TASK_ID] Starting epochs=100 at $(date)"
+echo "[Task $TASK_ID] Starting epochs=100 for dataset $DATASET_NUM at $(date)"
 $BASE_CMD $SCHEDULER_ARGS $OPTIMIZER_ARGS --epochs=100 --run_id="$RUN_ID" 2>&1
 
 if [ $? -eq 0 ]; then
-    echo "[Task $TASK_ID] ✓ Completed epochs=100 at $(date)"
+    echo "[Task $TASK_ID] ✓ Completed epochs=100 for dataset $DATASET_NUM at $(date)"
 else
-    echo "[Task $TASK_ID] ✗ Failed epochs=100 at $(date)"
+    echo "[Task $TASK_ID] ✗ Failed epochs=100 for dataset $DATASET_NUM at $(date)"
     exit 1
 fi
 
 # Brief pause between epoch configurations
 sleep 10
 
-# Run epochs=200
-RUN_ID="ms${DATASET_NUM}_${SCHEDULER}_${OPTIMIZER}_epochs200_seed${SEED}"
-echo "[Task $TASK_ID] Starting epochs=200 at $(date)"
-$BASE_CMD $SCHEDULER_ARGS $OPTIMIZER_ARGS --epochs=200 --run_id="$RUN_ID" 2>&1
+# Run epochs=150 (changed from 200)
+RUN_ID="ms${DATASET_NUM}_${SCHEDULER}_${OPTIMIZER}_epochs150_seed${SEED}"
+echo "[Task $TASK_ID] Starting epochs=150 for dataset $DATASET_NUM at $(date)"
+$BASE_CMD $SCHEDULER_ARGS $OPTIMIZER_ARGS --epochs=150 --run_id="$RUN_ID" 2>&1
 
 if [ $? -eq 0 ]; then
-    echo "[Task $TASK_ID] ✓ Completed epochs=200 at $(date)"
+    echo "[Task $TASK_ID] ✓ Completed epochs=150 for dataset $DATASET_NUM at $(date)"
 else
-    echo "[Task $TASK_ID] ✗ Failed epochs=200 at $(date)"
+    echo "[Task $TASK_ID] ✗ Failed epochs=150 for dataset $DATASET_NUM at $(date)"
     exit 1
 fi
 
-echo "[Task $TASK_ID] Finished all training for seed $SEED at $(date)"
+echo "[Task $TASK_ID] Finished all training for dataset $DATASET_NUM at $(date)"
 echo "[Task $TASK_ID] Final GPU memory: $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
 EOF
 
 chmod +x "$TRAINING_SCRIPT"
 
 # Export variables for the training script
-export DB_PATH
-export OUTPUT_DIR
-export DATASET_NUM
 export SCHEDULER
 export OPTIMIZER
+export SEED
+export OUTPUT_DIR
 
 echo "Launching Array $SLURM_ARRAY_TASK_ID with $SLURM_NTASKS parallel processes at $(date)..."
 
-# Launch parallel training
+# Launch parallel training over datasets
 srun --ntasks=$SLURM_NTASKS \
      --ntasks-per-node=$SLURM_NTASKS \
      --output="log/grid_task_%A_%a_%t.out" \
@@ -203,8 +202,8 @@ rm -f "$TRAINING_SCRIPT"
 
 echo "========================================================"
 echo "Array $SLURM_ARRAY_TASK_ID completed at $(date)"
-echo "Dataset: multi_saddle_${DATASET_NUM}.db"
-echo "Config: $SCHEDULER + $OPTIMIZER"  
+echo "Config: $SCHEDULER + $OPTIMIZER, Seed: $SEED"  
+echo "Datasets: 1-10 (parallelized)"
 echo "srun exit code: $SRUN_EXIT_CODE"
 echo "Individual task logs: log/grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out"
 echo "GPU usage log: log/gpu_usage_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log"

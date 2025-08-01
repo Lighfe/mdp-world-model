@@ -47,12 +47,18 @@ NOTE: Important, don't get confused with the layout of the grid. It is in a coor
 
 def plot_training_curves(history, save_path=None, state_loss_type=None):
     """Plot training and validation loss curves"""
+
+    # Paul Tol's muted color scheme for colorblind accessibility
+    tol_blue = '#332288'    # Primary blue for training
+    tol_yellow = '#DDCC77'  # Yellow for validation
+    tol_red = '#CC6677'     # Red for entropy weight
+
     plt.figure(figsize=(15, 10))
     
     # Plot total loss
     plt.subplot(2, 2, 1)
-    plt.plot(history['train_loss'], label='Train Loss')
-    plt.plot(history['val_loss'], label='Validation Loss')
+    plt.plot(history['train_loss'], color=tol_blue, label='Train Loss')
+    plt.plot(history['val_loss'], color=tol_yellow, label='Validation Loss')
     plt.title('Total Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
@@ -61,8 +67,8 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
     
     # Plot state loss
     plt.subplot(2, 2, 2)
-    plt.plot(history['train_state_loss'], label='Train State Loss')
-    plt.plot(history['val_state_loss'], label='Validation State Loss')
+    plt.plot(history['train_state_loss'], color=tol_blue, label='Train State Loss')
+    plt.plot(history['val_state_loss'], color=tol_yellow, label='Validation State Loss')
     if state_loss_type is None:
         plt.title('State Loss')
     else:
@@ -74,8 +80,8 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
     
     # Plot value loss
     plt.subplot(2, 2, 3)
-    plt.plot(history['train_value_loss'], label='Train Value Loss')
-    plt.plot(history['val_value_loss'], label='Validation Value Loss')
+    plt.plot(history['train_value_loss'], color=tol_blue, label='Train Value Loss')
+    plt.plot(history['val_value_loss'], color=tol_yellow, label='Validation Value Loss')
     plt.title('Value Loss (MSE)')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
@@ -90,9 +96,9 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
 
     # Plot batch entropy if it exists
     if 'train_batch_entropy' in history and len(history['train_batch_entropy']) > 0:
-        ax1.plot(history['train_batch_entropy'], 'b-', label='Train Batch Entropy')
+        ax1.plot(history['train_batch_entropy'], label='Train Batch Entropy')
         if 'val_batch_entropy' in history and len(history['val_batch_entropy']) > 0:
-            ax1.plot(history['val_batch_entropy'], 'b--', label='Val Batch Entropy')
+            ax1.plot(history['val_batch_entropy'], label='Val Batch Entropy')
 
     ax1.set_xlabel('Epoch')
     ax1.set_ylabel('Batch Entropy (Higher = More Uniform)')  # Remove color='b'
@@ -101,13 +107,11 @@ def plot_training_curves(history, save_path=None, state_loss_type=None):
 
     # Create second y-axis for entropy weight
     ax2 = ax1.twinx()
-
     # Plot entropy weight if it exists
     if 'train_entropy_weight' in history and len(history['train_entropy_weight']) > 0:
-        ax2.plot(history['train_entropy_weight'], 'r-', label='Entropy Weight', linewidth=2)
-
-    ax2.set_ylabel('Entropy Loss Weight')  # Remove color='r'
-
+        ax2.plot(history['train_entropy_weight'], color=tol_red, label='Entropy Weight')
+    ax2.set_ylabel('Entropy Loss Weight')
+    
     # Combine legends properly
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -429,7 +433,7 @@ def create_gif_from_data_frames(data_frame_paths, output_path, gif_duration=250)
         
         gif_path = f"{output_path}_animation.gif"
         
-        with imageio.get_writer(gif_path, mode='I', duration=gif_duration/1000.0) as writer:
+        with imageio.get_writer(gif_path, mode='I', duration=gif_duration) as writer:
             for data_path in data_frame_paths:
                 # Load data frame
                 with open(data_path, 'rb') as f:
