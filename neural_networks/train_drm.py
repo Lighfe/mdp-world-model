@@ -39,7 +39,7 @@ from neural_networks.drm_viz import (
     plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
     create_state_viz_from_data, analyze_state_assignment_evolution,
     create_gif_from_frames, create_state_evolution_analysis,
-    save_state_data_frame, create_gif_from_data_frames
+    create_png_from_frame_data, create_gif_from_data_frames
 )
 
 def set_all_seeds(seed):
