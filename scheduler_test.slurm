@@ -1,19 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=scheduler_test
+#SBATCH --job-name=scheduler_par
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=1:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=2
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks=10
+#SBATCH --ntasks-per-node=10
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=8G
-#SBATCH --output=log/scheduler_test_%A.out
-#SBATCH --error=log/scheduler_test_%A.err
+#SBATCH --mem=20G
+#SBATCH --output=log/scheduler_par_%A.out
+#SBATCH --error=log/scheduler_par_%A.err
 
 # Test run: dataset 10, cosine aggressive scheduler, adamw optimizer
 # 10 seeds in parallel, epoch 100 only (for testing)
+
 
 echo "========================================================"
 echo "SCHEDULER TEST - Single Array Job"
@@ -51,7 +52,7 @@ echo "  Seeds: 11-20 (10 seeds in parallel)"
 echo "  Epochs: 100 only (for testing)"
 
 # Create output directory
-OUTPUT_DIR="neural_networks/output/scheduler_test"
+OUTPUT_DIR="neural_networks/output/scheduler_par"
 mkdir -p "$OUTPUT_DIR"
 
 # Start GPU monitoring
