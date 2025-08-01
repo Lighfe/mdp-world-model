@@ -8,12 +8,9 @@
 #SBATCH --ntasks-per-node=10
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=20G
+#SBATCH --mem=16G
 #SBATCH --output=log/scheduler_par_%A.out
 #SBATCH --error=log/scheduler_par_%A.err
-
-# Test run: dataset 10, cosine aggressive scheduler, adamw optimizer
-# 10 seeds in parallel, epoch 100 only (for testing)
 
 
 echo "========================================================"
@@ -37,12 +34,9 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
 # Test configuration
-DATASET_NUM=$((TASK_ID + 1))
 SCHEDULER="cosine_aggressive"
-OPTIMIZER="adamw"
+OPTIMIZER="adam"
 
-# Fixed test dataset
-DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
 
 echo "Test Configuration:"
 echo "  Dataset: multi_saddle_${DATASET_NUM}.db"
@@ -68,9 +62,14 @@ cat > "$TRAINING_SCRIPT" << 'EOF'
 TASK_ID=$SLURM_PROCID
 SEED=$((TASK_ID + 11))
 
+DATASET_NUM=$((TASK_ID + 1))  # ← Move it here
+
+# Set dataset path
+DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
+
 export PYTHONUNBUFFERED=1
 
-echo "[Task $TASK_ID] Starting test with seed $SEED at $(date)"
+echo "[Task $TASK_ID] Starting test with dataset $DATASET_NUM, seed $SEED at $(date)"
 
 # Base command arguments
 BASE_CMD="python -u neural_networks/train_drm.py $DB_PATH \
@@ -99,9 +98,9 @@ BASE_CMD="python -u neural_networks/train_drm.py $DB_PATH \
     --seed=$SEED \
     --output_dir=$OUTPUT_DIR"
 
-# Scheduler and optimizer configuration (cosine aggressive + adamw)
+# Scheduler and optimizer configuration (cosine aggressive + adam)
 SCHEDULER_ARGS="--scheduler_type=cosine --lr=5e-5 --min_lr=1e-6"
-OPTIMIZER_ARGS="--optimizer=adamw"
+OPTIMIZER_ARGS="--optimizer=adam"
 
 # Run epoch 100 only (test)
 RUN_ID="test_ms${DATASET_NUM}_${SCHEDULER}_${OPTIMIZER}_epochs100_seed${SEED}"
