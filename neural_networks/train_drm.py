@@ -521,6 +521,17 @@ def extract_and_calculate_metrics(model, device, num_states, system_type,
     
     return metrics, dominant_states, grid_points, state_probs
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.floating, np.bool_)):
+            return obj.item()
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
+def safe_json_dump(obj, file_handle, **kwargs):
+    """JSON dump that handles numpy/torch types"""
+    return json.dump(obj, file_handle, cls=NumpyEncoder, **kwargs)
 
 def train_drm_model(db_path, 
                     system_type,
@@ -1261,7 +1272,7 @@ def train_drm_model(db_path,
     # Save test results
     test_results_path = os.path.join(output_dir, f"drm_test_results_{run_id}.json")
     with open(test_results_path, 'w') as f:
-        json.dump(test_metrics, f, indent=4)
+        safe_json_dump(test_metrics, f, indent=4)
     print(f"Saved test results to {test_results_path}")
 
     
@@ -1314,7 +1325,7 @@ def train_drm_model(db_path,
     # Save training history
     history_path = os.path.join(output_dir, f"drm_history_{run_id}.json")
     with open(history_path, 'w') as f:
-        json.dump(history, f)
+        safe_json_dump(history, f)
     print(f"Saved training history to {history_path}")
     
     # Plot training curves
@@ -1540,7 +1551,7 @@ if __name__ == "__main__":
     args_dict = vars(args)
     args_dict['run_id'] = run_id  # Add run_id to the saved config
     with open(output_dir / f"config_{run_id}.json", 'w') as f:
-        json.dump(args_dict, f, indent=4)
+        safe_json_dump(args_dict, f, indent=4)
     
     # Run parsed training
     model, history = train_drm_model(
