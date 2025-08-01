@@ -4,11 +4,11 @@
 #SBATCH --qos=gpushort
 #SBATCH --time=1:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=10
-#SBATCH --ntasks-per-node=10
+#SBATCH --ntasks=2
+#SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=8G
 #SBATCH --output=log/scheduler_test_%A.out
 #SBATCH --error=log/scheduler_test_%A.err
 

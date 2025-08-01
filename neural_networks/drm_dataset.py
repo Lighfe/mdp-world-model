@@ -381,7 +381,7 @@ class SocialTippingDataset(BaseDataset):
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
                        test_size=1000, probing_size=None, seed=42, value_method=None,
-                       num_workers=2):
+                       num_workers=1):
     """
     Create training, validation, test, and optionally probing data loaders
     
