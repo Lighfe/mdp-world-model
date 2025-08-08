@@ -42,8 +42,6 @@ from neural_networks.drm_viz import (
     create_png_from_frame_data, create_gif_from_data_frames
 )
 
-print(f"Process PID: {os.getpid()}, SLURM_PROCID: {os.environ.get('SLURM_PROCID', 'N/A')}")
-print(f"CUDA Device: {torch.cuda.current_device()}")
 
 def set_all_seeds(seed):
     """Set seeds for reproducibility"""

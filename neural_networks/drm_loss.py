@@ -278,12 +278,16 @@ class StableDRMLoss(nn.Module):
         return value_loss
     
     def _circular_mse_loss(self, pred, true):
-        """MSE loss for circular/angular values"""
-        # Handle circular nature of angles
-        diff = pred - true
-        # Wrap differences to [-pi, pi]
-        diff = torch.atan2(torch.sin(diff), torch.cos(diff))
-        return torch.mean(diff ** 2)
+        """MSE loss for sine/cosine representations"""
+        # Convert back to angles
+        angle_pred = torch.atan2(pred[..., 0], pred[..., 1])  # sin, cos
+        angle_true = torch.atan2(true[..., 0], true[..., 1])
+        
+        # Circular difference
+        diff = angle_pred - angle_true
+        circular_diff = torch.atan2(torch.sin(diff), torch.cos(diff))
+        
+        return torch.mean(circular_diff ** 2)
     
     def _binary_cross_entropy_loss(self, pred, true):
         """Binary cross entropy loss"""
