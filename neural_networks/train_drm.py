@@ -522,6 +522,347 @@ def extract_and_calculate_metrics(model, device, num_states, system_type,
     
     return metrics, dominant_states, grid_points, state_probs
 
+def compute_numerical_rank(matrix, threshold_ratio=0.01):
+    """
+    Compute numerical rank using SVD with threshold.
+    
+    Args:
+        matrix: torch.Tensor of shape (features, samples)
+        threshold_ratio: Threshold as ratio of largest singular value (default: 1%)
+    
+    Returns:
+        int: Numerical rank
+        np.ndarray: Singular values
+    """
+    # Ensure matrix is 2D
+    if matrix.dim() > 2:
+        matrix = matrix.view(-1, matrix.size(-1))
+    
+    # Convert to numpy for SVD
+    matrix_np = matrix.detach().cpu().numpy()
+    
+    # Compute SVD
+    try:
+        U, s, Vt = np.linalg.svd(matrix_np, full_matrices=False)
+    except np.linalg.LinAlgError:
+        # Handle degenerate case
+        return 0, np.array([])
+    
+    # Compute numerical rank with threshold
+    if len(s) == 0:
+        return 0, s
+    
+    threshold = threshold_ratio * s[0]
+    rank = np.sum(s > threshold)
+    
+    return int(rank), s
+
+def extract_hidden_and_logit_data(model, dataloader, device, max_samples=1000):
+    """
+    Extract last hidden layer activations and final logits from model.
+    
+    Args:
+        model: DRM model
+        dataloader: DataLoader (should be validation set)
+        device: torch device
+        max_samples: Maximum number of samples to use for analysis
+    
+    Returns:
+        dict: Contains 'hidden_activations', 'pre_softmax_logits', 'post_softmax_probs'
+    """
+    model.eval()
+    
+    captured_hidden = []
+    captured_logits = []
+    all_softmax_probs = []
+    
+    total_samples = 0
+    
+    # Hooks to capture activations
+    def hidden_hook(module, input, output):
+        captured_hidden.append(output.clone())
+    
+    def logit_hook(module, input, output):
+        captured_logits.append(input[0].clone())  # input to final layer = pre-softmax
+    
+    # Register hooks on encoder layers
+    # encoder[-2] = last hidden layer, encoder[-1] = final layer  
+    if len(model.encoder) >= 2:
+        hidden_handle = model.encoder[-2].register_forward_hook(hidden_hook)
+        logit_handle = model.encoder[-1].register_forward_hook(logit_hook)
+    else:
+        raise ValueError("Encoder structure unexpected - need at least 2 layers")
+    
+    try:
+        with torch.no_grad():
+            for batch in dataloader:
+                if total_samples >= max_samples:
+                    break
+                    
+                x_obs, x_control, x_next_obs, values = batch
+                x_obs = x_obs.to(device)
+                
+                batch_size = x_obs.size(0)
+                if total_samples + batch_size > max_samples:
+                    take = max_samples - total_samples
+                    x_obs = x_obs[:take]
+                    batch_size = take
+                
+                # Clear previous captures
+                captured_hidden.clear()
+                captured_logits.clear()
+                
+                # Forward pass - triggers hooks
+                softmax_probs = model.encoder(x_obs)
+                
+                # Store results
+                if captured_hidden:
+                    all_softmax_probs.append(softmax_probs)
+                    total_samples += batch_size
+                else:
+                    print("Warning: No activations captured")
+                    break
+                    
+    finally:
+        # Remove hooks
+        hidden_handle.remove()
+        logit_handle.remove()
+    
+    # Concatenate all batches
+    hidden_activations = torch.cat(captured_hidden, dim=0) if captured_hidden else torch.empty(0, 32)
+    pre_softmax_logits = torch.cat(captured_logits, dim=0) if captured_logits else torch.empty(0, 4)
+    post_softmax_probs = torch.cat(all_softmax_probs, dim=0) if all_softmax_probs else torch.empty(0, 4)
+    
+    print(f"Extracted activations: Hidden {hidden_activations.shape}, Logits {pre_softmax_logits.shape}")
+    
+    return {
+        'hidden_activations': hidden_activations,    # (N, 32)
+        'pre_softmax_logits': pre_softmax_logits,   # (N, 4)  
+        'post_softmax_probs': post_softmax_probs    # (N, 4)
+    }
+
+def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000):
+    """
+    Compute softmax rank metrics focusing on last hidden layer and final logits.
+    
+    Args:
+        model: DRM model
+        val_dataloader: Validation DataLoader
+        device: torch device
+        max_samples: Max samples for analysis
+    
+    Returns:
+        dict: All computed metrics
+    """
+    # Extract activations and logits
+    data = extract_hidden_and_logit_data(model, val_dataloader, device, max_samples)
+    
+    hidden_acts = data['hidden_activations']      # (N, 32)
+    pre_logits = data['pre_softmax_logits']       # (N, 4)
+    post_probs = data['post_softmax_probs']       # (N, 4)
+    
+    if hidden_acts.numel() == 0:
+        print("Warning: No data extracted, returning empty metrics")
+        return {}
+    
+    metrics = {}
+    
+    # ===== LAST HIDDEN LAYER (A₃, 32-dim) =====
+    
+    # 1. Frobenius norm of activation matrix
+    hidden_frobenius = torch.norm(hidden_acts, p='fro').item()
+    metrics['hidden_frobenius_norm'] = hidden_frobenius
+    
+    # 2. Rank and SVD analysis
+    hidden_acts_T = hidden_acts.T  # (32, N) for SVD
+    hidden_rank, hidden_sv = compute_numerical_rank(hidden_acts_T)
+    metrics['hidden_rank'] = hidden_rank
+    metrics['hidden_theoretical_max_rank'] = min(hidden_acts.size(0), hidden_acts.size(1))
+    
+    # Store normalized singular values for hidden layer
+    if len(hidden_sv) > 0:
+        hidden_sv_norm = hidden_sv / hidden_sv[0] if hidden_sv[0] > 0 else hidden_sv
+        # Store first few normalized singular values
+        for i, sv in enumerate(hidden_sv_norm[:min(8, len(hidden_sv_norm))]):  # Store up to 8
+            metrics[f'hidden_sv_norm_{i}'] = float(sv)
+    
+    # ===== FINAL LOGIT LAYER (M₄, A₄, 4-dim) =====
+    
+    # 1. Frobenius norms
+    pre_logits_frobenius = torch.norm(pre_logits, p='fro').item()
+    post_probs_frobenius = torch.norm(post_probs, p='fro').item()
+    metrics['logit_frobenius_norm'] = pre_logits_frobenius
+    metrics['softmax_frobenius_norm'] = post_probs_frobenius
+    
+    # 2. Ranks
+    pre_logits_T = pre_logits.T  # (4, N)
+    post_probs_T = post_probs.T  # (4, N)
+    
+    logit_rank, logit_sv = compute_numerical_rank(pre_logits_T)
+    softmax_rank, softmax_sv = compute_numerical_rank(post_probs_T)
+    
+    metrics['logit_rank'] = logit_rank
+    metrics['softmax_rank'] = softmax_rank
+    metrics['logit_theoretical_max_rank'] = min(pre_logits.size(0), pre_logits.size(1))
+    
+    # 3. Detailed SVD analysis for logits (M₄)
+    if len(logit_sv) > 0:
+        # Normalized singular values
+        logit_sv_norm = logit_sv / logit_sv[0] if logit_sv[0] > 0 else logit_sv
+        
+        # Store individual normalized singular values (up to 4 for logits)
+        for i, sv in enumerate(logit_sv_norm):
+            metrics[f'logit_sv_norm_{i}'] = float(sv)
+        
+        # σ₂/σ₁ ratio for collapse detection
+        if len(logit_sv_norm) > 1:
+            metrics['logit_sv_ratio_2nd_to_1st'] = float(logit_sv_norm[1])
+        else:
+            metrics['logit_sv_ratio_2nd_to_1st'] = 0.0
+    
+    return metrics
+
+def collect_softmax_rank_metrics(model, val_dataloader, device, epoch, history, max_samples=1000):
+    """
+    Collect softmax rank metrics and add to history.
+    
+    Args:
+        model: DRM model
+        val_dataloader: Validation DataLoader  
+        device: torch device
+        epoch: Current epoch number
+        history: Training history dict
+        max_samples: Max samples for analysis
+    """
+    try:
+        print(f"Computing softmax rank metrics for epoch {epoch}...")
+        
+        # Compute metrics
+        metrics = compute_softmax_rank_metrics(model, val_dataloader, device, max_samples)
+        
+        if not metrics:  # Empty metrics
+            print("  Skipping due to empty metrics")
+            return
+        
+        # Add epoch info
+        metrics['epoch'] = epoch
+        
+        # Add to history
+        if 'softmax_rank_metrics' not in history:
+            history['softmax_rank_metrics'] = []
+        history['softmax_rank_metrics'].append(metrics)
+        
+        # Print key metrics for monitoring
+        print(f"  Hidden layer (32-dim): rank={metrics['hidden_rank']}/{metrics['hidden_theoretical_max_rank']}, "
+              f"||A₃||_F={metrics['hidden_frobenius_norm']:.3f}")
+        print(f"  Logit layer (4-dim): rank={metrics['logit_rank']}/{metrics['logit_theoretical_max_rank']}, "
+              f"||M₄||_F={metrics['logit_frobenius_norm']:.3f}")
+        print(f"  Post-softmax: rank={metrics['softmax_rank']}, "
+              f"||A₄||_F={metrics['softmax_frobenius_norm']:.3f}")
+        
+        # Show logit singular value ratio for collapse detection
+        if 'logit_sv_ratio_2nd_to_1st' in metrics:
+            ratio = metrics['logit_sv_ratio_2nd_to_1st']
+            print(f"  Logit σ₂/σ₁ ratio: {ratio:.4f}")
+            if ratio < 0.1:
+                print(f"  ⚠️  WARNING: Low σ₂/σ₁ ratio ({ratio:.4f}) - potential logit collapse!")
+        
+        # Check for potential issues
+        if metrics['logit_rank'] < 2:
+            print(f"  ⚠️  WARNING: Very low logit rank ({metrics['logit_rank']}) - rank collapse!")
+        if metrics['hidden_rank'] < metrics['hidden_theoretical_max_rank'] * 0.5:
+            print(f"  ⚠️  WARNING: Hidden rank using <50% of capacity")
+            
+    except Exception as e:
+        print(f"Error computing softmax rank metrics: {e}")
+        import traceback
+        traceback.print_exc()
+
+def plot_softmax_rank_evolution(history, save_path):
+    """
+    Plot evolution of softmax rank metrics over training.
+    
+    Args:
+        history: Training history containing softmax_rank_metrics
+        save_path: Path to save the plot
+    """
+    import matplotlib.pyplot as plt
+    
+    if 'softmax_rank_metrics' not in history or not history['softmax_rank_metrics']:
+        print("No softmax rank metrics found in history")
+        return
+    
+    metrics_list = history['softmax_rank_metrics']
+    epochs = [m['epoch'] for m in metrics_list]
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # 1. Rank evolution
+    ax = axes[0, 0]
+    hidden_ranks = [m['hidden_rank'] for m in metrics_list]
+    logit_ranks = [m['logit_rank'] for m in metrics_list]
+    softmax_ranks = [m['softmax_rank'] for m in metrics_list]
+    
+    ax.plot(epochs, hidden_ranks, 'o-', label='Hidden Layer (32-dim)', linewidth=2, markersize=4)
+    ax.plot(epochs, logit_ranks, 's-', label='Logit Layer (4-dim)', linewidth=2, markersize=4) 
+    ax.plot(epochs, softmax_ranks, '^-', label='Post-Softmax (4-dim)', linewidth=2, markersize=4)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Numerical Rank')
+    ax.set_title('Rank Evolution During Training')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # 2. Frobenius norm evolution
+    ax = axes[0, 1]
+    hidden_norms = [m['hidden_frobenius_norm'] for m in metrics_list]
+    logit_norms = [m['logit_frobenius_norm'] for m in metrics_list]
+    softmax_norms = [m['softmax_frobenius_norm'] for m in metrics_list]
+    
+    ax.plot(epochs, hidden_norms, 'o-', label='Hidden ||A₃||_F', linewidth=2, markersize=4)
+    ax.plot(epochs, logit_norms, 's-', label='Logit ||M₄||_F', linewidth=2, markersize=4)
+    ax.plot(epochs, softmax_norms, '^-', label='Softmax ||A₄||_F', linewidth=2, markersize=4)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Frobenius Norm')
+    ax.set_title('Frobenius Norm Evolution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    
+    # 3. Logit singular value ratio (collapse detection)
+    ax = axes[1, 0]
+    sv_ratios = [m.get('logit_sv_ratio_2nd_to_1st', 0) for m in metrics_list]
+    
+    ax.plot(epochs, sv_ratios, 'o-', linewidth=2, color='red', markersize=4)
+    ax.axhline(y=0.1, color='orange', linestyle='--', alpha=0.7, label='10% threshold')
+    ax.axhline(y=0.01, color='red', linestyle='--', alpha=0.7, label='1% threshold')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('σ₂/σ₁ Ratio')
+    ax.set_title('Logit Collapse Detection\n(Lower = More Collapse)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    
+    # 4. Rank utilization efficiency
+    ax = axes[1, 1]
+    hidden_efficiency = [m['hidden_rank'] / m['hidden_theoretical_max_rank'] * 100 
+                        for m in metrics_list]
+    logit_efficiency = [m['logit_rank'] / min(4, m['logit_theoretical_max_rank']) * 100 
+                       for m in metrics_list]
+    
+    ax.plot(epochs, hidden_efficiency, 'o-', label='Hidden Layer', linewidth=2, markersize=4)
+    ax.plot(epochs, logit_efficiency, 's-', label='Logit Layer', linewidth=2, markersize=4)
+    ax.set_xlabel('Epoch') 
+    ax.set_ylabel('Rank Utilization (%)')
+    ax.set_title('Rank Efficiency')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 105)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved softmax rank evolution plot to {save_path}")
+
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (np.integer, np.floating, np.bool_)):
@@ -779,10 +1120,6 @@ def train_drm_model(db_path,
         "train_entropy_loss": [],
         "train_batch_entropy": [],
         "train_individual_entropy": [],
-        "train_vicreg_total": [],
-        "train_vicreg_invariance": [],
-        "train_vicreg_variance": [],
-        "train_vicreg_covariance": [],
         "train_entropy_weight": [],
         "val_loss": [],
         "val_state_loss": [],
@@ -790,17 +1127,13 @@ def train_drm_model(db_path,
         "val_entropy_loss": [],
         "val_batch_entropy": [],
         "val_individual_entropy": [],
-        "val_vicreg_total": [],
-        "val_vicreg_invariance": [],
-        "val_vicreg_variance": [],
-        "val_vicreg_covariance": [],
-        "state_metrics": []
+        "state_metrics": [],
+        "softmax_rank_metrics": []
     }
 
     # Initialize state metrics collection (replace state_assignment_data)
     collect_every_n_epochs = 2
     collect_initial = True  
-    collect_early_batches = 20
     visualization_frames = []  # Store frame paths for GIF
     prev_dominant_states = None  # For stability calculation
 
@@ -821,6 +1154,7 @@ def train_drm_model(db_path,
         
         # Store metrics
         history["state_metrics"].append(metrics)
+        collect_softmax_rank_metrics(model, val_loader, device, epoch=0, history=history)
         
         # Save lightweight data frame
         data_frame_path = save_state_data_frame(
@@ -863,10 +1197,6 @@ def train_drm_model(db_path,
         train_entropy_loss = 0.0
         train_batch_entropy = 0.0 
         train_individual_entropy = 0.0
-        train_vicreg_total = 0.0
-        train_vicreg_invariance = 0.0
-        train_vicreg_variance = 0.0
-        train_vicreg_covariance = 0.0
 
         # TODO: maybe move this to the loss function
         if loss_fn.use_entropy_reg:
@@ -932,10 +1262,6 @@ def train_drm_model(db_path,
                 train_entropy_loss += entropy_loss.item()
                 train_batch_entropy += batch_entropy.item()
                 train_individual_entropy += individual_entropy.item()
-                train_vicreg_total += vicreg_total.item()
-                train_vicreg_invariance += vicreg_invariance.item()
-                train_vicreg_variance += vicreg_variance.item()
-                train_vicreg_covariance += vicreg_covariance.item()
                 
             except Exception as e:
                 print(f"Error in batch {batch_idx}: {e}")
@@ -952,10 +1278,6 @@ def train_drm_model(db_path,
             train_entropy_loss /= num_batches
             train_batch_entropy /= num_batches
             train_individual_entropy /= num_batches
-            train_vicreg_total /= num_batches
-            train_vicreg_invariance /= num_batches
-            train_vicreg_variance /= num_batches
-            train_vicreg_covariance /= num_batches
         
         # Validation phase
         model.eval()
@@ -965,10 +1287,6 @@ def train_drm_model(db_path,
         val_entropy_loss = 0.0
         val_batch_entropy = 0.0
         val_individual_entropy = 0.0
-        val_vicreg_total = 0.0
-        val_vicreg_invariance = 0.0
-        val_vicreg_variance = 0.0
-        val_vicreg_covariance = 0.0
         valid_batches = 0
         
         with torch.no_grad():
@@ -1006,10 +1324,6 @@ def train_drm_model(db_path,
                     val_entropy_loss += entropy_loss.item()
                     val_batch_entropy += batch_entropy.item()
                     val_individual_entropy += individual_entropy.item()
-                    val_vicreg_total += vicreg_total.item()
-                    val_vicreg_invariance += vicreg_invariance.item()
-                    val_vicreg_variance += vicreg_variance.item()
-                    val_vicreg_covariance += vicreg_covariance.item()
                     valid_batches += 1
                     
                 except Exception as e:
@@ -1024,10 +1338,6 @@ def train_drm_model(db_path,
             val_entropy_loss /= valid_batches
             val_batch_entropy /= valid_batches
             val_individual_entropy /= valid_batches
-            val_vicreg_total /= valid_batches
-            val_vicreg_invariance /= valid_batches
-            val_vicreg_variance /= valid_batches
-            val_vicreg_covariance /= valid_batches
         
         # Update history
         history["train_loss"].append(train_loss)
@@ -1036,28 +1346,18 @@ def train_drm_model(db_path,
         history["train_entropy_loss"].append(train_entropy_loss)
         history["train_batch_entropy"].append(train_batch_entropy)
         history["train_individual_entropy"].append(train_individual_entropy)
-        history["train_vicreg_total"].append(train_vicreg_total)
-        history["train_vicreg_invariance"].append(train_vicreg_invariance)
-        history["train_vicreg_variance"].append(train_vicreg_variance)
-        history["train_vicreg_covariance"].append(train_vicreg_covariance)
         history["val_loss"].append(val_loss)
         history["val_state_loss"].append(val_state_loss)
         history["val_value_loss"].append(val_value_loss)
         history["val_entropy_loss"].append(val_entropy_loss)
         history["val_batch_entropy"].append(val_batch_entropy)
         history["val_individual_entropy"].append(val_individual_entropy)
-        history["val_vicreg_total"].append(val_vicreg_total)
-        history["val_vicreg_invariance"].append(val_vicreg_invariance)
-        history["val_vicreg_variance"].append(val_vicreg_variance)
-        history["val_vicreg_covariance"].append(val_vicreg_covariance)
         
         # Print progress
         # Print progress with all metrics
         print(f"Epoch {epoch+1}/{epochs} - "
             f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f} "
             )
-        print(f"  VICReg: {train_vicreg_total/num_batches:.4f} (Inv: {train_vicreg_invariance/num_batches:.4f}, "
-            f"Var: {train_vicreg_variance/num_batches:.4f}, Cov: {train_vicreg_covariance/num_batches:.4f})")
         print(f"  Batch Entropy: {train_batch_entropy:.4f}, Individual Entropy: {train_individual_entropy:.4f}")
         print(f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}")
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
@@ -1100,6 +1400,7 @@ def train_drm_model(db_path,
             
             # Store metrics
             history["state_metrics"].append(metrics)
+            collect_softmax_rank_metrics(model, val_loader, device, epoch=epoch+1, history=history)
             
             # Save lightweight data frame (not PNG!)
             data_frame_path = save_state_data_frame(
@@ -1172,10 +1473,6 @@ def train_drm_model(db_path,
     test_entropy_loss = 0.0
     test_batch_entropy = 0.0
     test_individual_entropy = 0.0
-    test_vicreg_total = 0.0
-    test_vicreg_invariance = 0.0
-    test_vicreg_variance = 0.0
-    test_vicreg_covariance = 0.0
     test_samples = 0
     
     with torch.no_grad():
@@ -1215,10 +1512,6 @@ def train_drm_model(db_path,
                 test_entropy_loss += entropy_loss.item() * len(x)
                 test_batch_entropy += batch_entropy.item() * len(x)
                 test_individual_entropy += individual_entropy.item() * len(x)
-                test_vicreg_total += vicreg_total.item() * len(x)
-                test_vicreg_invariance += vicreg_invariance.item() * len(x)
-                test_vicreg_variance += vicreg_variance.item() * len(x)
-                test_vicreg_covariance += vicreg_covariance.item() * len(x)
                 test_samples += len(x)
                 
             except Exception as e:
@@ -1233,10 +1526,6 @@ def train_drm_model(db_path,
         test_entropy_loss /= test_samples
         test_batch_entropy /= test_samples
         test_individual_entropy /= test_samples
-        test_vicreg_total /= test_samples
-        test_vicreg_invariance /= test_samples
-        test_vicreg_variance /= test_samples
-        test_vicreg_covariance /= test_samples
     
     # Layer probing
     probing_results = None
@@ -1253,10 +1542,6 @@ def train_drm_model(db_path,
         "test_entropy_loss": float(test_entropy_loss),
         "test_batch_entropy": float(test_batch_entropy),
         "test_individual_entropy": float(test_individual_entropy),
-        "test_vicreg_total": float(test_vicreg_total),
-        "test_vicreg_invariance": float(test_vicreg_invariance),
-        "test_vicreg_variance": float(test_vicreg_variance),
-        "test_vicreg_covariance": float(test_vicreg_covariance),
         "test_samples": test_samples,
         "prob_discrete_accuracy": probing_results['discrete_accuracy'] if probing_results else None,
         "prob_discrete_accuracy_unweighted": probing_results['discrete_accuracy_unweighted'] if probing_results else None
@@ -1332,13 +1617,24 @@ def train_drm_model(db_path,
     # Plot training curves
     plot_training_curves(history, os.path.join(output_dir, f"training_curves_{run_id}.png"), 
                          state_loss_type=loss_fn.state_loss_type)
-    # Plot VICReg metrics
-    vicreg_weights = {
-        'lambda': vicreg_lambda, 
-        'mu': vicreg_mu, 
-        'nu': vicreg_nu
-    }
-    # plot_vicreg_metrics(history, test_metrics, vicreg_weights, os.path.join(output_dir, f"vicreg_metrics_{run_id}.png"))
+    
+    # Plot softmax rank evolution
+    if 'softmax_rank_metrics' in history and history['softmax_rank_metrics']:
+        rank_plot_path = os.path.join(output_dir, f"softmax_rank_evolution_{run_id}.png")
+        plot_softmax_rank_evolution(history, rank_plot_path)
+        
+        # Print final summary
+        final_metrics = history['softmax_rank_metrics'][-1]
+        print("\n" + "="*60)
+        print("SOFTMAX RANK SUMMARY")
+        print("="*60)
+        print(f"Final hidden rank: {final_metrics['hidden_rank']}/{final_metrics['hidden_theoretical_max_rank']}")
+        print(f"Final logit rank: {final_metrics['logit_rank']}/{final_metrics['logit_theoretical_max_rank']}")
+        print(f"Final σ₂/σ₁ ratio: {final_metrics.get('logit_sv_ratio_2nd_to_1st', 0):.4f}")
+        print(f"Hidden ||A₃||_F: {final_metrics['hidden_frobenius_norm']:.3f}")
+        print(f"Logit ||M₄||_F: {final_metrics['logit_frobenius_norm']:.3f}")
+        print("="*60)
+    # ====================
 
     # Visualize Modl Architecture
     #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
