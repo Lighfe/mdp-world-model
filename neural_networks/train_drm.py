@@ -39,7 +39,8 @@ from neural_networks.drm_viz import (
     plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
     create_state_viz_from_data, analyze_state_assignment_evolution,
     create_gif_from_frames, create_state_evolution_analysis,
-    create_png_from_frame_data, create_gif_from_data_frames
+    create_png_from_frame_data, create_gif_from_data_frames,
+    plot_softmax_rank_evolution
 )
 
 
@@ -583,15 +584,17 @@ def extract_hidden_and_logit_data(model, dataloader, device, max_samples=1000):
         captured_hidden.append(output.clone())
     
     def logit_hook(module, input, output):
-        captured_logits.append(input[0].clone())  # input to final layer = pre-softmax
+        captured_logits.append(output.clone())  # output of final layer = pre-softmax logits
     
-    # Register hooks on encoder layers
-    # encoder[-2] = last hidden layer, encoder[-1] = final layer  
-    if len(model.encoder) >= 2:
-        hidden_handle = model.encoder[-2].register_forward_hook(hidden_hook)
-        logit_handle = model.encoder[-1].register_forward_hook(logit_hook)
+    # Register hooks on correct encoder layers
+    # NOTE: This is hard coded here and needs to be adapted if architecture changes
+    # Encoder structure: [Linear, ReLU, Linear, ReLU, Linear, ReLU, Linear, ReLU, Linear]
+    # We want: layer 6 (last hidden Linear 32→32) and layer 8 (final Linear 32→4)
+    if len(model.encoder) >= 9:
+        hidden_handle = model.encoder[6].register_forward_hook(hidden_hook)  # Last hidden Linear
+        logit_handle = model.encoder[8].register_forward_hook(logit_hook)    # Final Linear  
     else:
-        raise ValueError("Encoder structure unexpected - need at least 2 layers")
+        raise ValueError(f"Encoder structure unexpected - has {len(model.encoder)} layers, expected ≥9")
     
     try:
         with torch.no_grad():
@@ -635,6 +638,12 @@ def extract_hidden_and_logit_data(model, dataloader, device, max_samples=1000):
     
     print(f"Extracted activations: Hidden {hidden_activations.shape}, Logits {pre_softmax_logits.shape}")
     
+    # Verify shapes are correct
+    if hidden_activations.size(1) != 32:
+        print(f"⚠️ WARNING: Hidden activations should be 32-dim, got {hidden_activations.size(1)}")
+    if pre_softmax_logits.size(1) != 4:
+        print(f"⚠️ WARNING: Pre-softmax logits should be 4-dim, got {pre_softmax_logits.size(1)}")
+    
     return {
         'hidden_activations': hidden_activations,    # (N, 32)
         'pre_softmax_logits': pre_softmax_logits,   # (N, 4)  
@@ -644,6 +653,7 @@ def extract_hidden_and_logit_data(model, dataloader, device, max_samples=1000):
 def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000):
     """
     Compute softmax rank metrics focusing on last hidden layer and final logits.
+    Raw data only - no theoretical maximums or efficiency calculations.
     
     Args:
         model: DRM model
@@ -652,7 +662,7 @@ def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000
         max_samples: Max samples for analysis
     
     Returns:
-        dict: All computed metrics
+        dict: All computed metrics (raw data only)
     """
     # Extract activations and logits
     data = extract_hidden_and_logit_data(model, val_dataloader, device, max_samples)
@@ -677,13 +687,12 @@ def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000
     hidden_acts_T = hidden_acts.T  # (32, N) for SVD
     hidden_rank, hidden_sv = compute_numerical_rank(hidden_acts_T)
     metrics['hidden_rank'] = hidden_rank
-    metrics['hidden_theoretical_max_rank'] = min(hidden_acts.size(0), hidden_acts.size(1))
     
     # Store normalized singular values for hidden layer
     if len(hidden_sv) > 0:
         hidden_sv_norm = hidden_sv / hidden_sv[0] if hidden_sv[0] > 0 else hidden_sv
-        # Store first few normalized singular values
-        for i, sv in enumerate(hidden_sv_norm[:min(8, len(hidden_sv_norm))]):  # Store up to 8
+        # Store first few normalized singular values (up to 8 for debugging)
+        for i, sv in enumerate(hidden_sv_norm[:min(8, len(hidden_sv_norm))]):
             metrics[f'hidden_sv_norm_{i}'] = float(sv)
     
     # ===== FINAL LOGIT LAYER (M₄, A₄, 4-dim) =====
@@ -703,15 +712,14 @@ def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000
     
     metrics['logit_rank'] = logit_rank
     metrics['softmax_rank'] = softmax_rank
-    metrics['logit_theoretical_max_rank'] = min(pre_logits.size(0), pre_logits.size(1))
     
     # 3. Detailed SVD analysis for logits (M₄)
     if len(logit_sv) > 0:
         # Normalized singular values
         logit_sv_norm = logit_sv / logit_sv[0] if logit_sv[0] > 0 else logit_sv
         
-        # Store individual normalized singular values (up to 4 for logits)
-        for i, sv in enumerate(logit_sv_norm):
+        # Store individual normalized singular values (up to 4 for 4-dim logits)
+        for i, sv in enumerate(logit_sv_norm[:4]):  # Only first 4 for 4-dim layer
             metrics[f'logit_sv_norm_{i}'] = float(sv)
         
         # σ₂/σ₁ ratio for collapse detection
@@ -753,9 +761,9 @@ def collect_softmax_rank_metrics(model, val_dataloader, device, epoch, history, 
         history['softmax_rank_metrics'].append(metrics)
         
         # Print key metrics for monitoring
-        print(f"  Hidden layer (32-dim): rank={metrics['hidden_rank']}/{metrics['hidden_theoretical_max_rank']}, "
+        print(f"  Hidden layer (32-dim): rank={metrics['hidden_rank']}, "
               f"||A₃||_F={metrics['hidden_frobenius_norm']:.3f}")
-        print(f"  Logit layer (4-dim): rank={metrics['logit_rank']}/{metrics['logit_theoretical_max_rank']}, "
+        print(f"  Logit layer (4-dim): rank={metrics['logit_rank']}, "
               f"||M₄||_F={metrics['logit_frobenius_norm']:.3f}")
         print(f"  Post-softmax: rank={metrics['softmax_rank']}, "
               f"||A₄||_F={metrics['softmax_frobenius_norm']:.3f}")
@@ -770,98 +778,12 @@ def collect_softmax_rank_metrics(model, val_dataloader, device, epoch, history, 
         # Check for potential issues
         if metrics['logit_rank'] < 2:
             print(f"  ⚠️  WARNING: Very low logit rank ({metrics['logit_rank']}) - rank collapse!")
-        if metrics['hidden_rank'] < metrics['hidden_theoretical_max_rank'] * 0.5:
-            print(f"  ⚠️  WARNING: Hidden rank using <50% of capacity")
             
     except Exception as e:
         print(f"Error computing softmax rank metrics: {e}")
         import traceback
         traceback.print_exc()
 
-def plot_softmax_rank_evolution(history, save_path):
-    """
-    Plot evolution of softmax rank metrics over training.
-    
-    Args:
-        history: Training history containing softmax_rank_metrics
-        save_path: Path to save the plot
-    """
-    import matplotlib.pyplot as plt
-    
-    if 'softmax_rank_metrics' not in history or not history['softmax_rank_metrics']:
-        print("No softmax rank metrics found in history")
-        return
-    
-    metrics_list = history['softmax_rank_metrics']
-    epochs = [m['epoch'] for m in metrics_list]
-    
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
-    # 1. Rank evolution
-    ax = axes[0, 0]
-    hidden_ranks = [m['hidden_rank'] for m in metrics_list]
-    logit_ranks = [m['logit_rank'] for m in metrics_list]
-    softmax_ranks = [m['softmax_rank'] for m in metrics_list]
-    
-    ax.plot(epochs, hidden_ranks, 'o-', label='Hidden Layer (32-dim)', linewidth=2, markersize=4)
-    ax.plot(epochs, logit_ranks, 's-', label='Logit Layer (4-dim)', linewidth=2, markersize=4) 
-    ax.plot(epochs, softmax_ranks, '^-', label='Post-Softmax (4-dim)', linewidth=2, markersize=4)
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Numerical Rank')
-    ax.set_title('Rank Evolution During Training')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    # 2. Frobenius norm evolution
-    ax = axes[0, 1]
-    hidden_norms = [m['hidden_frobenius_norm'] for m in metrics_list]
-    logit_norms = [m['logit_frobenius_norm'] for m in metrics_list]
-    softmax_norms = [m['softmax_frobenius_norm'] for m in metrics_list]
-    
-    ax.plot(epochs, hidden_norms, 'o-', label='Hidden ||A₃||_F', linewidth=2, markersize=4)
-    ax.plot(epochs, logit_norms, 's-', label='Logit ||M₄||_F', linewidth=2, markersize=4)
-    ax.plot(epochs, softmax_norms, '^-', label='Softmax ||A₄||_F', linewidth=2, markersize=4)
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Frobenius Norm')
-    ax.set_title('Frobenius Norm Evolution')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_yscale('log')
-    
-    # 3. Logit singular value ratio (collapse detection)
-    ax = axes[1, 0]
-    sv_ratios = [m.get('logit_sv_ratio_2nd_to_1st', 0) for m in metrics_list]
-    
-    ax.plot(epochs, sv_ratios, 'o-', linewidth=2, color='red', markersize=4)
-    ax.axhline(y=0.1, color='orange', linestyle='--', alpha=0.7, label='10% threshold')
-    ax.axhline(y=0.01, color='red', linestyle='--', alpha=0.7, label='1% threshold')
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('σ₂/σ₁ Ratio')
-    ax.set_title('Logit Collapse Detection\n(Lower = More Collapse)')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_yscale('log')
-    
-    # 4. Rank utilization efficiency
-    ax = axes[1, 1]
-    hidden_efficiency = [m['hidden_rank'] / m['hidden_theoretical_max_rank'] * 100 
-                        for m in metrics_list]
-    logit_efficiency = [m['logit_rank'] / min(4, m['logit_theoretical_max_rank']) * 100 
-                       for m in metrics_list]
-    
-    ax.plot(epochs, hidden_efficiency, 'o-', label='Hidden Layer', linewidth=2, markersize=4)
-    ax.plot(epochs, logit_efficiency, 's-', label='Logit Layer', linewidth=2, markersize=4)
-    ax.set_xlabel('Epoch') 
-    ax.set_ylabel('Rank Utilization (%)')
-    ax.set_title('Rank Efficiency')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim(0, 105)
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Saved softmax rank evolution plot to {save_path}")
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -1623,13 +1545,13 @@ def train_drm_model(db_path,
         rank_plot_path = os.path.join(output_dir, f"softmax_rank_evolution_{run_id}.png")
         plot_softmax_rank_evolution(history, rank_plot_path)
         
-        # Print final summary
+        # Print final summary (raw data only)
         final_metrics = history['softmax_rank_metrics'][-1]
         print("\n" + "="*60)
         print("SOFTMAX RANK SUMMARY")
         print("="*60)
-        print(f"Final hidden rank: {final_metrics['hidden_rank']}/{final_metrics['hidden_theoretical_max_rank']}")
-        print(f"Final logit rank: {final_metrics['logit_rank']}/{final_metrics['logit_theoretical_max_rank']}")
+        print(f"Final hidden rank: {final_metrics['hidden_rank']}")
+        print(f"Final logit rank: {final_metrics['logit_rank']}")
         print(f"Final σ₂/σ₁ ratio: {final_metrics.get('logit_sv_ratio_2nd_to_1st', 0):.4f}")
         print(f"Hidden ||A₃||_F: {final_metrics['hidden_frobenius_norm']:.3f}")
         print(f"Logit ||M₄||_F: {final_metrics['logit_frobenius_norm']:.3f}")

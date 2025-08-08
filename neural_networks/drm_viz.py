@@ -984,6 +984,124 @@ def visualize_model_architecture(model, output_path):
         print(f"Fallback visualization saved to {fallback_path}.png")
         return fallback_path + '.png'
 
+def plot_softmax_rank_evolution(history, save_path):
+    """
+    Plot evolution of softmax rank metrics over training.
+    Uses Paul Tol's muted color scheme for colorblind accessibility.
+    
+    Args:
+        history: Training history containing softmax_rank_metrics
+        save_path: Path to save the plot
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    if 'softmax_rank_metrics' not in history or not history['softmax_rank_metrics']:
+        print("No softmax rank metrics found in history")
+        return
+    
+    # Paul Tol's muted color scheme for colorblind accessibility
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    metrics_list = history['softmax_rank_metrics']
+    epochs = [m['epoch'] for m in metrics_list]
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # ========================================================================
+    # Plot 1: Rank Evolution During Training
+    # ========================================================================
+    ax = axes[0, 0]
+    hidden_ranks = [m['hidden_rank'] for m in metrics_list]
+    logit_ranks = [m['logit_rank'] for m in metrics_list]
+    softmax_ranks = [m['softmax_rank'] for m in metrics_list]
+    
+    ax.plot(epochs, hidden_ranks, 'o-', label='Hidden Layer (32-dim)', 
+           linewidth=2, markersize=4, color=tol_muted[0])
+    ax.plot(epochs, logit_ranks, 's-', label='Logit Layer (4-dim)', 
+           linewidth=2, markersize=4, color=tol_muted[1]) 
+    ax.plot(epochs, softmax_ranks, '^-', label='Post-Softmax (4-dim)', 
+           linewidth=2, markersize=4, color=tol_muted[2])
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Numerical Rank')
+    ax.set_title('Rank Evolution During Training')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)  # Start y-axis at 0 as requested
+    
+    # ========================================================================
+    # Plot 2: Norm Evolution (Hidden A, Logit M, Softmax A)
+    # ========================================================================
+    ax = axes[0, 1]
+    hidden_norms = [m['hidden_frobenius_norm'] for m in metrics_list]      # ||A₃||_F
+    logit_norms = [m['logit_frobenius_norm'] for m in metrics_list]        # ||M₄||_F  
+    softmax_norms = [m['softmax_frobenius_norm'] for m in metrics_list]    # ||A₄||_F
+    
+    ax.plot(epochs, hidden_norms, 'o-', label='Hidden ||A₃||_F', 
+           linewidth=2, markersize=4, color=tol_muted[0])
+    ax.plot(epochs, logit_norms, 's-', label='Logit ||M₄||_F', 
+           linewidth=2, markersize=4, color=tol_muted[1])
+    ax.plot(epochs, softmax_norms, '^-', label='Softmax ||A₄||_F', 
+           linewidth=2, markersize=4, color=tol_muted[2])
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Frobenius Norm')
+    ax.set_title('Norm Evolution During Training')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')  # Log scale for better visualization
+    
+    # ========================================================================
+    # Plot 3: Logit Singular Values Evolution (4 biggest)
+    # ========================================================================
+    ax = axes[1, 0]
+    
+    # Plot first 4 normalized singular values for logits
+    colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
+    for i in range(4):
+        sv_key = f'logit_sv_norm_{i}'
+        if sv_key in metrics_list[0]:  # Check if this SV exists
+            sv_values = [m.get(sv_key, 0) for m in metrics_list]
+            ax.plot(epochs, sv_values, 'o-', label=f'σ_{i+1}', 
+                   color=colors_sv[i], linewidth=2, markersize=3)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Normalized Singular Value')
+    ax.set_title('Logit Singular Values Evolution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    
+    # ========================================================================
+    # Plot 4: Hidden Singular Values Evolution (first 4)
+    # ========================================================================
+    ax = axes[1, 1]
+    
+    # Plot first 4 normalized singular values for hidden layer
+    colors_sv = [tol_muted[4], tol_muted[5], tol_muted[6], tol_muted[7]]
+    for i in range(4):
+        sv_key = f'hidden_sv_norm_{i}'
+        if sv_key in metrics_list[0]:  # Check if this SV exists
+            sv_values = [m.get(sv_key, 0) for m in metrics_list]
+            ax.plot(epochs, sv_values, 'o-', label=f'σ_{i+1}', 
+                   color=colors_sv[i], linewidth=2, markersize=3)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Normalized Singular Value')
+    ax.set_title('Hidden Layer Singular Values Evolution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    
+    # ========================================================================
+    # Final styling and save
+    # ========================================================================
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved softmax rank evolution plot to {save_path}")
+
 
 ### NOTE: NO LONGER IN USE
 
