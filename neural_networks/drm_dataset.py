@@ -21,10 +21,11 @@ from neural_networks.system_registry import SystemType, get_system_config
 class BaseDataset(Dataset):
     """Base dataset class with common database functionality"""
     
-    def __init__(self, db_path, cache_data=True):
+    def __init__(self, db_path, cache_data=True, cache_verification=True):
         """Initialize base dataset with database connection"""
         self.db_path = db_path
         self.cache_data = cache_data
+        self.cache_verification = cache_verification
         self.cached_data = None
         
         # Create SQLAlchemy engine
@@ -55,6 +56,8 @@ class BaseDataset(Dataset):
         # Cache all data at startup if requested
         if self.cache_data:
             self._cache_all_data()
+        else:
+            print("Cache disabled - using original database queries")
     
     def _cache_all_data(self):
         """Load all data into memory at startup"""
