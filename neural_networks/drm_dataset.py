@@ -300,6 +300,48 @@ class SaddleSystemDataset(BaseDataset):
             return torch.tensor([transformed_y1, transformed_y2], dtype=torch.float32)
         else:
             raise NotImplementedError(f"Method '{self.value_method}' is not implemented for saddle system.")
+        
+    def _halfspace_for_single_point(self, x):
+        """Calculate halfspace values for a single point tensor"""
+        point = x.numpy()
+        
+        # Use stored config instead of reloading from database
+        saddle_points = self.saddle_config['saddle_points']
+        angles_degrees = self.saddle_config['angles_degrees']
+        
+        values = []
+        for saddle_point, angle_deg in zip(saddle_points, angles_degrees):
+            v = point - np.array(saddle_point)
+            angle_rad = np.radians(angle_deg)
+            manifold_dir = np.array([np.cos(angle_rad), np.sin(angle_rad)])
+            normal = np.array([-manifold_dir[1], manifold_dir[0]])
+            signed_dist = np.dot(v, normal)
+            values.append(0.0 if signed_dist < 0 else 1.0)
+        
+        return torch.tensor(values, dtype=torch.float32)
+    
+    def _halfspace_for_batch(self, x_batch):
+        """Calculate halfspace values for a batch of points"""
+        points = x_batch.numpy()  # (batch_size, 2)
+        
+        # Use stored config
+        saddle_points = self.saddle_config['saddle_points']
+        angles_degrees = self.saddle_config['angles_degrees']
+        
+        batch_size = points.shape[0]
+        num_saddles = len(saddle_points)
+        values = np.zeros((batch_size, num_saddles))
+        
+        for saddle_idx, (saddle_point, angle_deg) in enumerate(zip(saddle_points, angles_degrees)):
+            # Vectorized calculation
+            v = points - np.array(saddle_point)  # (batch_size, 2)
+            angle_rad = np.radians(angle_deg)
+            manifold_dir = np.array([np.cos(angle_rad), np.sin(angle_rad)])
+            normal = np.array([-manifold_dir[1], manifold_dir[0]])
+            signed_dist = np.dot(v, normal)  # (batch_size,)
+            values[:, saddle_idx] = (signed_dist >= 0).astype(float)
+        
+        return torch.tensor(values, dtype=torch.float32)
 
 class SocialTippingDataset(BaseDataset):
     """Dataset for social tipping system"""
