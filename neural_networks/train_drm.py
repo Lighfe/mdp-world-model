@@ -11,6 +11,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.amp import GradScaler
 import psutil
 import copy
 
@@ -54,6 +55,7 @@ def set_all_seeds(seed):
         # Also set deterministic behavior for CUDNN
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        torch.use_deterministic_algorithms(True, warn_only=True)
 
 def calculate_state_weights(targets):
     """
@@ -843,7 +845,8 @@ def train_drm_model(db_path,
                     scheduler_type='cosine',
                     weight_decay=0.0,
                     restart_period=20,
-                    restart_mult=1
+                    restart_mult=1,
+                    use_amp=False
                     ):
     """
     Full training function for the Discrete Representations Model with stability improvements
@@ -997,6 +1000,26 @@ def train_drm_model(db_path,
     # Check if CUDA is available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+
+    # ============= GPU OPTIMIZATIONS =============
+    if device.type == 'cuda':
+        # Get GPU information
+        gpu_name = torch.cuda.get_device_name()
+        gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"GPU: {gpu_name} ({gpu_memory_gb:.1f} GB)")
+        
+        # Enable TF32 for H100/A100 (free performance boost)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision('high')
+        print("✓ Enabled TF32 for tensor cores")
+        
+        # Clear GPU cache before starting
+        torch.cuda.empty_cache()
+        allocated = torch.cuda.memory_allocated() / (1024**3)
+        print(f"Initial GPU memory: {allocated:.2f} GB allocated")
+    # ============= END GPU OPTIMIZATIONS =============
+
     model.to(device)
     
     # Initialize loss function with appropriate types
@@ -1089,6 +1112,21 @@ def train_drm_model(db_path,
         prev_dominant_states = dominant_states
 
     
+    # ============= MIXED PRECISION SETUP =============
+    scaler = None
+    autocast_dtype = torch.float16  # Default
+    if use_amp and device.type == 'cuda':
+        from torch.amp import GradScaler
+        scaler = GradScaler('cuda')
+        
+        # Use bfloat16 for H100/A100 (better numerical stability)
+        gpu_name = torch.cuda.get_device_name()
+        if 'H100' in gpu_name or 'A100' in gpu_name:
+            autocast_dtype = torch.bfloat16
+        
+        print(f"✓ Enabled AMP with {autocast_dtype}")
+    # ============= END MIXED PRECISION =============
+
     # Start training loop
     print(f"Starting training for {epochs} epochs...")
     
@@ -1149,30 +1187,47 @@ def train_drm_model(db_path,
                 print(f"WARNING: NaN values in batch {batch_idx}, skipping")
                 continue
             
-            # Zero gradients
-            optimizer.zero_grad()
             
             try:
+                # Zero gradients - use set_to_none for slightly better performance
+                optimizer.zero_grad(set_to_none=True)
+                
                 # diagnostics
                 forward_start = time.time()
-
-                # Forward pass
-                s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(x, c, y, v_true, training=True)
+                
+                if use_amp and scaler is not None:
+                    # ============= AMP FORWARD PASS =============
+                    with torch.amp.autocast('cuda', dtype=autocast_dtype):
+                        # Forward pass
+                        s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                            x, c, y, v_true, training=True
+                        )
+                        
+                        # Calculate loss
+                        (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, 
+                        individual_entropy, vicreg_total, vicreg_invariance, 
+                        vicreg_variance, vicreg_covariance) = loss_fn(
+                            s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
+                            embed_x, embed_y, epoch=epoch, max_epochs=epochs
+                        )
+                else:
+                    # ============= REGULAR FORWARD PASS =============
+                    # Forward pass (existing code)
+                    s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                        x, c, y, v_true, training=True
+                    )
+                    
+                    # Calculate loss (existing code)
+                    (total_loss, state_loss, value_loss, entropy_loss, batch_entropy,
+                    individual_entropy, vicreg_total, vicreg_invariance, 
+                    vicreg_variance, vicreg_covariance) = loss_fn(
+                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
+                        embed_x, embed_y, epoch=epoch, max_epochs=epochs
+                    )
                 
                 # diagnostics
                 forward_end = time.time()
                 forward_time += (forward_end - forward_start)
-                
-                # Check for NaN values in model outputs
-                if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
-                    print(f"WARNING: NaN values in model outputs for batch {batch_idx}, skipping")
-                    continue
-                
-                # Calculate loss
-                (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropy,
-                    vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
-                        s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
-                        embed_x, embed_y, epoch=epoch, max_epochs=epochs) 
                 
                 # Check if loss is NaN
                 if torch.isnan(total_loss):
@@ -1182,28 +1237,47 @@ def train_drm_model(db_path,
                 # diagnostics
                 backward_start = time.time()
                 
-                # Backward pass
-                total_loss.backward()
+                if use_amp and scaler is not None:
+                    # ============= AMP BACKWARD PASS =============
+                    # Scale loss for mixed precision
+                    scaler.scale(total_loss).backward()
+                    
+                    # Unscale gradients before clipping
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    
+                    # Optimizer step with gradient scaling
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    # ============= REGULAR BACKWARD PASS =============
+                    total_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    optimizer.step()
                 
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-                
-                # Update weights
-                optimizer.step()
-
                 if model.use_target_encoder:
                     model.update_target_encoder()
-
+                
                 backward_end = time.time()
                 backward_time += (backward_end - backward_start)
 
                 # diagnostics
                 total_batches += 1
-                if batch_idx == 50:  # Print after 50 batches
-                    print(f"Avg times per batch:")
-                    print(f"  Data loading: {data_time/total_batches*1000:.2f}ms")
-                    print(f"  Forward pass: {forward_time/total_batches*1000:.2f}ms")
-                    print(f"  Backward pass: {backward_time/total_batches*1000:.2f}ms")
+
+                # Print first batch and then periodically
+                if batch_idx == 0:
+                    print(f"  Batch {batch_idx}: Loss={total_loss.item():.4f}")
+                    print(f"  First batch timings:")
+                    print(f"    Data loading: {(data_end - batch_start)*1000:.2f}ms")
+                    print(f"    Forward pass: {(forward_end - forward_start)*1000:.2f}ms")
+                    print(f"    Backward pass: {(backward_end - backward_start)*1000:.2f}ms")
+                    
+                    if device.type == 'cuda':
+                        allocated = torch.cuda.memory_allocated() / (1024**3)
+                        reserved = torch.cuda.memory_reserved() / (1024**3)
+                        print(f"    GPU Memory: {allocated:.2f}GB used, {reserved:.2f}GB reserved")
+                elif batch_idx % 50 == 0:  # Every 50 batches
+                    print(f"  Batch {batch_idx}: Loss={total_loss.item():.4f}")
                 
                 # Print batch info occasionally
                 if batch_idx % 50 == 0:
@@ -1254,18 +1328,26 @@ def train_drm_model(db_path,
                     continue
                 
                 try:
-                    # Forward pass
-                    s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(x, c, y, v_true, training=False)
-                    
-                    # Check for NaN values in model outputs
-                    if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
-                        continue
-                    
-                    # Calculate loss
-                    (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropy,
-                        vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
-                            s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
-                            embed_x, embed_y, epoch=epoch, max_epochs=epochs)
+                    if use_amp and device.type == 'cuda':
+                        with torch.amp.autocast('cuda', dtype=autocast_dtype):
+                            # Forward pass
+                            s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                                x, c, y, v_true, training=False
+                            )
+                            
+                            # Calculate loss
+                            (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, 
+                            individual_entropy, vicreg_total, vicreg_invariance, 
+                            vicreg_variance, vicreg_covariance) = loss_fn(
+                                s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
+                                embed_x, embed_y, epoch=epoch, max_epochs=epochs
+                            )
+                    else:
+                        # Existing validation code
+                        # Forward pass
+                        s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                            x, c, y, v_true, training=False
+                        )
                     
                     # Check if loss is NaN
                     if torch.isnan(total_loss):
@@ -1784,6 +1866,9 @@ if __name__ == "__main__":
                     choices=['cosine', 'warm_restarts', 'fixed'], 
                     default='cosine', help='Type of learning rate scheduler to use')
     
+    parser.add_argument('--use_amp', action='store_true', 
+                    help='Use mixed precision training (GPU optimization)')
+    
     args = parser.parse_args()
 
     # Create the run_id and complete output directory
@@ -1852,4 +1937,5 @@ if __name__ == "__main__":
         weight_decay=args.weight_decay,
         restart_period=args.restart_period,
         restart_mult=args.restart_mult, 
+        use_amp=args.use_amp
     )
