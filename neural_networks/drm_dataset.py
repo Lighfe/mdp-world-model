@@ -21,12 +21,9 @@ from neural_networks.system_registry import SystemType, get_system_config
 class BaseDataset(Dataset):
     """Base dataset class with common database functionality"""
     
-    def __init__(self, db_path, cache_data=False, cache_verification=True):
+    def __init__(self, db_path):
         """Initialize base dataset with database connection"""
         self.db_path = db_path
-        self.cache_data = cache_data
-        self.cache_verification = cache_verification
-        self.cached_data = None
         
         # Create SQLAlchemy engine
         self.engine = create_engine(f"sqlite:///{db_path}")
@@ -52,55 +49,6 @@ class BaseDataset(Dataset):
         with Session(self.engine) as session:
             self.length = session.query(self.table).count()
             print(f"Found {self.length} rows in the dataset")
-        
-        # Cache all data at startup if requested
-        if self.cache_data:
-            self._cache_all_data()
-        else:
-            print("Cache disabled - using original database queries")
-    
-    def _cache_all_data(self):
-        """Load all data into memory at startup"""
-        print("Loading all data into memory...")
-        
-        with Session(self.engine) as session:
-            # Get all data in one query
-            query = select(self.table)
-            result = session.execute(query).fetchall()
-            
-        self.cached_data = result
-        print(f"Cached {len(self.cached_data)} samples in memory")
-        
-        # Close database connection since we don't need it anymore
-        self.engine.dispose()
-
-    def _verify_cache_indexing(self):
-        """Verify that cached data matches original database indexing"""
-        # Test first 3 and last 3 indices to verify order is preserved
-        test_indices = [0, 1, 2, len(self.cached_data)-3, len(self.cached_data)-2, len(self.cached_data)-1]
-        
-        print("Testing cache indexing consistency:")
-        for idx in test_indices:
-            if idx < 0 or idx >= len(self.cached_data):
-                continue
-                
-            # Get from cache
-            cached_row = self.cached_data[idx]
-            
-            # Get from database using original method
-            with Session(self.engine) as session:
-                query = select(self.table).offset(idx).limit(1)
-                db_row = session.execute(query).fetchone()
-            
-            # Compare first few columns
-            cache_vals = [getattr(cached_row, col.name) for col in list(self.table.columns)[:3]]
-            db_vals = list(db_row)[:3]
-            
-            if cache_vals != db_vals:
-                raise ValueError(f"Cache indexing mismatch at index {idx}! "
-                               f"Cache: {cache_vals}, DB: {db_vals}")
-        
-        print("✓ Cache indexing verified - matches original database order")
     
     def __len__(self):
         return self.length
@@ -123,40 +71,36 @@ class BaseDataset(Dataset):
 class TechSubstitutionDataset(BaseDataset):
     """Dataset for technology substitution system"""
     
-    def __init__(self, db_path, value_method='market_share', cache_data=True):
+    def __init__(self, db_path, value_method='market_share'):
         self.value_method = value_method
-        super().__init__(db_path, cache_data=cache_data)
+        super().__init__(db_path)
         self._validate_samples()
     
     def __getitem__(self, idx):
-        if self.cached_data:
-            # Use cached data - no database query!
-            result = self.cached_data[idx]
-            
-            # Extract data directly from cached result
-            x0, x1, c0, y0, y1 = result.x0, result.x1, result.c0, result.y0, result.y1
-            
-        else:
-            # Fallback to original database query method
-            required_columns = ['x0', 'x1', 'c0', 'y0', 'y1']
-            for col in required_columns:
-                if not hasattr(self.table.c, col):
-                    raise ValueError(f"Required column '{col}' not found in table")
-            
-            with Session(self.engine) as session:
-                query = select(
-                    self.table.c.x0, self.table.c.x1, self.table.c.c0, 
-                    self.table.c.y0, self.table.c.y1
-                ).offset(idx).limit(1)
-                
-                result = session.execute(query).fetchone()
-                
-            if result is None:
-                raise IndexError(f"Index {idx} out of bounds")
-            
-            x0, x1, c0, y0, y1 = result
+        required_columns = ['x0', 'x1', 'c0', 'y0', 'y1']
+        for col in required_columns:
+            if not hasattr(self.table.c, col):
+                raise ValueError(f"Required column '{col}' not found in table")
         
-        # Convert to tensors (keep existing logic)
+        # SQLAlchemy query for this index
+        with Session(self.engine) as session:
+            query = select(
+                self.table.c.x0, 
+                self.table.c.x1, 
+                self.table.c.c0, 
+                self.table.c.y0, 
+                self.table.c.y1
+            ).offset(idx).limit(1)
+            
+            result = session.execute(query).fetchone()
+            
+        if result is None:
+            raise IndexError(f"Index {idx} out of bounds")
+        
+        # Extract data
+        x0, x1, c0, y0, y1 = result
+        
+        # Convert to tensors
         x = torch.tensor([x0, x1], dtype=torch.float32)
         c = torch.tensor([c0], dtype=torch.float32)
         y = torch.tensor([y0, y1], dtype=torch.float32)
@@ -173,7 +117,7 @@ class TechSubstitutionDataset(BaseDataset):
         return x, c, y, v_true
     
     def f_v(self, y):
-        """Calculate value function for tech substitution system"""
+        """Calculate value function for tech substitution"""
         if isinstance(y, (tuple, list)):
             y = np.array(y)
 
@@ -211,13 +155,14 @@ class TechSubstitutionDataset(BaseDataset):
         else:
             raise NotImplementedError(f"Method '{self.value_method}' is not implemented.")
 
+
 class SaddleSystemDataset(BaseDataset):
     """Dataset for saddle system"""
     
-    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=False, cache_verification=True):
+    def __init__(self, db_path, value_method='angle', num_saddles=None):
         self.value_method = value_method
         self.num_saddles = num_saddles
-        super().__init__(db_path, cache_data=cache_data, cache_verification=cache_verification)
+        super().__init__(db_path)
         
         # Infer number of saddles from data if not provided
         if self.num_saddles is None:
@@ -235,56 +180,42 @@ class SaddleSystemDataset(BaseDataset):
     
     def _infer_num_saddles(self):
         """Infer number of saddle points from control values in the data"""
-        if self.cached_data:
-            # Use cached data to infer saddles
-            unique_controls = set(row.c0 for row in self.cached_data)
+        with Session(self.engine) as session:
+            query = select(self.table.c.c0).distinct()
+            results = session.execute(query).fetchall()
+            unique_controls = [r[0] for r in results]
             self.num_saddles = len(unique_controls)
-            print(f"Inferred {self.num_saddles} saddle points from cached control values: {sorted(unique_controls)}")
-        else:
-            # Original database query method
-            with Session(self.engine) as session:
-                query = select(self.table.c.c0).distinct()
-                results = session.execute(query).fetchall()
-                unique_controls = [r[0] for r in results]
-                self.num_saddles = len(unique_controls)
-                print(f"Inferred {self.num_saddles} saddle points from control values: {unique_controls}")
+            print(f"Inferred {self.num_saddles} saddle points from control values: {unique_controls}")
     
     def __getitem__(self, idx):
-        if self.cached_data:
-            # Use cached data - no database query!
-            result = self.cached_data[idx]
+        required_columns = ['x0', 'x1', 'c0', 'y0', 'y1']
+        for col in required_columns:
+            if not hasattr(self.table.c, col):
+                    
+                raise ValueError(f"Required column '{col}' not found in table")
+        # SQLAlchemy query for this index
+        with Session(self.engine) as session:
+            query = select(
+                self.table.c.x0, 
+                self.table.c.x1, 
+                self.table.c.c0, 
+                self.table.c.y0, 
+                self.table.c.y1
+            ).offset(idx).limit(1)
             
-            # Extract data directly from cached result
-            x0, x1, c0, y0, y1 = result.x0, result.x1, result.c0, result.y0, result.y1
+            result = session.execute(query).fetchone()
             
-        else:
-            # Fallback to original database query method
-            required_columns = ['x0', 'x1', 'c0', 'y0', 'y1']
-            for col in required_columns:
-                if not hasattr(self.table.c, col):
-                    raise ValueError(f"Required column '{col}' not found in table")
-            
-            with Session(self.engine) as session:
-                query = select(
-                    self.table.c.x0, 
-                    self.table.c.x1, 
-                    self.table.c.c0, 
-                    self.table.c.y0, 
-                    self.table.c.y1
-                ).offset(idx).limit(1)
-                
-                result = session.execute(query).fetchone()
-                
-            if result is None:
-                raise IndexError(f"Index {idx} out of bounds")
-            
-            x0, x1, c0, y0, y1 = result
+        if result is None:
+            raise IndexError(f"Index {idx} out of bounds")
+        
+        # Extract data
+        x0, x1, c0, y0, y1 = result
 
-        # Validate control value
+            # Validate control value
         if int(c0) >= self.num_saddles or int(c0) < 0:
             raise ValueError(f"Invalid control value {c0}. Must be in range [0, {self.num_saddles})")
         
-        # Convert to tensors (keep existing logic)
+        # Convert to tensors
         x = torch.tensor([x0, x1], dtype=torch.float32)
         
         # Convert control to one-hot encoding
@@ -331,7 +262,7 @@ class SaddleSystemDataset(BaseDataset):
             return torch.tensor([transformed_y1, transformed_y2], dtype=torch.float32)
         else:
             raise NotImplementedError(f"Method '{self.value_method}' is not implemented for saddle system.")
-        
+    
     def _halfspace_for_single_point(self, x):
         """Calculate halfspace values for a single point tensor"""
         point = x.numpy()
@@ -374,46 +305,43 @@ class SaddleSystemDataset(BaseDataset):
         
         return torch.tensor(values, dtype=torch.float32)
 
+
 class SocialTippingDataset(BaseDataset):
     """Dataset for social tipping system"""
     
-    def __init__(self, db_path, value_method='abs_distance', cache_data=True):
+    def __init__(self, db_path, value_method='abs_distance'):
         self.value_method = value_method
-        super().__init__(db_path, cache_data=cache_data)
+        super().__init__(db_path)
         self._validate_samples()
     
     def __getitem__(self, idx):
-        if self.cached_data:
-            # Use cached data - no database query!
-            result = self.cached_data[idx]
-            
-            # Extract data directly from cached result
-            x0, x1, c0, c1, c2, c3, y0, y1 = (result.x0, result.x1, result.c0, 
-                                              result.c1, result.c2, result.c3, 
-                                              result.y0, result.y1)
-            
-        else:
-            # Fallback to original database query method
-            required_columns = ['x0', 'x1', 'c0', 'c1', 'c2', 'c3', 'y0', 'y1']
-            for col in required_columns:
-                if not hasattr(self.table.c, col):
-                    raise ValueError(f"Required column '{col}' not found in table")
-            
-            with Session(self.engine) as session:
-                query = select(
-                    self.table.c.x0, self.table.c.x1, 
-                    self.table.c.c0, self.table.c.c1, self.table.c.c2, self.table.c.c3,
-                    self.table.c.y0, self.table.c.y1
-                ).offset(idx).limit(1)
-                
-                result = session.execute(query).fetchone()
-                
-            if result is None:
-                raise IndexError(f"Index {idx} out of bounds")
-            
-            x0, x1, c0, c1, c2, c3, y0, y1 = result
+        required_columns = ['x0', 'x1', 'c0', 'c1', 'c2', 'c3', 'y0', 'y1']
+        for col in required_columns:
+            if not hasattr(self.table.c, col):
+                raise ValueError(f"Required column '{col}' not found in table")
         
-        # Convert to tensors (keep existing logic)
+        # SQLAlchemy query for this index (column-specific selection like SaddleSystemDataset)
+        with Session(self.engine) as session:
+            query = select(
+                self.table.c.x0, 
+                self.table.c.x1, 
+                self.table.c.c0,
+                self.table.c.c1,
+                self.table.c.c2,
+                self.table.c.c3,
+                self.table.c.y0, 
+                self.table.c.y1
+            ).offset(idx).limit(1)
+            
+            result = session.execute(query).fetchone()
+            
+        if result is None:
+            raise IndexError(f"Index {idx} out of bounds")
+        
+        # Extract data (direct unpacking like SaddleSystemDataset)
+        x0, x1, c0, c1, c2, c3, y0, y1 = result
+        
+        # Convert to tensors
         x = torch.tensor([x0, x1], dtype=torch.float32)
         c = torch.tensor([c0, c1, c2, c3], dtype=torch.float32)
         y = torch.tensor([y0, y1], dtype=torch.float32)
