@@ -1204,7 +1204,6 @@ def train_drm_model(db_path,
                     print(f"  Data loading: {data_time/total_batches*1000:.2f}ms")
                     print(f"  Forward pass: {forward_time/total_batches*1000:.2f}ms")
                     print(f"  Backward pass: {backward_time/total_batches*1000:.2f}ms")
-                    break
                 
                 # Print batch info occasionally
                 if batch_idx % 50 == 0:
