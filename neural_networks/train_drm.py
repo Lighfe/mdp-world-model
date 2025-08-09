@@ -1126,11 +1126,22 @@ def train_drm_model(db_path,
             history["train_entropy_weight"].append(entropy_weight)
             decay_status = "decaying" if loss_fn.use_entropy_decay else "constant"
             print(f"Epoch {epoch+1}/{epochs} - Entropy weight: {entropy_weight:.4f} ({decay_status})")
+
+        # diagnostics
+        data_time = 0
+        forward_time = 0
+        backward_time = 0
+        total_batches = 0
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
+            # diagnostics
+            batch_start = time.time()
 
             # Move data to device
             x, c, y, v_true = x.to(device), c.to(device), y.to(device), v_true.to(device)
+            # diagnostics
+            data_end = time.time()
+            data_time += (data_end - batch_start)
             
             # Check for NaN values in the batch
             if (torch.isnan(x).any() or torch.isnan(c).any() or 
@@ -1142,8 +1153,15 @@ def train_drm_model(db_path,
             optimizer.zero_grad()
             
             try:
+                # diagnostics
+                forward_start = time.time()
+
                 # Forward pass
                 s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(x, c, y, v_true, training=True)
+                
+                # diagnostics
+                forward_end = time.time()
+                forward_time += (forward_end - forward_start)
                 
                 # Check for NaN values in model outputs
                 if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
@@ -1161,6 +1179,9 @@ def train_drm_model(db_path,
                     print(f"WARNING: NaN loss in batch {batch_idx}, skipping")
                     continue
                 
+                # diagnostics
+                backward_start = time.time()
+                
                 # Backward pass
                 total_loss.backward()
                 
@@ -1172,6 +1193,18 @@ def train_drm_model(db_path,
 
                 if model.use_target_encoder:
                     model.update_target_encoder()
+
+                backward_end = time.time()
+                backward_time += (backward_end - backward_start)
+
+                # diagnostics
+                total_batches += 1
+                if batch_idx == 50:  # Print after 50 batches
+                    print(f"Avg times per batch:")
+                    print(f"  Data loading: {data_time/total_batches*1000:.2f}ms")
+                    print(f"  Forward pass: {forward_time/total_batches*1000:.2f}ms")
+                    print(f"  Backward pass: {backward_time/total_batches*1000:.2f}ms")
+                    break
                 
                 # Print batch info occasionally
                 if batch_idx % 50 == 0:
