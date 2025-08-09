@@ -70,6 +70,34 @@ class BaseDataset(Dataset):
         
         # Close database connection since we don't need it anymore
         self.engine.dispose()
+
+    def _verify_cache_indexing(self):
+        """Verify that cached data matches original database indexing"""
+        # Test first 3 and last 3 indices to verify order is preserved
+        test_indices = [0, 1, 2, len(self.cached_data)-3, len(self.cached_data)-2, len(self.cached_data)-1]
+        
+        print("Testing cache indexing consistency:")
+        for idx in test_indices:
+            if idx < 0 or idx >= len(self.cached_data):
+                continue
+                
+            # Get from cache
+            cached_row = self.cached_data[idx]
+            
+            # Get from database using original method
+            with Session(self.engine) as session:
+                query = select(self.table).offset(idx).limit(1)
+                db_row = session.execute(query).fetchone()
+            
+            # Compare first few columns
+            cache_vals = [getattr(cached_row, col.name) for col in list(self.table.columns)[:3]]
+            db_vals = list(db_row)[:3]
+            
+            if cache_vals != db_vals:
+                raise ValueError(f"Cache indexing mismatch at index {idx}! "
+                               f"Cache: {cache_vals}, DB: {db_vals}")
+        
+        print("✓ Cache indexing verified - matches original database order")
     
     def __len__(self):
         return self.length
@@ -183,10 +211,10 @@ class TechSubstitutionDataset(BaseDataset):
 class SaddleSystemDataset(BaseDataset):
     """Dataset for saddle system"""
     
-    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=True):
+    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=True, cache_verification=True):
         self.value_method = value_method
         self.num_saddles = num_saddles
-        super().__init__(db_path, cache_data=cache_data)
+        super().__init__(db_path, cache_data=cache_data, cache_verification=cache_verification)
         
         # Infer number of saddles from data if not provided
         if self.num_saddles is None:
