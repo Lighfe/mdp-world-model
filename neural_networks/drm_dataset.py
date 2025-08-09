@@ -21,7 +21,7 @@ from neural_networks.system_registry import SystemType, get_system_config
 class BaseDataset(Dataset):
     """Base dataset class with common database functionality"""
     
-    def __init__(self, db_path, cache_data=True, cache_verification=True):
+    def __init__(self, db_path, cache_data=False, cache_verification=True):
         """Initialize base dataset with database connection"""
         self.db_path = db_path
         self.cache_data = cache_data
@@ -214,7 +214,7 @@ class TechSubstitutionDataset(BaseDataset):
 class SaddleSystemDataset(BaseDataset):
     """Dataset for saddle system"""
     
-    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=True, cache_verification=True):
+    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=False, cache_verification=True):
         self.value_method = value_method
         self.num_saddles = num_saddles
         super().__init__(db_path, cache_data=cache_data, cache_verification=cache_verification)
