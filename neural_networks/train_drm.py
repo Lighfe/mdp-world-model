@@ -1143,7 +1143,7 @@ def train_drm_model(db_path,
         # Handle warmup if enabled
         if use_warmup and epoch < warmup_epochs:
             # Linearly increase learning rate during warmup period
-            progress = (epoch + 1) / warmup_epochs
+            progress = (epoch) / warmup_epochs
             new_lr = learning_rate * (0.1 + 0.9 * progress)  # 10% to 100% of base LR
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lr
