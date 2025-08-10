@@ -988,6 +988,7 @@ def plot_softmax_rank_evolution(history, save_path):
     """
     Plot evolution of softmax rank metrics over training.
     Uses Paul Tol's muted color scheme for colorblind accessibility.
+    Uses global normalization for singular values (like the paper).
     
     Args:
         history: Training history containing softmax_rank_metrics
@@ -1005,6 +1006,39 @@ def plot_softmax_rank_evolution(history, save_path):
     
     metrics_list = history['softmax_rank_metrics']
     epochs = [m['epoch'] for m in metrics_list]
+    
+    # ========================================================================
+    # GLOBAL NORMALIZATION: Find max singular values across ALL epochs
+    # ========================================================================
+    
+    # Collect all raw singular values across epochs for global normalization
+    all_logit_sv_raw = {i: [] for i in range(4)}
+    all_hidden_sv_raw = {i: [] for i in range(4)}  # Only first 4 for plotting
+    
+    for m in metrics_list:
+        # Collect raw logit singular values
+        for i in range(4):
+            key = f'logit_sv_raw_{i}'
+            if key in m:
+                all_logit_sv_raw[i].append(m[key])
+        
+        # Collect raw hidden singular values  
+        for i in range(4):
+            key = f'hidden_sv_raw_{i}'
+            if key in m:
+                all_hidden_sv_raw[i].append(m[key])
+    
+    # Find global maximum for each layer type
+    logit_global_max = 0
+    hidden_global_max = 0
+    
+    for i in range(4):
+        if all_logit_sv_raw[i]:
+            logit_global_max = max(logit_global_max, max(all_logit_sv_raw[i]))
+        if all_hidden_sv_raw[i]:
+            hidden_global_max = max(hidden_global_max, max(all_hidden_sv_raw[i]))
+    
+    print(f"Global normalization: Logit max = {logit_global_max:.3f}, Hidden max = {hidden_global_max:.3f}")
     
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     
@@ -1050,49 +1084,53 @@ def plot_softmax_rank_evolution(history, save_path):
     ax.set_title('Norm Evolution During Training')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    ax.set_yscale('log')  # Log scale for better visualization
+    ax.set_yscale('log')  # Keep log scale for norms (makes sense here)
     
     # ========================================================================
-    # Plot 3: Logit Singular Values Evolution (4 biggest)
+    # Plot 3: Logit Singular Values Evolution (GLOBAL NORMALIZATION, LINEAR SCALE)
     # ========================================================================
     ax = axes[1, 0]
     
-    # Plot first 4 normalized singular values for logits
+    # Plot first 4 globally normalized singular values for logits
     colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
     for i in range(4):
-        sv_key = f'logit_sv_norm_{i}'
-        if sv_key in metrics_list[0]:  # Check if this SV exists
-            sv_values = [m.get(sv_key, 0) for m in metrics_list]
+        sv_raw_key = f'logit_sv_raw_{i}'
+        if sv_raw_key in metrics_list[0] and logit_global_max > 0:  # Check if this SV exists
+            # Apply global normalization
+            sv_values = [m.get(sv_raw_key, 0) / logit_global_max for m in metrics_list]
             ax.plot(epochs, sv_values, 'o-', label=f'σ_{i+1}', 
                    color=colors_sv[i], linewidth=2, markersize=3)
     
     ax.set_xlabel('Epoch')
-    ax.set_ylabel('Normalized Singular Value')
+    ax.set_ylabel('Globally Normalized Singular Value')
     ax.set_title('Logit Singular Values Evolution')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    ax.set_yscale('log')
+    # CHANGED: Use linear scale instead of log scale
+    ax.set_ylim(0, 1.1)  # Linear scale from 0 to 1
     
     # ========================================================================
-    # Plot 4: Hidden Singular Values Evolution (first 4)
+    # Plot 4: Hidden Singular Values Evolution (GLOBAL NORMALIZATION, LINEAR SCALE)
     # ========================================================================
     ax = axes[1, 1]
     
-    # Plot first 4 normalized singular values for hidden layer
+    # Plot first 4 globally normalized singular values for hidden layer
     colors_sv = [tol_muted[4], tol_muted[5], tol_muted[6], tol_muted[7]]
     for i in range(4):
-        sv_key = f'hidden_sv_norm_{i}'
-        if sv_key in metrics_list[0]:  # Check if this SV exists
-            sv_values = [m.get(sv_key, 0) for m in metrics_list]
+        sv_raw_key = f'hidden_sv_raw_{i}'
+        if sv_raw_key in metrics_list[0] and hidden_global_max > 0:  # Check if this SV exists
+            # Apply global normalization
+            sv_values = [m.get(sv_raw_key, 0) / hidden_global_max for m in metrics_list]
             ax.plot(epochs, sv_values, 'o-', label=f'σ_{i+1}', 
                    color=colors_sv[i], linewidth=2, markersize=3)
     
     ax.set_xlabel('Epoch')
-    ax.set_ylabel('Normalized Singular Value')
+    ax.set_ylabel('Globally Normalized Singular Value')
     ax.set_title('Hidden Layer Singular Values Evolution')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    ax.set_yscale('log')
+    # CHANGED: Use linear scale instead of log scale
+    ax.set_ylim(0, 1.1)  # Linear scale from 0 to 1
     
     # ========================================================================
     # Final styling and save
@@ -1101,7 +1139,6 @@ def plot_softmax_rank_evolution(history, save_path):
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Saved softmax rank evolution plot to {save_path}")
-
 
 ### NOTE: NO LONGER IN USE
 
