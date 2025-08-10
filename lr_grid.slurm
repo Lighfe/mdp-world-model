@@ -154,7 +154,7 @@ esac
 
 # For each dataset (run sequentially)
 for DATASET_NUM in {1..10}; do
-    DB_PATH="datasets/db_${DATASET_NUM}.pkl"
+    DB_PATH="datasets/results/multi_saddle_${DATASET_NUM}.db"
     if [ ! -f "$DB_PATH" ]; then
         echo "[Task $TASK_ID] ERROR: Dataset not found: $DB_PATH"
         continue
