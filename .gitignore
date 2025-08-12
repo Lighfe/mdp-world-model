@@ -19,6 +19,9 @@ datasets/results/*
 # Model checkpoints and visualizations
 /neural_networks/output/*
 
+# Weights and Biases
+/wandb/*
+
 # Visualizations
 data_generation/visualization/figures/*
 data_generation/figs/*
