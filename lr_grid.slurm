@@ -1,20 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=lr_grid
+#SBATCH --job-name=adamw_cosine
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=2:00:00
+#SBATCH --time=1:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=16
 #SBATCH --ntasks-per-node=16
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --output=log/lr_grid_%A_%a.out
-#SBATCH --error=log/lr_grid_%A_%a.err
-#SBATCH --array=1-8  # 8 array jobs (one per configuration)
+#SBATCH --mem=34G
+#SBATCH --output=log/adamw_cosine_%A_%a.out
+#SBATCH --error=log/adamw_cosine_%A_%a.err
+#SBATCH --array=1-2  # 2 array jobs (one per configuration)
 
 echo "========================================================"
-echo "LR GRID SEARCH - Array Job $SLURM_ARRAY_TASK_ID/8"
+echo "ADAMW COSINE TEST - Array Job $SLURM_ARRAY_TASK_ID/2"
 echo "Job started at $(date)"
 echo "Running on $(hostname)"
 echo "SLURM_JOBID: $SLURM_JOBID"
@@ -68,84 +68,24 @@ CONFIG_ID=$SLURM_ARRAY_TASK_ID
 
 case $CONFIG_ID in
     1)
-        export OPTIMIZER="adam"
-        export SCHEDULER="fixed"
-        export LR="1e-5"
-        export MIN_LR=""
-        export WEIGHT_DECAY=""
-        export HIDDEN_DIM="32"
-        export CONFIG_NAME="adam_fixed_1e-5"
-        CONFIG_DESC="Adam with fixed LR=1e-5"
-        ;;
-    2)
-        export OPTIMIZER="adam"
-        export SCHEDULER="fixed"
-        export LR="5e-5"
-        export MIN_LR=""
-        export WEIGHT_DECAY=""
-        export HIDDEN_DIM="32"
-        export CONFIG_NAME="adam_fixed_5e-5"
-        CONFIG_DESC="Adam with fixed LR=5e-5"
-        ;;
-    3)
-        export OPTIMIZER="adam"
+        export OPTIMIZER="adamw"
         export SCHEDULER="cosine"
         export LR="1e-5"
         export MIN_LR="1e-6"
-        export WEIGHT_DECAY=""
+        export WEIGHT_DECAY="0.01"
         export HIDDEN_DIM="32"
-        export CONFIG_NAME="adam_cosine_1e-5"
-        CONFIG_DESC="Adam with cosine LR=1e-5→1e-6"
+        export CONFIG_NAME="adamw_cosine_1e-5"
+        CONFIG_DESC="AdamW with cosine LR=1e-5→1e-6, WD=0.01"
         ;;
-    4)
-        export OPTIMIZER="adam"
+    2)
+        export OPTIMIZER="adamw"
         export SCHEDULER="cosine"
         export LR="5e-5"
         export MIN_LR="5e-6"
-        export WEIGHT_DECAY=""
-        export HIDDEN_DIM="32"
-        export CONFIG_NAME="adam_cosine_5e-5"
-        CONFIG_DESC="Adam with cosine LR=5e-5→5e-6"
-        ;;
-    5)
-        export OPTIMIZER="adamw"
-        export SCHEDULER="fixed"
-        export LR="1e-5"
-        export MIN_LR=""
         export WEIGHT_DECAY="0.01"
         export HIDDEN_DIM="32"
-        export CONFIG_NAME="adamw_1e-5"
-        CONFIG_DESC="AdamW with LR=1e-5, WD=0.01"
-        ;;
-    6)
-        export OPTIMIZER="adamw"
-        export SCHEDULER="fixed"
-        export LR="5e-5"
-        export MIN_LR=""
-        export WEIGHT_DECAY="0.01"
-        export HIDDEN_DIM="32"
-        export CONFIG_NAME="adamw_5e-5"
-        CONFIG_DESC="AdamW with LR=5e-5, WD=0.01"
-        ;;
-    7)
-        export OPTIMIZER="adam"
-        export SCHEDULER="fixed"
-        export LR="1e-5"
-        export MIN_LR=""
-        export WEIGHT_DECAY=""
-        export HIDDEN_DIM="16"
-        export CONFIG_NAME="adam_hd16_1e-5"
-        CONFIG_DESC="Adam with hidden_dim=16, LR=1e-5"
-        ;;
-    8)
-        export OPTIMIZER="adam"
-        export SCHEDULER="fixed"
-        export LR="5e-5"
-        export MIN_LR=""
-        export WEIGHT_DECAY=""
-        export HIDDEN_DIM="16"
-        export CONFIG_NAME="adam_hd16_5e-5"
-        CONFIG_DESC="Adam with hidden_dim=16, LR=5e-5"
+        export CONFIG_NAME="adamw_cosine_5e-5"
+        CONFIG_DESC="AdamW with cosine LR=5e-5→5e-6, WD=0.01"
         ;;
 esac
 
@@ -156,16 +96,16 @@ echo "  Seeds: 11-26 (16 seeds)"
 echo "  Datasets: 1-10 (sequential per task)"
 echo "  Total parallel tasks: 16 seeds"
 
-# Create output directory
+# Use same output directory as main grid search
 export OUTPUT_DIR="neural_networks/output/lr_grid_search"
 mkdir -p "$OUTPUT_DIR"
 
 # Start GPU monitoring
-nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=10 > "log/gpu_lr_grid_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log" &
+nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=10 > "log/gpu_adamw_cosine_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log" &
 GPU_MONITOR_PID=$!
 
 # Create training script for this array job
-TRAINING_SCRIPT="lr_grid_${SLURM_ARRAY_TASK_ID}_${SLURM_JOBID}.sh"
+TRAINING_SCRIPT="adamw_cosine_${SLURM_ARRAY_TASK_ID}_${SLURM_JOBID}.sh"
 cat > "$TRAINING_SCRIPT" << 'EOF'
 #!/bin/bash
 
@@ -176,7 +116,7 @@ SEED=$((TASK_ID + 11))  # Seeds 11-26
 export PYTHONUNBUFFERED=1
 
 echo "[Task $TASK_ID] Starting Config $CONFIG_ID ($CONFIG_NAME), Seed $SEED at $(date)"
-echo "[Task $TASK_ID] Config details: optimizer=$OPTIMIZER, scheduler=$SCHEDULER, lr=$LR, hidden_dim=$HIDDEN_DIM"
+echo "[Task $TASK_ID] Config details: optimizer=$OPTIMIZER, scheduler=$SCHEDULER, lr=$LR→$MIN_LR, wd=$WEIGHT_DECAY"
 
 # Run 10 datasets sequentially
 for DATASET_NUM in {1..10}; do
@@ -217,19 +157,12 @@ for DATASET_NUM in {1..10}; do
         --optimizer=$OPTIMIZER \
         --scheduler_type=$SCHEDULER \
         --lr=$LR \
+        --min_lr=$MIN_LR \
+        --weight_decay=$WEIGHT_DECAY \
         --epochs=100 \
         --seed=$SEED \
         --output_dir=$OUTPUT_DIR \
         --run_id=lr_grid_ds${DATASET_NUM}_${CONFIG_NAME}_seed${SEED}"
-    
-    # Add optional parameters
-    if [ ! -z "$MIN_LR" ]; then
-        CMD="$CMD --min_lr=$MIN_LR"
-    fi
-    
-    if [ ! -z "$WEIGHT_DECAY" ]; then
-        CMD="$CMD --weight_decay=$WEIGHT_DECAY"
-    fi
     
     # Execute the command
     $CMD 2>&1
@@ -254,8 +187,8 @@ echo "========================================================"
 # Launch parallel training
 srun --ntasks=$SLURM_NTASKS \
      --ntasks-per-node=$SLURM_NTASKS \
-     --output="log/lr_grid_task_%A_%a_%t.out" \
-     --error="log/lr_grid_task_%A_%a_%t.err" \
+     --output="log/adamw_cosine_task_%A_%a_%t.out" \
+     --error="log/adamw_cosine_task_%A_%a_%t.err" \
      --unbuffered \
      ./"$TRAINING_SCRIPT"
 
@@ -276,108 +209,12 @@ echo "Array Job $SLURM_ARRAY_TASK_ID completed at $(date)"
 echo "Configuration: $CONFIG_NAME"
 echo "srun exit code: $SRUN_EXIT_CODE"
 echo "Results saved to: $OUTPUT_DIR"
-echo "GPU usage log: log/gpu_lr_grid_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log"
-echo "Task logs: log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out"
+echo "GPU usage log: log/gpu_adamw_cosine_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.log"
+echo "Task logs: log/adamw_cosine_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out"
 echo "========================================================"
 
 # Comprehensive summary
 echo ""
-echo "Total completed: $completed/$total_expected experiments"
-echo "Success rate: $(echo "scale=1; $completed * 100 / $total_expected" | bc)%"
-
-# Check average runtime from logs
-echo ""
-if ls log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out 1> /dev/null 2>&1; then
-    echo "Runtime Statistics:"
-    total_time=0
-    count=0
-    min_time=999999
-    max_time=0
-    
-    for logfile in log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out; do
-        if grep -q "Training completed in" "$logfile" 2>/dev/null; then
-            # Extract all training times from this task's log
-            grep "Training completed in" "$logfile" | while read -r line; do
-                runtime=$(echo "$line" | awk '{print $4}')
-                if [ ! -z "$runtime" ]; then
-                    # Check if runtime is a valid number
-                    if [[ "$runtime" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        total_time=$(echo "$total_time + $runtime" | bc)
-                        count=$((count + 1))
-                        
-                        # Update min/max
-                        if (( $(echo "$runtime < $min_time" | bc -l) )); then
-                            min_time=$runtime
-                        fi
-                        if (( $(echo "$runtime > $max_time" | bc -l) )); then
-                            max_time=$runtime
-                        fi
-                    fi
-                fi
-            done
-        fi
-    done
-    
-    if [ $count -gt 0 ]; then
-        avg_time=$(echo "scale=2; $total_time / $count" | bc)
-        echo "  Average training time: ${avg_time} seconds per run"
-        echo "  Min time: ${min_time} seconds"
-        echo "  Max time: ${max_time} seconds"
-        echo "  Total runtime samples: $count"
-    fi
-fi
-
-echo "================================================"
-
-exit $SRUN_EXIT_CODE
-echo "Total completed: $completed/$total_expected experiments"
-echo "Success rate: $(echo "scale=1; $completed * 100 / $total_expected" | bc)%"
-
-# Check average runtime from logs
-echo ""
-if ls log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out 1> /dev/null 2>&1; then
-    echo "Runtime Statistics:"
-    total_time=0
-    count=0
-    min_time=999999
-    max_time=0
-    
-    for logfile in log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out; do
-        if grep -q "Training completed in" "$logfile" 2>/dev/null; then
-            # Extract all training times from this task's log
-            grep "Training completed in" "$logfile" | while read -r line; do
-                runtime=$(echo "$line" | awk '{print $4}')
-                if [ ! -z "$runtime" ]; then
-                    # Check if runtime is a valid number
-                    if [[ "$runtime" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        total_time=$(echo "$total_time + $runtime" | bc)
-                        count=$((count + 1))
-                        
-                        # Update min/max
-                        if (( $(echo "$runtime < $min_time" | bc -l) )); then
-                            min_time=$runtime
-                        fi
-                        if (( $(echo "$runtime > $max_time" | bc -l) )); then
-                            max_time=$runtime
-                        fi
-                    fi
-                fi
-            done
-        fi
-    done
-    
-    if [ $count -gt 0 ]; then
-        avg_time=$(echo "scale=2; $total_time / $count" | bc)
-        echo "  Average training time: ${avg_time} seconds per run"
-        echo "  Min time: ${min_time} seconds"
-        echo "  Max time: ${max_time} seconds"
-        echo "  Total runtime samples: $count"
-    fi
-fi
-
-echo "================================================"
-
-exit $SRUN_EXIT_CODE
 echo "Summary for Configuration: $CONFIG_NAME"
 echo "================================================"
 
@@ -415,14 +252,14 @@ echo "Success rate: $(echo "scale=1; $completed * 100 / $total_expected" | bc)%"
 
 # Check average runtime from logs
 echo ""
-if ls log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out 1> /dev/null 2>&1; then
+if ls log/adamw_cosine_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out 1> /dev/null 2>&1; then
     echo "Runtime Statistics:"
     total_time=0
     count=0
     min_time=999999
     max_time=0
     
-    for logfile in log/lr_grid_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out; do
+    for logfile in log/adamw_cosine_task_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}_*.out; do
         if grep -q "Training completed in" "$logfile" 2>/dev/null; then
             # Extract all training times from this task's log
             while IFS= read -r line; do
