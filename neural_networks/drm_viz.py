@@ -994,8 +994,6 @@ def plot_softmax_rank_evolution(history, save_path):
         history: Training history containing softmax_rank_metrics
         save_path: Path to save the plot
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
     
     if 'softmax_rank_metrics' not in history or not history['softmax_rank_metrics']:
         print("No softmax rank metrics found in history")
@@ -1006,39 +1004,6 @@ def plot_softmax_rank_evolution(history, save_path):
     
     metrics_list = history['softmax_rank_metrics']
     epochs = [m['epoch'] for m in metrics_list]
-    
-    # ========================================================================
-    # GLOBAL NORMALIZATION: Find max singular values across ALL epochs
-    # ========================================================================
-    
-    # Collect all raw singular values across epochs for global normalization
-    all_logit_sv_raw = {i: [] for i in range(4)}
-    all_hidden_sv_raw = {i: [] for i in range(4)}  # Only first 4 for plotting
-    
-    for m in metrics_list:
-        # Collect raw logit singular values
-        for i in range(4):
-            key = f'logit_sv_raw_{i}'
-            if key in m:
-                all_logit_sv_raw[i].append(m[key])
-        
-        # Collect raw hidden singular values  
-        for i in range(4):
-            key = f'hidden_sv_raw_{i}'
-            if key in m:
-                all_hidden_sv_raw[i].append(m[key])
-    
-    # Find global maximum for each layer type
-    logit_global_max = 0
-    hidden_global_max = 0
-    
-    for i in range(4):
-        if all_logit_sv_raw[i]:
-            logit_global_max = max(logit_global_max, max(all_logit_sv_raw[i]))
-        if all_hidden_sv_raw[i]:
-            hidden_global_max = max(hidden_global_max, max(all_hidden_sv_raw[i]))
-    
-    print(f"Global normalization: Logit max = {logit_global_max:.3f}, Hidden max = {hidden_global_max:.3f}")
     
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     
@@ -1094,10 +1059,9 @@ def plot_softmax_rank_evolution(history, save_path):
     # Plot first 4 globally normalized singular values for logits
     colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
     for i in range(4):
-        sv_raw_key = f'logit_sv_raw_{i}'
-        if sv_raw_key in metrics_list[0] and logit_global_max > 0:  # Check if this SV exists
-            # Apply global normalization
-            sv_values = [m.get(sv_raw_key, 0) / logit_global_max for m in metrics_list]
+        sv_global_key = f'logit_sv_global_norm_{i}'
+        if sv_global_key in metrics_list[0]:  # Check if globally normalized values exist
+            sv_values = [m.get(sv_global_key, 0) for m in metrics_list]
             ax.plot(epochs, sv_values, 'o-', label=f'σ_{i+1}', 
                    color=colors_sv[i], linewidth=2, markersize=3)
     
@@ -1106,7 +1070,6 @@ def plot_softmax_rank_evolution(history, save_path):
     ax.set_title('Logit Singular Values Evolution')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    # CHANGED: Use linear scale instead of log scale
     ax.set_ylim(0, 1.1)  # Linear scale from 0 to 1
     
     # ========================================================================
@@ -1117,10 +1080,9 @@ def plot_softmax_rank_evolution(history, save_path):
     # Plot first 4 globally normalized singular values for hidden layer
     colors_sv = [tol_muted[4], tol_muted[5], tol_muted[6], tol_muted[7]]
     for i in range(4):
-        sv_raw_key = f'hidden_sv_raw_{i}'
-        if sv_raw_key in metrics_list[0] and hidden_global_max > 0:  # Check if this SV exists
-            # Apply global normalization
-            sv_values = [m.get(sv_raw_key, 0) / hidden_global_max for m in metrics_list]
+        sv_global_key = f'hidden_sv_global_norm_{i}'
+        if sv_global_key in metrics_list[0]:  # Check if globally normalized values exist
+            sv_values = [m.get(sv_global_key, 0) for m in metrics_list]
             ax.plot(epochs, sv_values, 'o-', label=f'σ_{i+1}', 
                    color=colors_sv[i], linewidth=2, markersize=3)
     
@@ -1129,7 +1091,6 @@ def plot_softmax_rank_evolution(history, save_path):
     ax.set_title('Hidden Layer Singular Values Evolution')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    # CHANGED: Use linear scale instead of log scale
     ax.set_ylim(0, 1.1)  # Linear scale from 0 to 1
     
     # ========================================================================

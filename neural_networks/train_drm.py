@@ -525,6 +525,7 @@ def extract_and_calculate_metrics(model, device, num_states, system_type,
     
     return metrics, dominant_states, grid_points, state_probs
 
+# Softmax
 def compute_numerical_rank(matrix, threshold_ratio=0.01):
     """
     Compute numerical rank using SVD with threshold.
@@ -589,7 +590,6 @@ def extract_hidden_and_logit_data(model, dataloader, device, max_samples=1000):
         captured_logits.append(output.clone())  # output of final layer = pre-softmax logits
     
     # Register hooks on correct encoder layers
-    # NOTE: This is hard coded here and needs to be adapted if architecture changes
     # Encoder structure: [Linear, ReLU, Linear, ReLU, Linear, ReLU, Linear, ReLU, Linear]
     # We want: layer 6 (last hidden Linear 32→32) and layer 8 (final Linear 32→4)
     if len(model.encoder) >= 9:
@@ -690,12 +690,10 @@ def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000
     hidden_rank, hidden_sv = compute_numerical_rank(hidden_acts_T)
     metrics['hidden_rank'] = hidden_rank
     
-    # Store normalized singular values for hidden layer
+    # Store RAW singular values for hidden layer (for later global normalization)
     if len(hidden_sv) > 0:
-        hidden_sv_norm = hidden_sv / hidden_sv[0] if hidden_sv[0] > 0 else hidden_sv
-        # Store first few normalized singular values (up to 8 for debugging)
-        for i, sv in enumerate(hidden_sv_norm[:min(8, len(hidden_sv_norm))]):
-            metrics[f'hidden_sv_norm_{i}'] = float(sv)
+        for i, sv in enumerate(hidden_sv[:min(8, len(hidden_sv))]):
+            metrics[f'hidden_sv_raw_{i}'] = float(sv)
     
     # ===== FINAL LOGIT LAYER (M₄, A₄, 4-dim) =====
     
@@ -715,18 +713,15 @@ def compute_softmax_rank_metrics(model, val_dataloader, device, max_samples=1000
     metrics['logit_rank'] = logit_rank
     metrics['softmax_rank'] = softmax_rank
     
-    # 3. Detailed SVD analysis for logits (M₄)
+    # 3. Detailed SVD analysis for logits (M₄) - Store RAW values only
     if len(logit_sv) > 0:
-        # Normalized singular values
-        logit_sv_norm = logit_sv / logit_sv[0] if logit_sv[0] > 0 else logit_sv
+        # Store raw singular values for global normalization
+        for i, sv in enumerate(logit_sv[:4]):  # Only first 4 for 4-dim layer
+            metrics[f'logit_sv_raw_{i}'] = float(sv)
         
-        # Store individual normalized singular values (up to 4 for 4-dim logits)
-        for i, sv in enumerate(logit_sv_norm[:4]):  # Only first 4 for 4-dim layer
-            metrics[f'logit_sv_norm_{i}'] = float(sv)
-        
-        # σ₂/σ₁ ratio for collapse detection
-        if len(logit_sv_norm) > 1:
-            metrics['logit_sv_ratio_2nd_to_1st'] = float(logit_sv_norm[1])
+        # σ₂/σ₁ ratio for collapse detection (still useful for real-time monitoring)
+        if len(logit_sv) > 1:
+            metrics['logit_sv_ratio_2nd_to_1st'] = float(logit_sv[1] / logit_sv[0]) if logit_sv[0] > 0 else 0.0
         else:
             metrics['logit_sv_ratio_2nd_to_1st'] = 0.0
     
@@ -785,6 +780,78 @@ def collect_softmax_rank_metrics(model, val_dataloader, device, epoch, history, 
         print(f"Error computing softmax rank metrics: {e}")
         import traceback
         traceback.print_exc()
+
+def add_global_normalized_singular_values(history):
+    """
+    Post-processing function to add globally normalized singular values to history.
+    Call this AFTER training is complete.
+    
+    Args:
+        history: Training history dict containing softmax_rank_metrics with raw SVs
+    """
+    if 'softmax_rank_metrics' not in history or not history['softmax_rank_metrics']:
+        print("No softmax rank metrics found for global normalization")
+        return
+    
+    metrics_list = history['softmax_rank_metrics']
+    
+    # ========================================================================
+    # Find global maximum singular values across ALL epochs
+    # ========================================================================
+    
+    # Collect all raw singular values
+    all_logit_sv_raw = {i: [] for i in range(4)}
+    all_hidden_sv_raw = {i: [] for i in range(8)}  # Up to 8 for hidden layer
+    
+    for m in metrics_list:
+        # Collect raw logit singular values
+        for i in range(4):
+            key = f'logit_sv_raw_{i}'
+            if key in m:
+                all_logit_sv_raw[i].append(m[key])
+        
+        # Collect raw hidden singular values  
+        for i in range(8):
+            key = f'hidden_sv_raw_{i}'
+            if key in m:
+                all_hidden_sv_raw[i].append(m[key])
+    
+    # Find global maximum for each layer type
+    logit_global_max = 0
+    hidden_global_max = 0
+    
+    for i in range(4):
+        if all_logit_sv_raw[i]:
+            logit_global_max = max(logit_global_max, max(all_logit_sv_raw[i]))
+    
+    for i in range(8):
+        if all_hidden_sv_raw[i]:
+            hidden_global_max = max(hidden_global_max, max(all_hidden_sv_raw[i]))
+    
+    print(f"Global normalization: Logit max = {logit_global_max:.3f}, Hidden max = {hidden_global_max:.3f}")
+    
+    # ========================================================================
+    # Add globally normalized values to each epoch's metrics
+    # ========================================================================
+    
+    for m in metrics_list:
+        # Add globally normalized logit singular values
+        if logit_global_max > 0:
+            for i in range(4):
+                raw_key = f'logit_sv_raw_{i}'
+                if raw_key in m:
+                    normalized_value = m[raw_key] / logit_global_max
+                    m[f'logit_sv_global_norm_{i}'] = normalized_value
+        
+        # Add globally normalized hidden singular values
+        if hidden_global_max > 0:
+            for i in range(8):
+                raw_key = f'hidden_sv_raw_{i}'
+                if raw_key in m:
+                    normalized_value = m[raw_key] / hidden_global_max
+                    m[f'hidden_sv_global_norm_{i}'] = normalized_value
+    
+    print(f"Added globally normalized singular values to {len(metrics_list)} epochs")
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -1649,17 +1716,28 @@ def train_drm_model(db_path,
     with open(history_path, 'w') as f:
         safe_json_dump(history, f)
     print(f"Saved training history to {history_path}")
-    
+
     # Plot training curves
     plot_training_curves(history, os.path.join(output_dir, f"training_curves_{run_id}.png"), 
                          state_loss_type=loss_fn.state_loss_type)
     
-    # Plot softmax rank evolution
+
+    # SOFTMAX RANK POST-PROCESSING AND PLOTTING:
     if 'softmax_rank_metrics' in history and history['softmax_rank_metrics']:
+        # STEP 1: Post-process to add globally normalized singular values
+        print("Post-processing: Computing global normalization for singular values...")
+        add_global_normalized_singular_values(history)
+        
+        # STEP 2: Re-save history with globally normalized values
+        with open(history_path, 'w') as f:
+            safe_json_dump(history, f)
+        print(f"Updated training history with global normalization")
+        
+        # STEP 3: Create plots
         rank_plot_path = os.path.join(output_dir, f"softmax_rank_evolution_{run_id}.png")
         plot_softmax_rank_evolution(history, rank_plot_path)
         
-        # Print final summary (raw data only)
+        # STEP 4: Print final summary
         final_metrics = history['softmax_rank_metrics'][-1]
         print("\n" + "="*60)
         print("SOFTMAX RANK SUMMARY")
@@ -1670,7 +1748,7 @@ def train_drm_model(db_path,
         print(f"Hidden ||A₃||_F: {final_metrics['hidden_frobenius_norm']:.3f}")
         print(f"Logit ||M₄||_F: {final_metrics['logit_frobenius_norm']:.3f}")
         print("="*60)
-    # ====================
+    
 
     # Visualize Modl Architecture
     #arch_vis_path = os.path.join(output_dir, f"model_architecture_{run_id}")
