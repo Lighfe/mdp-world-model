@@ -421,10 +421,10 @@ class SocialTippingDataset(BaseDataset):
 
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
-                       test_size=1000, probing_size=None, seed=42, value_method=None,
+                       test_size=1000, seed=42, value_method=None,
                        num_workers=1):
     """
-    Create training, validation, test, and optionally probing data loaders
+    Create training, validation, and test data loaders
     
     Args:
         system_type: Type of system ('tech_substitution', 'saddle_system', or 'social_tipping')
@@ -432,13 +432,11 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
         batch_size: Batch size for training
         val_size: Number of samples to use for validation
         test_size: Number of samples to use for final testing
-        probing_size: Number of samples to reserve for probing (if None, no probing loader)
         seed: Random seed for reproducibility
         value_method: Optional value method (if None, uses system default)
     
     Returns:
-        If probing_size is None: train_loader, val_loader, test_loader
-        If probing_size is not None: train_loader, val_loader, test_loader, probing_loader
+        train_loader, val_loader, test_loader
     """
     from neural_networks.system_registry import SystemType, get_system_config
     
@@ -467,36 +465,18 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     indices = list(range(len(dataset)))
     np.random.shuffle(indices)
     
-    if probing_size is not None:
-        # Reserve probing data first (never seen during training)
-        probing_indices = indices[:probing_size]
-        remaining_indices = indices[probing_size:]
-        
-        # Ensure sizes aren't too large for remaining data
-        remaining_size = len(remaining_indices)
-        total_reserved = min(val_size + test_size, remaining_size // 2)
-        val_size = min(val_size, total_reserved // 2)
-        test_size = min(test_size, total_reserved - val_size)
-        
-        # Split remaining indices
-        test_indices = remaining_indices[:test_size]
-        val_indices = remaining_indices[test_size:test_size + val_size]
-        train_indices = remaining_indices[test_size + val_size:]
-        
-        print(f"Probing set: {len(probing_indices)} samples")
-    else:
-        # Original logic without probing
-        total_reserved = min(val_size + test_size, len(dataset) // 2)
-        val_size = min(val_size, total_reserved // 2)
-        test_size = min(test_size, total_reserved - val_size)
-        
-        test_indices = indices[:test_size]
-        val_indices = indices[test_size:test_size + val_size]
-        train_indices = indices[test_size + val_size:]
+    # Standard train/val/test split (no separate probing set)
+    total_reserved = min(val_size + test_size, len(dataset) // 2)
+    val_size = min(val_size, total_reserved // 2)
+    test_size = min(test_size, total_reserved - val_size)
+    
+    test_indices = indices[:test_size]
+    val_indices = indices[test_size:test_size + val_size]
+    train_indices = indices[test_size + val_size:]
     
     print(f"Training set: {len(train_indices)} samples")
-    print(f"Validation set: {len(val_indices)} samples")
-    print(f"Test set: {len(test_indices)} samples")
+    print(f"Validation set: {len(val_indices)} samples (used for intermediate probing)")
+    print(f"Test set: {len(test_indices)} samples (used for final probing)")
     
     # Create loaders with proper seeding
     generator = torch.Generator()
@@ -529,18 +509,7 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
         persistent_workers=True if num_workers > 0 else False  # Keep workers alive
     )
     
-    if probing_size is not None:
-        probing_loader = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            sampler=SubsetRandomSampler(probing_indices, generator=generator),
-            num_workers=num_workers,  
-            pin_memory=True,  # For GPU transfer efficiency
-            persistent_workers=True if num_workers > 0 else False  # Keep workers alive
-        )
-        return train_loader, val_loader, test_loader, probing_loader
-    else:
-        return train_loader, val_loader, test_loader
+    return train_loader, val_loader, test_loader
 
 
 def get_saddle_configuration(db_path, verbose=True):

@@ -131,12 +131,17 @@ class DiscreteRepresentationsModel(nn.Module):
         
         return embeddings, logits
     
+    def get_logits(self, x, use_target=False):
+        """Get final logits from encoder"""
+        encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
+        return encoder_to_use(x)
+    
     def get_state_probs(self, x, training=True, hard=False, use_target=False, soft=False):
         # Choose encoder
         encoder_to_use = self.target_encoder if self.use_target_encoder and use_target else self.encoder
         
         # Get logits
-        _, logits = self.get_embeddings_and_logits(x, use_target=use_target)
+        logits = self.get_logits(x, use_target=use_target)
         
         if hard:
             # Always use hard argmax when requested regardless of other settings
@@ -198,11 +203,11 @@ class DiscreteRepresentationsModel(nn.Module):
         """Forward pass with embedding extraction for VICReg"""
         
         # Get embeddings and state probs for current observation
-        embed_x, logits_x = self.get_embeddings_and_logits(x, use_target=False)
+        logits_x = self.get_logits(x, use_target=False)
         s_x = self._logits_to_probs(logits_x, training=training, use_target=False, hard=False, soft=False)
         
         # Get embeddings and state probs for next observation  
-        embed_y, logits_y = self.get_embeddings_and_logits(y, use_target=True)
+        logits_y = self.get_logits(y, use_target=True)
         s_y = self._logits_to_probs(logits_y, training=training, use_target=True, hard=False, soft=False)
         
         # Predict next state probabilities
@@ -211,7 +216,7 @@ class DiscreteRepresentationsModel(nn.Module):
         # Compute values for all possible states
         v_pred_for_all_states = self.compute_values_for_all_states()
         
-        return s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y
+        return s_x, s_y, s_y_pred, v_pred_for_all_states
 
     def _logits_to_probs(self, logits, training, use_target, hard, soft):
         """Convert logits to probabilities using existing logic"""

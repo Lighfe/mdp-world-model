@@ -37,7 +37,7 @@ from neural_networks.drm import DiscreteRepresentationsModel, LinearProbe, initi
 from neural_networks.drm_viz import (
     visualize_state_space, analyze_discrete_state_transitions, 
     visualize_transition_matrices, visualize_model_architecture, 
-    plot_training_curves, analyze_mdp_from_model, visualize_mdp, plot_vicreg_metrics,
+    plot_training_curves, analyze_mdp_from_model, visualize_mdp,
     create_state_viz_from_data, analyze_state_assignment_evolution,
     create_gif_from_frames, create_state_evolution_analysis,
     create_png_from_frame_data, create_gif_from_data_frames,
@@ -91,7 +91,7 @@ def calculate_state_weights(targets):
     
     return torch.tensor(sample_weights, dtype=torch.float32)
 
-def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_size=64):
+def train_probe(features, targets, probe_name, num_epochs=20, lr=0.01, batch_size=64):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     input_dim = features.shape[1]
     num_saddles = targets.shape[1]
@@ -116,45 +116,7 @@ def train_probe(features, targets, probe_name, num_epochs=50, lr=0.025, batch_si
             loss = criterion(predictions, batch_targets)
             loss.backward()
             optimizer.step()
-        
-        # Evaluate on full dataset
-        if (epoch==0) or (epoch==10) or (epoch==40):
-            with torch.no_grad():
-                full_predictions = probe(features.to(device))
-                binary_preds = (full_predictions > 0.5).float()
-                targets_device = targets.to(device)
-                
-                # Balanced accuracy - calculate accuracy per state, then average
-                unique_states = []
-                state_accuracies = []
-                
-                # Get unique state patterns
-                for i in range(targets_device.shape[0]):
-                    state_pattern = tuple(targets_device[i].cpu().numpy())
-                    if state_pattern not in unique_states:
-                        unique_states.append(state_pattern)
-                
-                # Calculate accuracy for each state
-                for state_pattern in unique_states:
-                    # Find samples with this state
-                    state_mask = torch.zeros(targets_device.shape[0], dtype=torch.bool)
-                    for i in range(targets_device.shape[0]):
-                        if tuple(targets_device[i].cpu().numpy()) == state_pattern:
-                            state_mask[i] = True
-                    
-                    if state_mask.sum() > 0:
-                        state_preds = binary_preds[state_mask]
-                        state_targets = targets_device[state_mask]
-                        # All halfspace value match = state correctly learned
-                        state_acc = (state_preds == state_targets).all(dim=1).float().mean()
-                        state_accuracies.append(state_acc.item())
-                
-                # Balanced accuracy = mean of per-state accuracies
-                state_accuracy = np.mean(state_accuracies)
-                # Standard (unweighted) accuracy - all samples treated equally
-                unweighted_accuracy = (binary_preds == targets_device).all(dim=1).float().mean().item()
-                print(f" Epoch {epoch+1}/{num_epochs} - Balanced State Acc: {state_accuracy:.4f}, Unweighted Acc: {unweighted_accuracy:.4f}")
-                    
+    
     # Final evaluation with same balanced accuracy calculation
     with torch.no_grad():
         full_predictions = probe(features.to(device))
@@ -873,8 +835,7 @@ def train_drm_model(db_path,
                     seed=42,
                     val_size=1000,
                     test_size=1000, 
-                    probing_size=None,
-                    batch_size=64, 
+                    batch_size=128, 
                     epochs=100,
                     learning_rate=5e-5, 
                     num_states=4,
@@ -899,14 +860,6 @@ def train_drm_model(db_path,
                     ema_decay=0.9,
                     state_loss_type="kl_div",
                     sort_states=False,
-                    use_vicreg=True,
-                    #TODO: adjust vicreg params
-                    vicreg_weight=0.1,
-                    vicreg_lambda=25.0,
-                    vicreg_mu=25.0,
-                    vicreg_nu=1.0,
-                    vicreg_variance_target=0.4,
-                    vicreg_invariance_schedule=True,
                     encoder_init_method="he",
                     optimizer_type='adam',
                     scheduler_type='cosine',
@@ -985,19 +938,7 @@ def train_drm_model(db_path,
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if probing_size is not None:
-        train_loader, val_loader, test_loader, probing_loader = create_data_loaders(
-            system_type=system_type,
-            db_path=db_path,
-            value_method=value_method,
-            batch_size=batch_size,
-            val_size=val_size, 
-            test_size=test_size,
-            probing_size=probing_size,
-            seed=seed
-        )
-    else:
-        train_loader, val_loader, test_loader = create_data_loaders(
+    train_loader, val_loader, test_loader = create_data_loaders(
             system_type=system_type,
             db_path=db_path,
             value_method=value_method,
@@ -1006,7 +947,6 @@ def train_drm_model(db_path,
             test_size=test_size,
             seed=seed
         )
-        probing_loader = None
 
     # Get dimensions from first batch
     for x, c, y, v_true in train_loader:
@@ -1099,14 +1039,7 @@ def train_drm_model(db_path,
         entropy_decay_proportion=entropy_decay_proportion,
         state_loss_type=state_loss_type,
         value_loss_type=value_loss_type,
-        value_method=value_method,
-        use_vicreg=use_vicreg,
-        vicreg_weight=vicreg_weight,
-        vicreg_lambda=vicreg_lambda,
-        vicreg_mu=vicreg_mu,
-        vicreg_nu=vicreg_nu,
-        vicreg_variance_target=vicreg_variance_target,
-        vicreg_invariance_schedule=vicreg_invariance_schedule
+        value_method=value_method
     )
 
     optimizer = create_optimizer_with_bias_exclusion(
@@ -1266,30 +1199,28 @@ def train_drm_model(db_path,
                     # ============= AMP FORWARD PASS =============
                     with torch.amp.autocast('cuda', dtype=autocast_dtype):
                         # Forward pass
-                        s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                        s_x, s_y, s_y_pred, v_pred_for_all_states = model(
                             x, c, y, v_true, training=True
                         )
                         
                         # Calculate loss
                         (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, 
-                        individual_entropy, vicreg_total, vicreg_invariance, 
-                        vicreg_variance, vicreg_covariance) = loss_fn(
+                        individual_entropy) = loss_fn(
                             s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
-                            embed_x, embed_y, epoch=epoch, max_epochs=epochs
+                            epoch=epoch, max_epochs=epochs
                         )
                 else:
                     # ============= REGULAR FORWARD PASS =============
                     # Forward pass (existing code)
-                    s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                    s_x, s_y, s_y_pred, v_pred_for_all_states= model(
                         x, c, y, v_true, training=True
                     )
                     
                     # Calculate loss (existing code)
                     (total_loss, state_loss, value_loss, entropy_loss, batch_entropy,
-                    individual_entropy, vicreg_total, vicreg_invariance, 
-                    vicreg_variance, vicreg_covariance) = loss_fn(
+                    individual_entropy) = loss_fn(
                         s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
-                        embed_x, embed_y, epoch=epoch, max_epochs=epochs
+                        epoch=epoch, max_epochs=epochs
                     )
                 
                 # diagnostics
@@ -1398,21 +1329,20 @@ def train_drm_model(db_path,
                     if use_amp and device.type == 'cuda':
                         with torch.amp.autocast('cuda', dtype=autocast_dtype):
                             # Forward pass
-                            s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                            s_x, s_y, s_y_pred, v_pred_for_all_states= model(
                                 x, c, y, v_true, training=False
                             )
                             
                             # Calculate loss
                             (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, 
-                            individual_entropy, vicreg_total, vicreg_invariance, 
-                            vicreg_variance, vicreg_covariance) = loss_fn(
+                            individual_entropy) = loss_fn(
                                 s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
-                                embed_x, embed_y, epoch=epoch, max_epochs=epochs
+                                epoch=epoch, max_epochs=epochs
                             )
                     else:
                         # Existing validation code
                         # Forward pass
-                        s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(
+                        s_x, s_y, s_y_pred, v_pred_for_all_states = model(
                             x, c, y, v_true, training=False
                         )
                     
@@ -1464,6 +1394,22 @@ def train_drm_model(db_path,
         print(f"  Batch Entropy: {train_batch_entropy:.4f}, Individual Entropy: {train_individual_entropy:.4f}")
         print(f"Val Loss: {val_loss:.4f} (State: {val_state_loss:.4f}, Value: {val_value_loss:.4f}")
         print(f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}")
+
+        # Intermediate layer probing every 10 epochs
+        if (epoch + 1) % 10 == 0 and system_type == 'saddle_system':
+            print(f"\n--- Intermediate Layer Probing at Epoch {epoch+1} ---")
+            intermediate_results = run_layer_probing(model, val_loader, device, system_type, db_path)
+            print(f"Validation Probing - Discrete Accuracy: {intermediate_results['discrete_accuracy']:.4f}")
+            print(f"Validation Probing - Unweighted Accuracy: {intermediate_results['discrete_accuracy_unweighted']:.4f}")
+            
+            # Store results in history for tracking
+            if 'intermediate_probing' not in history:
+                history['intermediate_probing'] = []
+            history['intermediate_probing'].append({
+                'epoch': epoch + 1,
+                'discrete_accuracy': intermediate_results['discrete_accuracy'],
+                'discrete_accuracy_unweighted': intermediate_results['discrete_accuracy_unweighted']
+            })
 
 
         if epoch == 10 or epoch == 50:
@@ -1590,7 +1536,7 @@ def train_drm_model(db_path,
                 
             try:
                 # Forward pass
-                s_x, s_y, s_y_pred, v_pred_for_all_states, embed_x, embed_y = model(x, c, y, v_true, training=False)
+                s_x, s_y, s_y_pred, v_pred_for_all_states = model(x, c, y, v_true, training=False)
                 
                 # Skip if model outputs have NaN values
                 if torch.isnan(s_y).any() or torch.isnan(s_y_pred).any() or torch.isnan(v_pred_for_all_states).any():
@@ -1599,10 +1545,9 @@ def train_drm_model(db_path,
                 # TODO: entropy
 
                 # Calculate loss
-                (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropy,
-                    vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance) = loss_fn(
+                (total_loss, state_loss, value_loss, entropy_loss, batch_entropy, individual_entropye) = loss_fn(
                         s_y, s_y_pred, v_true, v_pred_for_all_states, s_x, 
-                        embed_x, embed_y, epoch=epoch, max_epochs=epochs)
+                        epoch=epoch, max_epochs=epochs)
                 
                 # Skip if loss is NaN
                 if torch.isnan(total_loss):
@@ -1630,10 +1575,11 @@ def train_drm_model(db_path,
         test_batch_entropy /= test_samples
         test_individual_entropy /= test_samples
     
-    # Layer probing
+    # Layer probing on test set (final evaluation)
     probing_results = None
-    if probing_loader is not None and system_type == 'saddle_system':
-        probing_results = run_layer_probing(model, probing_loader, device, system_type, db_path)
+    if system_type == 'saddle_system':
+        print("\n--- Final Layer Probing on Test Set ---")
+        probing_results = run_layer_probing(model, test_loader, device, system_type, db_path)
 
     
 
@@ -1906,32 +1852,16 @@ if __name__ == "__main__":
     # Randomness control
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
 
+    # NOTE: I'm not really doing this anymore
     parser.add_argument('--sort_states', action='store_true',
                     help='Sort states by value after training for consistent visualizations')
     
-    # VICReg arguments
-    # TODO: adjust default
-    parser.add_argument('--use_vicreg', action='store_true', 
-                    help='Use VICReg-style state regularization')
-    parser.add_argument('--vicreg_weight', type=float, default=0.1,
-                help='Overall weight for VICReg loss components')
-    parser.add_argument('--vicreg_lambda', type=float, default=25.0,
-                    help='Weight for VICReg invariance term')
-    parser.add_argument('--vicreg_mu', type=float, default=25.0,
-                    help='Weight for VICReg variance term')
-    parser.add_argument('--vicreg_nu', type=float, default=1.0,
-                    help='Weight for VICReg covariance term')
-    parser.add_argument('--vicreg_variance_target', type=float, default=0.4,
-                    help='Target standard deviation for VICReg variance term')
-    parser.add_argument('--vicreg_invariance_schedule', action='store_true',
-                    help='Gradually reduce VICReg invariance weight over training')
-    parser.add_argument('--probing_size', type=int, default=None,
-                    help='Number of samples to reserve for layer probing (default: None)')
-    
+    # Initialization
     parser.add_argument('--encoder_init_method', type=str, default='xavier_uniform',
                     choices=['xavier_uniform', 'xavier_normal', 'chaos', 'chaos2', 'he'],
                     help='Initialization method for encoder layers')
     
+    # Optimizer & Scheduler
     parser.add_argument('--optimizer', type=str, choices=['adam', 'adamw'], 
                     default='adam', help='Optimizer type')
     parser.add_argument('--weight_decay', type=float, default=0.0, 
@@ -2002,13 +1932,6 @@ if __name__ == "__main__":
         state_loss_type=args.state_loss_type,
         value_loss_type=args.value_loss_type,
         sort_states = args.sort_states,
-        use_vicreg=args.use_vicreg,
-        vicreg_weight=args.vicreg_weight,
-        vicreg_lambda=args.vicreg_lambda,
-        vicreg_mu=args.vicreg_mu,
-        vicreg_nu=args.vicreg_nu,
-        vicreg_variance_target=args.vicreg_variance_target,
-        vicreg_invariance_schedule=args.vicreg_invariance_schedule,
         encoder_init_method=args.encoder_init_method,
         optimizer_type=args.optimizer,
         scheduler_type=args.scheduler_type,

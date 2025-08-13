@@ -12,8 +12,6 @@ class StableDRMLoss(nn.Module):
     def __init__(self, state_loss_weight=0.5, value_loss_weight=1.5, 
                  use_entropy_reg=True, entropy_weight=3.0, 
                  use_entropy_decay=True, entropy_decay_proportion=0.2,
-                 use_vicreg=True, vicreg_weight=0.1, vicreg_lambda=25.0, vicreg_mu=25.0, vicreg_nu=1.0,
-                 vicreg_variance_target=0.4, vicreg_invariance_schedule=True,
                  state_loss_type="kl_div", value_loss_type="mse", value_method=None):
         """
         Loss function for the Discrete Representations Model with optional entropy regularization.
@@ -28,13 +26,6 @@ class StableDRMLoss(nn.Module):
                                         reaches its minimum value (0.2 = 20% of training)
             state_loss_type: Type of state loss ("kl_div", "cross_entropy", "mse", "js_div")
             value_loss_type: Type of value loss ("mse", "angular", "binary_cross_entropy")
-            use_vicreg: Whether to use VICReg-style regularization
-            vicreg_weight: Weight for variance, invariance, covariance regularization
-            vicreg_lambda: Weight for VICReg invariance term
-            vicreg_mu: Weight for VICReg variance term  
-            vicreg_nu: Weight for VICReg covariance term
-            vicreg_variance_target: Target standard deviation for variance term (0.433 theoretical max with softmax)
-            vicreg_invariance_schedule: Whether to anneal invariance weight over time
         """
         super(StableDRMLoss, self).__init__()
         self.state_loss_weight = state_loss_weight
@@ -47,16 +38,6 @@ class StableDRMLoss(nn.Module):
         self.min_entropy_weight = 0.01 # hardcoded for now
         self.use_entropy_decay = use_entropy_decay
         self.entropy_decay_proportion = entropy_decay_proportion
-
-        # VICReg parameters
-        self.use_vicreg = use_vicreg
-        self.vicreg_weight = vicreg_weight if self.use_vicreg else 0.0
-        self.vicreg_lambda = vicreg_lambda
-        self.vicreg_mu = vicreg_mu
-        self.vicreg_nu = vicreg_nu
-        self.vicreg_variance_target = vicreg_variance_target
-        self.vicreg_invariance_schedule = vicreg_invariance_schedule
-        self.vicreg_epsilon = 1e-4
 
         # State loss type
         self.state_loss_type = state_loss_type
@@ -82,14 +63,11 @@ class StableDRMLoss(nn.Module):
             v_true: True values
             v_pred_for_all_states: Predicted values for all states
             s_x: Current state probabilities (for entropy calculation)
-            embed_x: Current embeddings (for VICReg)
-            embed_y: Target embeddings (for VICReg)
             epoch: Current epoch (for scheduling)
             max_epochs: Total epochs (for scheduling)
         
         Returns:
-            Tuple of (total_loss, state_loss, value_loss, 0.0, entropy_loss, batch_entropy, individual_entropy,
-                     vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance)
+            Tuple of (total_loss, state_loss, value_loss, 0.0, entropy_loss, batch_entropy, individual_entropy)
         """
 
         expected_dims = {
@@ -147,29 +125,14 @@ class StableDRMLoss(nn.Module):
                 individual_weight = 0.2 # hard coded
                 entropy_loss = batch_weight * (1.0 - batch_entropy) + individual_weight * individual_entropy
         
-        # VICReg loss (only if embeddings provided)
-        vicreg_total = torch.tensor(0.0, device=s_y.device)
-        vicreg_invariance = torch.tensor(0.0, device=s_y.device)
-        vicreg_variance = torch.tensor(0.0, device=s_y.device)
-        vicreg_covariance = torch.tensor(0.0, device=s_y.device)
-        
-        if embed_x is not None and embed_y is not None and self.use_vicreg:
-            vicreg_invariance, vicreg_variance, vicreg_covariance = self._compute_vicreg_loss(
-                embed_x, embed_y, epoch, max_epochs
-            )
-            vicreg_total = (self.vicreg_lambda * vicreg_invariance + 
-                           self.vicreg_mu * vicreg_variance + 
-                           self.vicreg_nu * vicreg_covariance)
         
         # Combine losses
         total_loss = (self.state_loss_weight * state_loss + 
                      self.value_loss_weight * value_loss + 
-                     self.current_entropy_weight * entropy_loss +
-                     self.vicreg_weight * vicreg_total)
+                     self.current_entropy_weight * entropy_loss)
         
         return (total_loss, state_loss, value_loss,  
-                entropy_loss, batch_entropy, individual_entropy,
-                vicreg_total, vicreg_invariance, vicreg_variance, vicreg_covariance)
+                entropy_loss, batch_entropy, individual_entropy)
     
     def update_entropy_weight(self, epoch, max_epochs):
         """Gradually decrease entropy weight as training progresses"""
@@ -293,40 +256,4 @@ class StableDRMLoss(nn.Module):
         """Binary cross entropy loss"""
         return F.binary_cross_entropy_with_logits(pred, true)
     
-    def _compute_vicreg_loss(self, embed_x, embed_y, epoch, max_epochs):
-        """Compute VICReg loss components"""
-        batch_size, embed_dim = embed_x.shape
-        
-        # Invariance loss (MSE between representations)
-        invariance_loss = F.mse_loss(embed_x, embed_y)
-        
-        # Apply invariance scheduling if enabled
-        if self.vicreg_invariance_schedule:
-            # Gradually reduce invariance weight as training progresses
-            schedule_factor = max(0.1, 1.0 - (epoch / max_epochs))
-            invariance_loss = invariance_loss * schedule_factor
-        
-        # Variance loss (encourage variance to be close to target)
-        def variance_loss_fn(embeddings):
-            std = torch.sqrt(embeddings.var(dim=0) + self.vicreg_epsilon)
-            target = torch.full_like(std, self.vicreg_variance_target)
-            return F.mse_loss(std, target)
-        
-        variance_x = variance_loss_fn(embed_x)
-        variance_y = variance_loss_fn(embed_y)
-        variance_loss = (variance_x + variance_y) / 2
-        
-        # Covariance loss (decorrelate features)
-        def covariance_loss_fn(embeddings):
-            batch_size = embeddings.size(0)
-            embeddings = embeddings - embeddings.mean(dim=0, keepdim=True)
-            cov_matrix = torch.mm(embeddings.t(), embeddings) / (batch_size - 1)
-            # Zero out diagonal (we don't want to penalize variance)
-            cov_matrix = cov_matrix.fill_diagonal_(0)
-            return cov_matrix.pow(2).sum() / embed_dim
-        
-        covariance_x = covariance_loss_fn(embed_x)
-        covariance_y = covariance_loss_fn(embed_y)
-        covariance_loss = (covariance_x + covariance_y) / 2
-        
-        return invariance_loss, variance_loss, covariance_loss
+    
