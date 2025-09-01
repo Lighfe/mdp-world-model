@@ -109,7 +109,7 @@ class StableDRMLoss(nn.Module):
         # Value loss calculation based on type
         value_loss = self._calculate_expected_value_loss(
             s_y_pred, v_pred_for_all_states, v_true, 
-            loss_type=self.value_loss_type, value_type=self.value_method
+            loss_type=self.value_loss_type, value_method=self.value_method
         )
         
         # Calculate batch and individual entropy metrics
@@ -225,7 +225,7 @@ class StableDRMLoss(nn.Module):
         js_loss = 0.5 * (kl1 + kl2)
         return torch.mean(js_loss)
     
-    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse", value_type=None):
+    def _calculate_expected_value_loss(self, s_y_pred, v_pred_for_all_states, v_true, loss_type="mse", value_method=None):
         """Calculate value loss based on expected value computation"""
         # Compute expected value: sum over states of (state_prob * value_for_state)
         expected_v_pred = torch.matmul(s_y_pred, v_pred_for_all_states)  # <-- REVERT TO THIS

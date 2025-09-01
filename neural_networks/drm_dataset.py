@@ -74,13 +74,15 @@ class BaseDataset(Dataset):
     def __len__(self):
         return self.length
     
-    def _validate_samples(self, num_samples=5):
+    def _validate_samples(self, num_samples=5, verbose=False):
         """Check first few samples for any issues"""
-        print(f"Validating first {num_samples} samples:")
+        if verbose:
+            print(f"Validating first {num_samples} samples:")
         try:
             for i in range(min(num_samples, len(self))):
                 data = self[i]
-                print(f"Sample {i}: {[d.numpy() if torch.is_tensor(d) else d for d in data]}")
+                if verbose:
+                    print(f"Sample {i}: {[d.numpy() if torch.is_tensor(d) else d for d in data]}")
                 # Check for NaN values
                 for d in data:
                     if torch.is_tensor(d) and torch.isnan(d).any():

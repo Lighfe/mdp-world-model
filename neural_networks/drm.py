@@ -23,9 +23,9 @@ from neural_networks.system_registry import SystemType, get_value_sorting_functi
 
 
 class DiscreteRepresentationsModel(nn.Module):
-    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=64, 
-                 predictor_type='bilinear', use_gumbel=False, initial_temp=5.0, min_temp=0.5,
-                 use_target_encoder=False, ema_decay=0.9, value_activation="sigmoid"):
+    def __init__(self, obs_dim=2, control_dim=1, value_dim=1, num_states=4, hidden_dim=32, 
+                 predictor_type='standard', use_gumbel=True, initial_temp=3.0, min_temp=0.5,
+                 use_target_encoder=True, ema_decay=0.9, value_activation="sigmoid"):
         """
         Initialize the Discrete Representations architecture
         
