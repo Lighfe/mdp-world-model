@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 import json
 import yaml
+import shutil
+from itertools import product
 import numpy as np
 import torch
 import torch.nn as nn
@@ -699,7 +701,8 @@ def collect_softmax_rank_metrics(model, val_dataloader, device, epoch, history, 
         max_samples: Max samples for analysis
     """
     try:
-        print(f"Computing softmax rank metrics for epoch {epoch}...")
+        if verbose:
+            print(f"Computing softmax rank metrics for epoch {epoch}...")
         
         # Compute metrics
         metrics = compute_softmax_rank_metrics(model, val_dataloader, device, max_samples)
@@ -893,3 +896,142 @@ def load_and_validate_config(config_path):
     print("Config loaded and validated successfully")
     return params
 
+def parse_comma_separated(value):
+    """Parse comma-separated values into list"""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(',')]
+
+def set_nested_dict_value(config_dict, key_path, value):
+    """
+    Set a value in a nested dictionary using dot notation.
+    
+    Args:
+        config_dict: Dictionary to modify
+        key_path: Dot-separated path (e.g., "meta.seed")
+        value: Value to set
+    """
+    keys = key_path.split('.')
+    current = config_dict
+    
+    # Navigate to the parent of the target key
+    for key in keys[:-1]:
+        if key not in current:
+            current[key] = {}
+        current = current[key]
+    
+    # Set the final value
+    current[keys[-1]] = value
+
+def create_run_name(override_values, db_path_key="meta.db_path"):
+    """
+    Create a run name from override values.
+    
+    Args:
+        override_values: Dictionary of override key-value pairs
+        db_path_key: Key that contains database path for naming
+    
+    Returns:
+        String run name
+    """
+    # Extract seed and database name for run naming
+    seed = override_values.get("meta.seed", "unknown")
+    db_path = override_values.get(db_path_key, "unknown")
+    
+    if db_path != "unknown":
+        db_name = Path(db_path).stem
+    else:
+        db_name = "unknown"
+    
+    return f"seed_{seed}_{db_name}"
+
+def generate_config_combinations(base_config_path, config_id, override_params, 
+                                output_configs_dir=None):
+    """
+    Generate configuration files for all parameter combinations (more general version).
+    
+    Args:
+        base_config_path: Path to base YAML config
+        config_id: Identifier for this config set
+        override_params: Dict mapping parameter paths to lists of values
+                        e.g., {"meta.seed": [11, 12], "meta.db_path": ["data1.db", "data2.db"]}
+        output_configs_dir: Optional custom output directory for configs
+    
+    Returns:
+        List of tuples: (config_path, run_name, override_values_dict)
+    """
+    # Load base config
+    base_config = load_config(base_config_path)
+    
+    # Create configs directory (relative to project root if not specified)
+    if output_configs_dir is None:
+        # Assume we're being called from neural_networks/ or project root
+        project_root = Path(__file__).resolve().parent.parent
+        configs_dir = project_root / "configs" / config_id
+    else:
+        configs_dir = Path(output_configs_dir) / config_id
+        
+    configs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate all combinations using itertools.product
+    param_names = list(override_params.keys())
+    param_value_lists = [override_params[name] for name in param_names]
+    
+    generated_configs = []
+    
+    for value_combination in product(*param_value_lists):
+        # Create override dictionary for this combination
+        override_values = dict(zip(param_names, value_combination))
+        
+        # Create run name
+        run_name = create_run_name(override_values)
+        
+        # Create modified config
+        config_copy = base_config.copy()
+        
+        # Apply all overrides
+        for param_path, value in override_values.items():
+            set_nested_dict_value(config_copy, param_path, value)
+        
+        # Set run_id if meta section exists
+        if 'meta' in config_copy:
+            config_copy['meta']['run_id'] = run_name
+        
+        # Save individual config
+        config_filename = f"config_{run_name}.yaml"
+        config_path = configs_dir / config_filename
+        
+        with open(config_path, 'w') as f:
+            yaml.dump(config_copy, f, default_flow_style=False, indent=2)
+        
+        generated_configs.append((str(config_path), run_name, override_values))
+    
+    print(f"Generated {len(generated_configs)} config files in {configs_dir}")
+    return generated_configs
+
+def setup_output_structure(output_dir, config_id, base_config_path):
+    """
+    Create output directory structure and copy base config.
+    
+    Args:
+        output_dir: Base output directory 
+        config_id: Config identifier
+        base_config_path: Path to original base config
+    
+    Returns:
+        Path to the config-specific output directory
+    """
+    # Create main output structure
+    config_output_dir = Path(output_dir) / config_id
+    config_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create individual_runs subdirectory
+    individual_runs_dir = config_output_dir / "individual_runs"
+    individual_runs_dir.mkdir(exist_ok=True)
+    
+    # Copy base config
+    base_config_copy = config_output_dir / "base_config.yaml"
+    shutil.copy2(base_config_path, base_config_copy)
+    
+    print(f"Set up output structure at {config_output_dir}")
+    return config_output_dir

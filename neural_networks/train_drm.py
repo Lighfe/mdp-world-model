@@ -47,19 +47,19 @@ from neural_networks.drm_viz import (
 
 from neural_networks.utils import *
 
-def train_drm_model(config_path, batch_mode=False):
+def train_drm_model(config_path, multi_run=False):
     """
     Train DRM model - now with config support and batch mode.
     
     New parameters:
         config: Configuration dictionary or path to config file
         dataset_id: Dataset ID for database path formatting  
-        batch_mode: If True, minimizes outputs for batch processing
+        multi_run: If True, minimizes outputs for batch processing
         
-    All original parameters still work via kwargs.
     """
     # Load config
     config = load_and_validate_config(config_path)
+    verbose = not multi_run
     
     # Extract output directory (already complete)
     output_dir = Path(config['output_dir'])
@@ -130,7 +130,7 @@ def train_drm_model(config_path, batch_mode=False):
     # Value loss type - Legacy code
     if value_loss_type is None:
         value_loss_type = system_config['default_value_loss'][value_method]
-        if not batch_mode:
+        if not multi_run:
             print(f"Using default value loss type: {value_loss_type}")
     
     # Setup paths
@@ -166,7 +166,7 @@ def train_drm_model(config_path, batch_mode=False):
         value_dim = v_true.shape[1]
         break
     
-    if not batch_mode:
+    if not multi_run:
         print(f"Detected dimensions: obs_dim={obs_dim}, control_dim={control_dim}, value_dim={value_dim}")
     
     # For plotting the saddle nodes, extract config
@@ -196,7 +196,7 @@ def train_drm_model(config_path, batch_mode=False):
     
     # Device setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if not batch_mode:
+    if not multi_run:
         print(f"Using device: {device}")
     
     # Create model (keeping original)
@@ -226,7 +226,7 @@ def train_drm_model(config_path, batch_mode=False):
         model, optimizer_type, lr, weight_decay)
     
     # Setup warmup if enabled
-    if use_warmup and not batch_mode:
+    if use_warmup and not multi_run:
         print(f"Using warmup for first {warmup_epochs} epochs (starting LR: {lr * 0.1:.2e})")
     
     # Create scheduler (keeping original function)
@@ -270,7 +270,7 @@ def train_drm_model(config_path, batch_mode=False):
         "softmax_rank_metrics": []
     }
     
-    # State metrics collection (only if not batch_mode)
+    # State metrics collection (only if not multi_run)
     collect_every_n_epochs = 2
     collect_initial = True
     visualization_frames = []
@@ -278,8 +278,8 @@ def train_drm_model(config_path, batch_mode=False):
 
     bounds = get_visualization_bounds(SystemType[system_type.upper()])
     
-    # INITIAL STATE COLLECTION (EPOCH 0) - only if not batch_mode
-    if collect_initial and not batch_mode:
+    # INITIAL STATE COLLECTION (EPOCH 0) - only if not multi_run
+    if collect_initial and not multi_run:
         print("Collecting initial state assignments (epoch 0)...")
         
         metrics, dominant_states, grid_points, state_probs = extract_and_calculate_metrics(
@@ -294,7 +294,7 @@ def train_drm_model(config_path, batch_mode=False):
         
         # Store metrics
         history["state_metrics"].append(metrics)
-        collect_softmax_rank_metrics(model, val_loader, device, epoch=0, history=history)
+        collect_softmax_rank_metrics(model, val_loader, device, epoch=0, history=history, verbose=verbose)
         
         # Save lightweight data frame
         data_frame_path = save_state_data_frame(
@@ -332,7 +332,7 @@ def train_drm_model(config_path, batch_mode=False):
             new_lr = lr * (0.1 + 0.9 * progress)  # 10% to 100% of base LR
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lr
-            if not batch_mode:
+            if not multi_run:
                 print(f"Warmup epoch {epoch+1}/{warmup_epochs}, LR set to {new_lr:.2e}")
         
         for batch_idx, (x, c, y, v_true) in enumerate(train_loader):
@@ -342,7 +342,7 @@ def train_drm_model(config_path, batch_mode=False):
             # Check for NaN
             if (torch.isnan(x).any() or torch.isnan(c).any() or 
                 torch.isnan(y).any() or torch.isnan(v_true).any()):
-                if not batch_mode:
+                if not multi_run:
                     print(f"WARNING: NaN values in batch {batch_idx}, skipping")
                 continue
             
@@ -384,7 +384,7 @@ def train_drm_model(config_path, batch_mode=False):
                 train_individual_entropy += individual_entropy.item()
                 
             except Exception as e:
-                if not batch_mode:
+                if not multi_run:
                     print(f"Error in batch {batch_idx}: {e}")
                     import traceback
                     traceback.print_exc()
@@ -444,7 +444,7 @@ def train_drm_model(config_path, batch_mode=False):
                     valid_batches += 1
                     
                 except Exception as e:
-                    if not batch_mode:
+                    if not multi_run:
                         print(f"Error in validation: {e}")
                     continue
         
@@ -471,8 +471,8 @@ def train_drm_model(config_path, batch_mode=False):
         history["val_batch_entropy"].append(val_batch_entropy)
         history["val_individual_entropy"].append(val_individual_entropy)
         
-        # Print progress (only if not batch_mode)
-        if not batch_mode:
+        # Print progress (only if not multi_run)
+        if not multi_run:
             print(f"Epoch {epoch+1}/{epochs} - "
                   f"Train Loss: {train_loss:.4f} (State: {train_state_loss:.4f}, Value: {train_value_loss:.4f})")
             print(f"  Batch Entropy: {train_batch_entropy:.4f}, Individual Entropy: {train_individual_entropy:.4f}")
@@ -481,10 +481,10 @@ def train_drm_model(config_path, batch_mode=False):
         
         # INTERMEDIATE LAYER PROBING - every 10 epochs
         if (epoch + 1) % 10 == 0 and system_type == 'saddle_system':
-            if not batch_mode:
+            if not multi_run:
                 print(f"\n--- Intermediate Layer Probing at Epoch {epoch+1} ---")
             intermediate_results = run_layer_probing(model, val_loader, device, system_type, db_path)
-            if not batch_mode:
+            if not multi_run:
                 print(f"Validation Probing - Discrete Accuracy: {intermediate_results['discrete_accuracy']:.4f}")
                 print(f"Validation Probing - Unweighted Accuracy: {intermediate_results['discrete_accuracy_unweighted']:.4f}")
             
@@ -497,8 +497,8 @@ def train_drm_model(config_path, batch_mode=False):
                 'discrete_accuracy_unweighted': intermediate_results['discrete_accuracy_unweighted']
             })
         
-        # Visualizations at specific epochs (only if not batch_mode)
-        if not batch_mode and (epoch == 10 or epoch == 50):
+        # Visualizations at specific epochs (only if not multi_run)
+        if not multi_run and (epoch == 10 or epoch == 50):
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
             visualize_state_space(
                 model=model,
@@ -512,8 +512,12 @@ def train_drm_model(config_path, batch_mode=False):
                 bounds=bounds
             )
         
-        # Collect state metrics periodically (only if not batch_mode)
-        if not batch_mode and ((epoch + 1) % collect_every_n_epochs == 0):
+        # Collect softmax rank metrics
+        if (epoch + 1) % collect_every_n_epochs == 0:
+            collect_softmax_rank_metrics(model, val_loader, device, epoch=epoch+1, history=history)
+        
+        # Collect state metrics periodically (only if not multi_run)
+        if not multi_run and ((epoch + 1) % collect_every_n_epochs == 0):
             
             metrics, dominant_states, grid_points, state_probs = extract_and_calculate_metrics(
                 model=model,
@@ -527,7 +531,6 @@ def train_drm_model(config_path, batch_mode=False):
             
             # Store metrics
             history["state_metrics"].append(metrics)
-            collect_softmax_rank_metrics(model, val_loader, device, epoch=epoch+1, history=history)
             
             # Save lightweight data frame
             data_frame_path = save_state_data_frame(
@@ -537,13 +540,22 @@ def train_drm_model(config_path, batch_mode=False):
             visualization_frames.append(data_frame_path)
             # Update for next epoch's stability calculation
             prev_dominant_states = dominant_states
+        elif multi_run and ((epoch + 1) % collect_every_n_epochs == 0):
+            # Basic assignment metrics only (no visualization)
+            metrics, dominant_states, _, _ = extract_and_calculate_metrics(
+                model=model, device=device, num_states=num_states,
+                system_type=system_type, bounds=bounds, epoch=epoch+1,
+                prev_dominant_states=prev_dominant_states
+            )
+            history["state_metrics"].append(metrics)
+            prev_dominant_states = dominant_states
         
         # Apply scheduler
         if lr_scheduler is not None and (not use_warmup or epoch >= warmup_epochs):
             lr_scheduler.step()
         
-        # Save checkpoint (only if not batch_mode)
-        if not batch_mode and ((epoch + 1) % checkpoint_every == 0 or (epoch+1) == 10):
+        # Save checkpoint (only if not multi_run)
+        if not multi_run and ((epoch + 1) % checkpoint_every == 0 or (epoch+1) == 10):
             checkpoint_path = os.path.join(output_dir, f"drm_checkpoint_epoch{epoch+1}_{run_id}.pt")
             torch.save({
                 'epoch': epoch,
@@ -553,11 +565,11 @@ def train_drm_model(config_path, batch_mode=False):
                 'val_loss': val_loss,
                 'config': checkpoint_config
             }, checkpoint_path)
-            if not batch_mode:
+            if not multi_run:
                 print(f"Saved checkpoint to {checkpoint_path}")
     
-    # POST-TRAINING: Create visualizations (only if not batch_mode)
-    if not batch_mode and history["state_metrics"]:
+    # POST-TRAINING: Create visualizations (only if not multi_run)
+    if not multi_run and history["state_metrics"]:
         print("Creating state evolution analysis and GIF...")
         
         # Create state evolution analysis plot
@@ -587,7 +599,7 @@ def train_drm_model(config_path, batch_mode=False):
                     pass
     
     # FINAL TEST EVALUATION (keeping exact original structure)
-    if not batch_mode:
+    if not multi_run:
         print("Evaluating on test set...")
     model.eval()
     test_loss = 0.0
@@ -631,7 +643,7 @@ def train_drm_model(config_path, batch_mode=False):
                 test_samples += len(x)
                 
             except Exception as e:
-                if not batch_mode:
+                if not multi_run:
                     print(f"Error in test evaluation: {e}")
                 continue
     
@@ -647,7 +659,7 @@ def train_drm_model(config_path, batch_mode=False):
     # FINAL LAYER PROBING on test set
     probing_results = None
     if system_type == 'saddle_system':
-        if not batch_mode:
+        if not multi_run:
             print("\n--- Final Layer Probing on Test Set ---")
         probing_results = run_layer_probing(model, test_loader, device, system_type, db_path)
     
@@ -664,8 +676,8 @@ def train_drm_model(config_path, batch_mode=False):
         "prob_discrete_accuracy_unweighted": probing_results['discrete_accuracy_unweighted'] if probing_results else None
     }
     
-    # Print test results (only if not batch_mode)
-    if not batch_mode:
+    # Print test results (only if not multi_run)
+    if not multi_run:
         print(f"Test Results:")
         print(f"  Loss: {test_loss:.4f} (State: {test_state_loss:.4f}, Value: {test_value_loss:.4f})")
         print(f"  Entropy Loss: {test_entropy_loss:.4f}")
@@ -685,7 +697,7 @@ def train_drm_model(config_path, batch_mode=False):
     # SOFTMAX RANK POST-PROCESSING AND PLOTTING:
     if 'softmax_rank_metrics' in history and history['softmax_rank_metrics']:
         # Post-process to add globally normalized singular values
-        if not batch_mode:
+        if not multi_run:
             print("Post-processing: Computing global normalization for singular values...")
         add_global_normalized_singular_values(history)
         
@@ -694,7 +706,7 @@ def train_drm_model(config_path, batch_mode=False):
             safe_json_dump(history, f)
         print(f"Updated training history with global normalization")
         
-        if not batch_mode:
+        if not multi_run:
             # Create plots
             rank_plot_path = os.path.join(output_dir, f"softmax_rank_evolution_{run_id}.png")
             plot_softmax_rank_evolution(history, rank_plot_path)
@@ -746,8 +758,8 @@ def train_drm_model(config_path, batch_mode=False):
         bounds=bounds
     )
     
-    # Create other visualizations (only if not batch_mode)
-    if not batch_mode:
+    # Create other visualizations (only if not multi_run)
+    if not multi_run:
         # Training curves
         plot_path = os.path.join(output_dir, f"training_curves_{run_id}.png")
         plot_training_curves(history, plot_path)
@@ -779,7 +791,7 @@ def train_drm_model(config_path, batch_mode=False):
     
     # Calculate training time
     training_time = time.time() - start_time
-    if not batch_mode:
+    if not multi_run:
         print(f"Training completed in {training_time:.2f} seconds")
     
     return model, history
@@ -788,7 +800,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('config_path', help='Path to YAML config file')
-    parser.add_argument('--batch_mode', action='store_true')
+    parser.add_argument('--multi_run', action='store_true')
     
     args = parser.parse_args()
-    model, history = train_drm_model(args.config_path, args.batch_mode)
+    model, history = train_drm_model(args.config_path, args.multi_run)
