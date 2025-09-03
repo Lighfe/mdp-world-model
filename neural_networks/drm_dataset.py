@@ -70,6 +70,10 @@ class BaseDataset(Dataset):
         
         # Close database connection since we don't need it anymore
         self.engine.dispose()
+        
+        # REMOVE the engine object entirely for pickling compatibility
+        self.engine = None
+        self.table = None  # Also remove table reference
     
     def __len__(self):
         return self.length
