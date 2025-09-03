@@ -33,11 +33,6 @@ def run_single_training_wrapper(args):
     Returns:
         dict: Run result dictionary
     """
-    import multiprocessing as mp
-    try:
-        mp.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
 
     config_file_path, run_name, individual_runs_dir, run_index, total_runs = args
     
@@ -146,9 +141,11 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     
     total_start_time = time.time()
     
-    # Use multiprocessing to run training jobs in parallel
-    with multiprocessing.Pool(processes=max_parallel) as pool:
-        print(f"Created multiprocessing pool with {max_parallel} workers")
+    # Use explicit spawn context:
+    import multiprocessing as mp
+    ctx = mp.get_context('spawn')
+    with ctx.Pool(processes=max_parallel) as pool:
+        print(f"Created spawn-context pool with {max_parallel} workers")
         results = pool.map(run_single_training_wrapper, worker_args)
     
     # Separate successful and failed runs
