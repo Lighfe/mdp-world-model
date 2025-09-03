@@ -167,6 +167,9 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     return completed_runs, failed_runs, config_output_dir
 
 def main():
+    # Set spawn method before any multiprocessing
+    multiprocessing.set_start_method("spawn", force=True)
+
     parser = argparse.ArgumentParser(
         description="Multi-run DRM training with different seeds and datasets"
     )

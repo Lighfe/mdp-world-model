@@ -813,7 +813,7 @@ def add_global_normalized_singular_values(history):
                     normalized_value = m[raw_key] / hidden_global_max
                     m[f'hidden_sv_global_norm_{i}'] = normalized_value
     
-    print(f"Added globally normalized singular values to {len(metrics_list)} epochs")
+    print(f"Added globally normalized singular values to {len(metrics_list)} entries")
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom encoder for numpy/torch types"""
