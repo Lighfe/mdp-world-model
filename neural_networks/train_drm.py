@@ -554,6 +554,11 @@ def train_drm_model(config_path, multi_run=False):
         # Apply scheduler
         if lr_scheduler is not None and (not use_warmup or epoch >= warmup_epochs):
             lr_scheduler.step()
+
+        # Debugging
+        if (epoch == 1) or (epoch==50):
+            debug_duration = time.time() - start_time
+            print(f"Run_id: {run_id}, Epoch: {epoch}, Duration: {debug_duration}")
         
         # Save checkpoint (only if not multi_run)
         if not multi_run and ((epoch + 1) % checkpoint_every == 0 or (epoch+1) == 10):

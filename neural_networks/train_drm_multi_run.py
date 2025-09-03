@@ -110,7 +110,8 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     # Step 1: Generate individual run configs
     override_params = {
         "meta.seed": seeds,
-        "meta.db_path": db_paths
+        "meta.db_path": db_paths,
+        "meta.output_dir": [f"{output_dir}/{config_id}/individual_runs"]
     }
     
     run_configs = generate_config_combinations(

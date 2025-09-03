@@ -2,7 +2,7 @@
 #SBATCH --job-name=multi_run_drm
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=2:00:00
+#SBATCH --time=2:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -66,11 +66,11 @@ GPU_MONITOR_PID=$!
 
 # Define parameters for the job (example - modify as needed)
 CONFIG_PATH="configs/base.yaml"
-OUTPUT_DIR="neural_networks/output/test_parallel"
-CONFIG_ID="test_parallel"
-SEEDS="11,12,13,14,15"
-DB_PATHS="datasets/results/multi_saddle_1.db,datasets/results/multi_saddle_2.db"
-MAX_PARALLEL="10"
+OUTPUT_DIR="neural_networks/output"
+CONFIG_ID="test_parallel2"
+SEEDS="11,12,13,14,15,16,17,18,19,20"
+DB_PATHS="datasets/results/multi_saddle_5.db,datasets/results/multi_saddle_7.db"
+MAX_PARALLEL="20"
 
 echo "========================================================"
 echo "Starting Python multiprocessing training..."
