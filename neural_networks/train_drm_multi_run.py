@@ -23,6 +23,11 @@ from neural_networks.utils import (
 )
 from neural_networks.train_drm import train_drm_model
 
+def worker_wrapper(args, result_queue):
+    """Wrapper that puts results in queue"""
+    result = run_single_training_wrapper(args)
+    result_queue.put(result)
+
 def run_single_training_wrapper(args):
     """
     Minimal wrapper for multiprocessing. Just handles config path setup and calls train_drm_model.
@@ -144,11 +149,6 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     # Instead of Pool, use explicit torch multiprocessing processes (non-daemonic)
     processes = []
     results_queue = mp.Queue()  # To collect results
-
-    def worker_wrapper(args, result_queue):
-        """Wrapper that puts results in queue"""
-        result = run_single_training_wrapper(args)
-        result_queue.put(result)
 
     # Start all processes
     for i, worker_arg in enumerate(worker_args):
