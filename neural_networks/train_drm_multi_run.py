@@ -33,6 +33,12 @@ def run_single_training_wrapper(args):
     Returns:
         dict: Run result dictionary
     """
+    import multiprocessing as mp
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+
     config_file_path, run_name, individual_runs_dir, run_index, total_runs = args
     
     print(f"RUN {run_index}/{total_runs}: {run_name} [PID: {os.getpid()}] - Starting...")
@@ -167,9 +173,6 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     return completed_runs, failed_runs, config_output_dir
 
 def main():
-    # Set spawn method before any multiprocessing
-    multiprocessing.set_start_method("spawn", force=True)
-
     parser = argparse.ArgumentParser(
         description="Multi-run DRM training with different seeds and datasets"
     )
