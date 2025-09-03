@@ -6,7 +6,7 @@ import time
 import numpy as np
 import json
 import yaml
-import multiprocessing
+import torch.multiprocessing as mp
 from pathlib import Path
 
 # Add project root to path (go up two levels from neural_networks/)
@@ -140,13 +140,31 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
         ))
     
     total_start_time = time.time()
-    
-    # Use explicit spawn context:
-    import multiprocessing as mp
-    ctx = mp.get_context('spawn')
-    with ctx.Pool(processes=max_parallel) as pool:
-        print(f"Created spawn-context pool with {max_parallel} workers")
-        results = pool.map(run_single_training_wrapper, worker_args)
+
+    # Instead of Pool, use explicit torch multiprocessing processes (non-daemonic)
+    processes = []
+    results_queue = mp.Queue()  # To collect results
+
+    def worker_wrapper(args, result_queue):
+        """Wrapper that puts results in queue"""
+        result = run_single_training_wrapper(args)
+        result_queue.put(result)
+
+    # Start all processes
+    for i, worker_arg in enumerate(worker_args):
+        p = mp.Process(target=worker_wrapper, args=(worker_arg, results_queue))
+        p.start()
+        processes.append(p)
+        print(f"Started process {i+1}/{len(worker_args)}")
+
+    # Wait for all to complete
+    for p in processes:
+        p.join()
+
+    # Collect results
+    results = []
+    while not results_queue.empty():
+        results.append(results_queue.get())
     
     # Separate successful and failed runs
     completed_runs = [r for r in results if r['success']]
@@ -170,6 +188,9 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     return completed_runs, failed_runs, config_output_dir
 
 def main():
+    mp.set_start_method("spawn", force=True)
+    print("Set torch multiprocessing to spawn method")
+
     parser = argparse.ArgumentParser(
         description="Multi-run DRM training with different seeds and datasets"
     )
