@@ -428,7 +428,7 @@ class SocialTippingDataset(BaseDataset):
 
 def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000, 
                        test_size=1000, seed=42, value_method=None,
-                       num_workers=1):
+                       num_workers=1, verbose=False):
     """
     Create training, validation, and test data loaders
     
@@ -480,9 +480,10 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     val_indices = indices[test_size:test_size + val_size]
     train_indices = indices[test_size + val_size:]
     
-    print(f"Training set: {len(train_indices)} samples")
-    print(f"Validation set: {len(val_indices)} samples (used for intermediate probing)")
-    print(f"Test set: {len(test_indices)} samples (used for final probing)")
+    if verbose:
+        print(f"Training set: {len(train_indices)} samples")
+        print(f"Validation set: {len(val_indices)} samples (used for intermediate probing)")
+        print(f"Test set: {len(test_indices)} samples (used for final probing)")
     
     # Create loaders with proper seeding
     generator = torch.Generator()

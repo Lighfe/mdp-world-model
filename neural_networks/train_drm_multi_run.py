@@ -8,6 +8,8 @@ import json
 import yaml
 import torch.multiprocessing as mp
 from pathlib import Path
+import psutil
+import subprocess
 
 # Add project root to path (go up two levels from neural_networks/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -129,6 +131,15 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     # Step 2: Set up output directory structure
     config_output_dir = setup_output_structure(output_dir, config_id, config_path)
     individual_runs_dir = config_output_dir / "individual_runs"
+
+    # Debugging
+    print(f"Available memory: {psutil.virtual_memory().available / 1024**3:.1f} GB")
+    print(f"CPU count: {psutil.cpu_count()}")
+
+    # Check current process count
+    result = subprocess.run(['ps', '-u', 'judralle'], capture_output=True, text=True)
+    current_processes = len(result.stdout.split('\n')) - 1
+    print(f"Current processes for user: {current_processes}")
     
     # Step 3: Execute training runs in parallel
     print(f"Starting parallel execution with {max_parallel} processes...")
@@ -148,15 +159,17 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
 
     # Instead of Pool, use explicit torch multiprocessing processes (non-daemonic)
     processes = []
-    results_queue = mp.Queue()  # To collect results
+    ctx = mp.get_context('spawn') 
+    results_queue = ctx.SimpleQueue()  # No feeder thread issues
 
     print(f"Starting {max_parallel} non-daemonic processes...")
     # Start all processes
     for i, worker_arg in enumerate(worker_args):
-        p = mp.Process(target=worker_wrapper, args=(worker_arg, results_queue))
+        p = ctx.Process(target=worker_wrapper, args=(worker_arg, results_queue))
         p.start()
+        time.sleep(0.1) # Small stagger for CUDA initialization
         processes.append(p)
-        print(f"Started process {i+1}/{len(worker_args)}")
+        print(f"Started process {i+1}/{len(worker_args)}", flush=True)
         
     # Add this check
     time.sleep(5)  # Wait a moment
@@ -170,9 +183,9 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
 
     # Collect results with timeout
     results = []
-    for i in range(len(worker_args)):  # Expect exactly this many results
+    for i in range(len(worker_args)):
         try:
-            result = results_queue.get(timeout=10)  # 10 second timeout
+            result = results_queue.get(timeout=30)
             results.append(result)
         except:
             print(f"Warning: Could not get result {i+1}")
