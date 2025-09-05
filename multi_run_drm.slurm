@@ -2,10 +2,10 @@
 #SBATCH --job-name=multi_run_drm
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=1:30:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=6
+#SBATCH --cpus-per-task=7
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
 #SBATCH --output=log/multi_run_drm_%j.out
@@ -28,7 +28,7 @@ module load anaconda
 source activate mdp-world-model
 
 # Set standard environment
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=2
 export OMP_PROC_BIND=true
 
 # ============= H100-SPECIFIC OPTIMIZATIONS =============
@@ -67,8 +67,8 @@ GPU_MONITOR_PID=$!
 # Define parameters for the job (example - modify as needed)
 CONFIG_PATH="configs/base.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="test_parallel4"
-SEEDS="11,12,13"
+CONFIG_ID="test_parallel5"
+SEEDS="15,16,17"
 DB_PATHS="datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
 MAX_PARALLEL="6"
 

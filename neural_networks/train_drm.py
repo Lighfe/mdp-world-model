@@ -173,7 +173,7 @@ def train_drm_model(config_path, multi_run=False):
     # For plotting the saddle nodes, extract config
     points_config = None
     if system_type == 'saddle_system':
-        saddle_config = get_saddle_configuration(db_path)
+        saddle_config = get_saddle_configuration(db_path, verbose=verbose)
         if saddle_config:
             points_config = {
                 'points': saddle_config['saddle_points'],
