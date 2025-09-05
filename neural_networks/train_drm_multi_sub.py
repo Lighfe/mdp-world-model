@@ -221,16 +221,27 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         # Small delay to stagger process starts
         time.sleep(0.2)
     
+    print(f"[DEBUG] Exited initial batch loop, active_processes: {len(active_processes)}")
+    sys.stdout.flush()
+
     print(f"Started initial batch of {len(active_processes)} processes")
-    
+
+    print(f"[DEBUG] About to enter monitoring loop")
+    sys.stdout.flush()
+
     # Monitor processes and start new ones as they complete
     while active_processes or pending_configs:
+        print(f"[DEBUG] In monitoring loop, active: {len(active_processes)}, pending: {len(pending_configs)}")
+        sys.stdout.flush()
         
         # Check for completed processes
         completed_processes = []
         for process in list(active_processes.keys()):
             if process.poll() is not None:  # Process has finished
                 completed_processes.append(process)
+        
+        print(f"[DEBUG] Found {len(completed_processes)} completed processes")
+        sys.stdout.flush()
         
         # Handle completed processes
         for process in completed_processes:
