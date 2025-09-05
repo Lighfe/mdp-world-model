@@ -126,6 +126,9 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         db_paths: List of database paths
         max_parallel: Maximum number of parallel processes
     """
+    print("[DEBUG] Entered multi_train_drm_subprocess function")
+    sys.stdout.flush()
+
     if max_parallel is None:
         max_parallel = len(seeds)
     
@@ -283,45 +286,32 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     return successful_runs, failed_runs, config_output_dir
 
 def main():
+    print("[DEBUG] Starting main() function")
+    sys.stdout.flush()
+    
     parser = argparse.ArgumentParser(
         description="Multi-run DRM training using subprocess approach"
     )
-    parser.add_argument(
-        "config_path", 
-        help="Path to base YAML configuration file"
-    )
-    parser.add_argument(
-        "--output-dir", 
-        required=True,
-        help="Base output directory for results"
-    )
-    parser.add_argument(
-        "--config-id", 
-        required=True,
-        help="Identifier for this configuration (used as subfolder name)"
-    )
-    parser.add_argument(
-        "--seeds", 
-        required=True,
-        help="Comma-separated list of random seeds (e.g., '11,12,13,14,15')"
-    )
-    parser.add_argument(
-        "--db-paths", 
-        required=True,
-        help="Comma-separated list of database paths"
-    )
-    parser.add_argument(
-        "--max-parallel",
-        type=int,
-        default=None,
-        help="Maximum number of parallel processes (default: number of seeds)"
-    )
+    print("[DEBUG] Created argument parser")
+    sys.stdout.flush()
+    
+    # ... all the parser.add_argument calls ...
+    
+    print("[DEBUG] About to parse arguments")
+    sys.stdout.flush()
     
     args = parser.parse_args()
+    
+    print("[DEBUG] Arguments parsed successfully")
+    sys.stdout.flush()
     
     # Parse comma-separated arguments
     seeds = [int(s) for s in parse_comma_separated(args.seeds)]
     db_paths = parse_comma_separated(args.db_paths)
+    
+    print(f"[DEBUG] Parsed seeds: {seeds}")
+    print(f"[DEBUG] Parsed db_paths: {db_paths}")
+    sys.stdout.flush()
     
     # Validate inputs
     if not seeds:
@@ -337,6 +327,9 @@ def main():
     for db_path in db_paths:
         if not Path(db_path).exists():
             print(f"WARNING: Database file not found: {db_path}")
+    
+    print("[DEBUG] About to call multi_train_drm_subprocess")
+    sys.stdout.flush()
     
     # Execute multi-run training
     successful_runs, failed_runs, output_dir = multi_train_drm_subprocess(
