@@ -60,7 +60,6 @@ def run_single_training_wrapper(args):
             yaml.dump(config, f, default_flow_style=False, indent=2)
         
         # Execute training with multi_run=True (minimal output)
-        # Execute training with multi_run=True (minimal output)
         model, history = train_drm_model(str(updated_config_path), multi_run=True)
         print(f"[DEBUG] train_drm_model() returned successfully")
 
@@ -69,6 +68,7 @@ def run_single_training_wrapper(args):
         if history and 'training_completed' in history:
             accuracy = history.get('test_accuracy')
 
+        run_time = time.time() - run_start_time
         # Return simplified result
         return {
             'run_name': run_name,
