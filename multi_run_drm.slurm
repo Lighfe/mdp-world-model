@@ -5,7 +5,7 @@
 #SBATCH --time=1:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=6
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
 #SBATCH --output=log/multi_run_drm_%j.out
@@ -61,16 +61,16 @@ fi
 # ============= END H100 OPTIMIZATIONS =============
 
 # Start GPU monitoring
-nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=10 > "log/gpu_multi_run_${SLURM_JOBID}.log" &
+nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=30 > "log/gpu_multi_run_${SLURM_JOBID}.log" &
 GPU_MONITOR_PID=$!
 
 # Define parameters for the job (example - modify as needed)
 CONFIG_PATH="configs/base.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="test_parallel3"
-SEEDS="11,12,13,14,15"
+CONFIG_ID="test_parallel4"
+SEEDS="11,12,13"
 DB_PATHS="datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
-MAX_PARALLEL="10"
+MAX_PARALLEL="6"
 
 echo "========================================================"
 echo "Starting Python multiprocessing training..."

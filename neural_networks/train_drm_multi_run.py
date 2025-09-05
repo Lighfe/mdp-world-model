@@ -150,21 +150,34 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
     processes = []
     results_queue = mp.Queue()  # To collect results
 
+    print(f"Starting {max_parallel} non-daemonic processes...")
     # Start all processes
     for i, worker_arg in enumerate(worker_args):
         p = mp.Process(target=worker_wrapper, args=(worker_arg, results_queue))
         p.start()
         processes.append(p)
         print(f"Started process {i+1}/{len(worker_args)}")
+        
+    # Add this check
+    import time
+    time.sleep(5)  # Wait a moment
+    print("Checking if processes are still alive:")
+    for i, p in enumerate(processes):
+        print(f"Process {i+1}: PID {p.pid}, alive: {p.is_alive()}")
 
     # Wait for all to complete
     for p in processes:
         p.join()
 
-    # Collect results
+    # Collect results with timeout
     results = []
-    while not results_queue.empty():
-        results.append(results_queue.get())
+    for i in range(len(worker_args)):  # Expect exactly this many results
+        try:
+            result = results_queue.get(timeout=10)  # 10 second timeout
+            results.append(result)
+        except:
+            print(f"Warning: Could not get result {i+1}")
+            break
     
     # Separate successful and failed runs
     completed_runs = [r for r in results if r['success']]
