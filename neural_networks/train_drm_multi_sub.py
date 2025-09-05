@@ -126,6 +126,9 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         db_paths: List of database paths
         max_parallel: Maximum number of parallel processes
     """
+    print("[DEBUG] Entering multi_train_drm_subprocess function")
+    sys.stdout.flush()
+    
     if max_parallel is None:
         max_parallel = len(seeds)
     
@@ -138,6 +141,9 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     print(f"Max parallel processes: {max_parallel}")
     print("="*60)
     
+    print("[DEBUG] About to call generate_config_combinations")
+    sys.stdout.flush()
+    
     # Step 1: Generate individual run configs
     override_params = {
         "meta.seed": seeds,
@@ -145,28 +151,72 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         "meta.output_dir": [f"{output_dir}/{config_id}/individual_runs"]
     }
     
-    run_configs = generate_config_combinations(
-        base_config_path=config_path,
-        config_id=config_id,
-        override_params=override_params
-    )
+    print("[DEBUG] About to call generate_config_combinations with params:", override_params)
+    sys.stdout.flush()
+    
+    try:
+        run_configs = generate_config_combinations(
+            base_config_path=config_path,
+            config_id=config_id,
+            override_params=override_params
+        )
+        print(f"[DEBUG] generate_config_combinations completed, got {len(run_configs)} configs")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"[DEBUG] ERROR in generate_config_combinations: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        raise
+    
+    print("[DEBUG] About to call setup_output_structure")
+    sys.stdout.flush()
     
     # Step 2: Set up output directory structure
-    config_output_dir = setup_output_structure(output_dir, config_id, config_path)
+    try:
+        config_output_dir = setup_output_structure(output_dir, config_id, config_path)
+        print(f"[DEBUG] setup_output_structure completed: {config_output_dir}")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"[DEBUG] ERROR in setup_output_structure: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        raise
+    
+    print("[DEBUG] About to check resources")
+    sys.stdout.flush()
     
     # Resource monitoring
-    print(f"Available memory: {psutil.virtual_memory().available / 1024**3:.1f} GB")
-    print(f"CPU count: {psutil.cpu_count()}")
+    try:
+        available_mem = psutil.virtual_memory().available / 1024**3
+        cpu_count = psutil.cpu_count()
+        print(f"Available memory: {available_mem:.1f} GB")
+        print(f"CPU count: {cpu_count}")
+        print("[DEBUG] Resource check completed")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"[DEBUG] ERROR in resource check: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        raise
     
     # Step 3: Execute subprocess-based parallel training
     print(f"Starting subprocess-based parallel execution...")
+    print("[DEBUG] About to start subprocess monitoring")
+    sys.stdout.flush()
     
+    # Rest of the function continues...
     total_start_time = time.time()
     
     # Track active processes and results
     active_processes = {}  # {process: (run_name, run_index, total_runs)}
     completed_results = []
     pending_configs = list(enumerate(run_configs, 1))  # [(run_index, config_info)]
+    
+    print(f"[DEBUG] Created pending_configs list with {len(pending_configs)} items")
+    sys.stdout.flush()
     
     # Start initial batch of processes
     while len(active_processes) < max_parallel and pending_configs:
