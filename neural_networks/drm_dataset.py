@@ -21,7 +21,7 @@ from neural_networks.system_registry import SystemType, get_system_config
 class BaseDataset(Dataset):
     """Base dataset class with common database functionality"""
     
-    def __init__(self, db_path, cache_data=True):
+    def __init__(self, db_path, cache_data=True, verbose=False):
         """Initialize base dataset with database connection"""
         self.db_path = db_path
         self.cache_data = cache_data
@@ -54,11 +54,12 @@ class BaseDataset(Dataset):
         
         # Cache all data at startup if requested
         if self.cache_data:
-            self._cache_all_data()
+            self._cache_all_data(verbose=False)
     
-    def _cache_all_data(self):
+    def _cache_all_data(self, verbose=False):
         """Load all data into memory at startup"""
-        print("Loading all data into memory...")
+        if verbose:
+            print("Loading all data into memory...")
         
         with Session(self.engine) as session:
             # Get all data in one query
@@ -66,7 +67,8 @@ class BaseDataset(Dataset):
             result = session.execute(query).fetchall()
             
         self.cached_data = result
-        print(f"Cached {len(self.cached_data)} samples in memory")
+        if verbose:
+            print(f"Cached {len(self.cached_data)} samples in memory")
         
         # Close database connection since we don't need it anymore
         self.engine.dispose()
@@ -98,7 +100,7 @@ class BaseDataset(Dataset):
 class TechSubstitutionDataset(BaseDataset):
     """Dataset for technology substitution system"""
     
-    def __init__(self, db_path, value_method='market_share', cache_data=True):
+    def __init__(self, db_path, value_method='market_share', cache_data=True, verbose=False):
         self.value_method = value_method
         super().__init__(db_path, cache_data=cache_data)
         self._validate_samples()
@@ -189,7 +191,7 @@ class TechSubstitutionDataset(BaseDataset):
 class SaddleSystemDataset(BaseDataset):
     """Dataset for saddle system"""
     
-    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=True):
+    def __init__(self, db_path, value_method='angle', num_saddles=None, cache_data=True, verbose=False):
         self.value_method = value_method
         self.num_saddles = num_saddles
         super().__init__(db_path, cache_data=cache_data)
@@ -199,12 +201,13 @@ class SaddleSystemDataset(BaseDataset):
             self._infer_num_saddles()
 
         # After inferring num_saddles, validate against system config
-        self.saddle_config = get_saddle_configuration(db_path, verbose=False)
+        self.saddle_config = get_saddle_configuration(db_path, verbose=verbose)
         if self.saddle_config:
             expected_saddles = len(self.saddle_config['saddle_points'])
             if self.num_saddles != expected_saddles:
-                print(f"WARNING: Inferred {self.num_saddles} saddles from data, "
-                    f"but system config shows {expected_saddles} saddle points!")
+                if verbose:
+                    print(f"WARNING: Inferred {self.num_saddles} saddles from data, "
+                        f"but system config shows {expected_saddles} saddle points!")
         
         self._validate_samples()
     
@@ -352,7 +355,7 @@ class SaddleSystemDataset(BaseDataset):
 class SocialTippingDataset(BaseDataset):
     """Dataset for social tipping system"""
     
-    def __init__(self, db_path, value_method='abs_distance', cache_data=True):
+    def __init__(self, db_path, value_method='abs_distance', cache_data=True, verbose=False):
         self.value_method = value_method
         super().__init__(db_path, cache_data=cache_data)
         self._validate_samples()
@@ -459,11 +462,11 @@ def create_data_loaders(system_type, db_path, batch_size=64, val_size=1000,
     
     # Create the appropriate dataset
     if system_type == 'tech_substitution':
-        dataset = TechSubstitutionDataset(db_path, value_method=value_method)
+        dataset = TechSubstitutionDataset(db_path, value_method=value_method, verbose=verbose)
     elif system_type == 'saddle_system':
-        dataset = SaddleSystemDataset(db_path, value_method=value_method)
+        dataset = SaddleSystemDataset(db_path, value_method=value_method, verbose=verbose)
     elif system_type == 'social_tipping':
-        dataset = SocialTippingDataset(db_path, value_method=value_method)
+        dataset = SocialTippingDataset(db_path, value_method=value_method, verbose=verbose)
     else:
         raise ValueError(f"Unknown system type: {system_type}")
     

@@ -60,7 +60,9 @@ def run_single_training_wrapper(args):
             yaml.dump(config, f, default_flow_style=False, indent=2)
         
         # Execute training with multi_run=True (minimal output)
+        print(f"[DEBUG] About to call train_drm_model()")
         model, history = train_drm_model(str(updated_config_path), multi_run=True)
+        print(f"[DEBUG] train_drm_model() returned successfully")
         
         run_time = time.time() - run_start_time
         
@@ -171,15 +173,25 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
         processes.append(p)
         print(f"Started process {i+1}/{len(worker_args)}", flush=True)
         
-    # Add this check
-    time.sleep(5)  # Wait a moment
+    # After the process creation loop
+    print("All processes started successfully!")
+    sys.stdout.flush()
+
+    print("About to sleep for 5 seconds...")
+    sys.stdout.flush()
+
+    time.sleep(5)
+
+    print("Sleep completed, checking process status...")
+    sys.stdout.flush()
+
     print("Checking if processes are still alive:")
     for i, p in enumerate(processes):
         print(f"Process {i+1}: PID {p.pid}, alive: {p.is_alive()}")
 
-    # Wait for all to complete
-    for p in processes:
-        p.join()
+        # Wait for all to complete
+        for p in processes:
+            p.join()
 
     # Collect results with timeout
     results = []

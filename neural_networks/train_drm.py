@@ -795,6 +795,10 @@ def train_drm_model(config_path, multi_run=False):
     training_time = time.time() - start_time
     if not multi_run:
         print(f"Training completed in {training_time:.2f} seconds")
+
+    # DEBUGGING
+    print(f"[DEBUG] About to return from train_drm_model()")
+    sys.stdout.flush()
     
     return model, history
 
