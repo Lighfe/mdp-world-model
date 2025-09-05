@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=multi_run_subprocess
+#SBATCH --job-name=multi_run_mps
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=1:30:00
@@ -8,15 +8,14 @@
 #SBATCH --cpus-per-task=11
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --output=log/multi_run_subprocess_%j.out
-#SBATCH --error=log/multi_run_subprocess_%j.err
+#SBATCH --output=log/multi_run_mps_%j.out
+#SBATCH --error=log/multi_run_mps_%j.err
 
 echo "========================================================"
-echo "MULTI-RUN DRM TRAINING - SUBPROCESS EXECUTION"
+echo "MULTI-RUN DRM TRAINING - WITH CUDA MPS"
 echo "Job started at $(date)"
 echo "Running on $(hostname)"
 echo "SLURM_JOBID: $SLURM_JOBID"
-echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"
 echo "GPU Info: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 echo "========================================================"
 
@@ -27,50 +26,70 @@ mkdir -p log
 module load anaconda
 source activate mdp-world-model
 
-# CRITICAL FIX: Explicitly set PATH to use conda environment
+# Explicitly set PATH to use conda environment
 export PATH="$CONDA_PREFIX/bin:$PATH"
 
-# Verify the fix worked
-echo "Python executable after PATH fix: $(which python)"
+# Verify environment
+echo "Python executable: $(which python)"
 python -c "import torch; print(f'Torch {torch.__version__} available')"
 
-# Set environment for subprocess approach
-export OMP_NUM_THREADS=2  # Lower per-process threading since we have multiple subprocesses
-export OMP_PROC_BIND=true
+# ============= CUDA MPS SETUP =============
+echo "Setting up CUDA MPS..."
 
-# ============= H100-SPECIFIC OPTIMIZATIONS =============
-# Enable asynchronous GPU operations
+# Set GPU for MPS
+export CUDA_VISIBLE_DEVICES=0
+
+# Create MPS directories (fix for HPC systems)
+MPS_LOG_DIR="log/mps_${SLURM_JOBID}"
+MPS_PIPE_DIR="log/mps_pipes_${SLURM_JOBID}"
+mkdir -p "$MPS_LOG_DIR" "$MPS_PIPE_DIR"
+
+# Start CUDA MPS control daemon
+echo "Starting CUDA MPS control daemon..."
+export CUDA_MPS_PIPE_DIRECTORY="$MPS_PIPE_DIR"
+export CUDA_MPS_LOG_DIRECTORY="$MPS_LOG_DIR"
+
+# Kill any existing MPS daemon
+echo quit | nvidia-cuda-mps-control 2>/dev/null || true
+
+# Start new MPS daemon
+nvidia-cuda-mps-control -d
+
+# Verify MPS is running
+if pgrep nvidia-cuda-mps > /dev/null; then
+    echo "✓ CUDA MPS daemon started successfully"
+else
+    echo "✗ Failed to start CUDA MPS daemon"
+    exit 1
+fi
+# ============= END MPS SETUP =============
+
+# ============= THREAD CONTROL =============
+# Prevent thread oversubscription
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1 
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# H100 optimizations
 export CUDA_LAUNCH_BLOCKING=0
-
-# Set architecture for H100 (compute capability 9.0)
 export TORCH_CUDA_ARCH_LIST="9.0"
-
-# Better error messages for debugging
 export TORCH_USE_CUDA_DSA=1
-
-# Enable TF32 for tensor operations
 export TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
-
-# Fix CuBLAS deterministic warning
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+# ============= END THREAD CONTROL =============
 
-# NOTE: No MPS daemon needed for subprocess approach
-# Each subprocess gets its own independent GPU context
-echo "Using subprocess approach - no MPS daemon needed"
-# ============= END H100 OPTIMIZATIONS =============
-
-# Define parameters for the job
+# Job parameters
 CONFIG_PATH="configs/base.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="subprocess_test1"
+CONFIG_ID="mps_test"
 SEEDS="11,12,13,14,15"
 DB_PATHS="datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
 MAX_PARALLEL="10"
 
 echo "========================================================"
-echo "Starting subprocess-based multiprocessing training..."
+echo "Starting MPS-enabled multiprocessing training..."
 echo "Config: $CONFIG_PATH"
-echo "Output dir: $OUTPUT_DIR"
 echo "Config ID: $CONFIG_ID"
 echo "Seeds: $SEEDS"
 echo "Databases: $DB_PATHS"
@@ -78,16 +97,13 @@ echo "Max parallel: $MAX_PARALLEL"
 echo "========================================================"
 
 # Start GPU monitoring
-nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=30 > "log/gpu_subprocess_${SLURM_JOBID}.log" &
+nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=30 > "log/gpu_mps_${SLURM_JOBID}.log" &
 GPU_MONITOR_PID=$!
 
-# Ensure we're in the project root directory
+# Change to project directory
 cd /p/projects/ou/rd4/bega/mdp/dralle/mdp-world-model
 
-echo "Current directory: $(pwd)"
-echo "Python script exists: $(test -f neural_networks/train_drm_multi_sub.py && echo 'YES' || echo 'NO')"
-
-# Execute the subprocess-based multi-run training
+# Execute training with MPS
 python neural_networks/train_drm_multi_sub.py "$CONFIG_PATH" \
     --output-dir "$OUTPUT_DIR" \
     --config-id "$CONFIG_ID" \
@@ -100,59 +116,45 @@ PYTHON_EXIT_CODE=$?
 # Stop GPU monitoring
 kill $GPU_MONITOR_PID 2>/dev/null
 
-echo "========================================================"
-echo "Subprocess-based training completed at $(date)"
-echo "Python exit code: $PYTHON_EXIT_CODE"
-echo "Results saved to: $OUTPUT_DIR/$CONFIG_ID"
-echo "GPU usage log: log/gpu_subprocess_${SLURM_JOBID}.log"
-echo "========================================================"
+# ============= MPS CLEANUP =============
+echo "Cleaning up CUDA MPS..."
+echo quit | nvidia-cuda-mps-control
 
-# Summary information
-echo ""
-echo "Summary for Configuration: $CONFIG_ID"
-echo "================================================"
+# Wait for MPS to shut down
+sleep 2
 
-# Check completion status
-if [ $PYTHON_EXIT_CODE -eq 0 ]; then
-    echo "✓ Training completed successfully"
-    
-    # Count completed runs by checking for final output files
-    if [ -d "$OUTPUT_DIR/$CONFIG_ID/individual_runs" ]; then
-        completed_count=$(find "$OUTPUT_DIR/$CONFIG_ID/individual_runs" -name "*.png" -name "*final_state_assignment*" | wc -l)
-        total_expected=$(echo "$SEEDS" | tr ',' '\n' | wc -l)
-        total_expected=$((total_expected * $(echo "$DB_PATHS" | tr ',' '\n' | wc -l)))
-        
-        echo "  Completed visualizations: $completed_count/$total_expected"
-        
-        # Check for run summary
-        if [ -f "$OUTPUT_DIR/$CONFIG_ID/run_summary.json" ]; then
-            echo "  Summary file created: ✓"
-        fi
-    fi
-    
-else
-    echo "✗ Training failed with exit code: $PYTHON_EXIT_CODE"
+if pgrep nvidia-cuda-mps > /dev/null; then
+    echo "Warning: MPS processes still running, force killing..."
+    pkill nvidia-cuda-mps
 fi
 
-# Check average runtime from GPU log
-echo ""
-echo "GPU Utilization Summary:"
-if [ -f "log/gpu_subprocess_${SLURM_JOBID}.log" ]; then
-    # Get GPU utilization stats (skip header line)
-    avg_util=$(tail -n +2 "log/gpu_subprocess_${SLURM_JOBID}.log" | awk -F',' '{sum+=$3; count++} END {if(count>0) print sum/count; else print 0}')
-    max_memory=$(tail -n +2 "log/gpu_subprocess_${SLURM_JOBID}.log" | awk -F',' '{if($1>max) max=$1} END {print max}')
+echo "✓ CUDA MPS cleaned up"
+# ============= END MPS CLEANUP =============
+
+echo "========================================================"
+echo "MPS-enabled training completed at $(date)"
+echo "Python exit code: $PYTHON_EXIT_CODE"
+echo "Results saved to: $OUTPUT_DIR/$CONFIG_ID"
+echo "GPU usage log: log/gpu_mps_${SLURM_JOBID}.log"
+echo "MPS logs: $MPS_LOG_DIR"
+echo "========================================================"
+
+# GPU utilization summary
+if [ -f "log/gpu_mps_${SLURM_JOBID}.log" ]; then
+    avg_util=$(tail -n +2 "log/gpu_mps_${SLURM_JOBID}.log" | awk -F',' '{sum+=$3; count++} END {if(count>0) print sum/count; else print 0}')
+    max_memory=$(tail -n +2 "log/gpu_mps_${SLURM_JOBID}.log" | awk -F',' '{if($1>max) max=$1} END {print max}')
     
+    echo "GPU Utilization with MPS:"
     echo "  Average GPU utilization: ${avg_util}%"
     echo "  Peak memory usage: ${max_memory} MiB"
     
-    # Compare with expected single-run utilization (~11%)
-    if (( $(echo "$avg_util > 20" | bc -l) )); then
-        echo "  ✓ GPU utilization significantly improved over single-run baseline"
+    # Expected improvement with MPS
+    expected_util=$(echo "$avg_util > 50" | bc -l)
+    if [ "$expected_util" -eq 1 ]; then
+        echo "  ✓ Significant improvement with MPS!"
     else
-        echo "  ⚠ GPU utilization similar to single-run baseline (~11%)"
+        echo "  ⚠ GPU utilization still low - check kernel size/batch size"
     fi
 fi
-
-echo "================================================"
 
 exit $PYTHON_EXIT_CODE
