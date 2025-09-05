@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib as mpl
 import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplcol
@@ -14,6 +15,15 @@ from data_generation.visualization.create_plots import create_2D_vectorfield, pl
 from clustering.patchwork import create_patchwork
 
 hv.extension('bokeh')
+
+mpl.rcParams.update({
+    "text.usetex": True,
+    "mathtext.fontset": "cm",   # Computer Modern math
+    "font.family": "serif",     # falls back to DejaVu Serif
+    #"font.size": 9,
+})
+thesis_colour = (0, 0.42, 0.572, 1)# '#006b92'
+warm_orange_brick_colour = (0.8, 0.35, 0.1)
 
 def plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5):
     """
@@ -77,7 +87,19 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 
 
-def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True):
+def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True, pdfready = True):
+
+
+    # Make plots ready for the thesis
+    if pdfready == True:
+        labelfontsize = 26
+        tickfontsize = 22
+        numberticks = 6
+    else:
+        labelfontsize = 14
+        tickfontsize = 11
+        numberticks = 11
+
 
     grid_class_name = type(patchwork.grid).__name__
     num_cells = len(patchwork.grid.indices)
@@ -95,8 +117,8 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     # Prepare meshgrid for the streamplot calculations
     if patchwork.grid.transformed_bool:
        
-        x_axis_tick_labels = [(tick, str(np.round(patchwork.grid.inverse_transformations[0](tick),2))) for tick in np.linspace(0,1,11)]
-        y_axis_tick_labels = [(tick, str(np.round(patchwork.grid.inverse_transformations[1](tick),2))) for tick in np.linspace(0,1,11)]
+        x_axis_tick_labels = [(tick, str(np.round(patchwork.grid.inverse_transformations[0](tick),2))) for tick in np.linspace(0,1,numberticks)]
+        y_axis_tick_labels = [(tick, str(np.round(patchwork.grid.inverse_transformations[1](tick),2))) for tick in np.linspace(0,1,numberticks)]
         #Remove boundaries for infinity case (transformation doesn't work herd)
         if np.isinf(patchwork.grid.bounds[0][1]):
             X1lin = X1lin[:-1]
@@ -112,9 +134,9 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         X2_org = np.vectorize(patchwork.grid.inverse_transformations[1])(X2)
     
     else:
-        tick_positions = np.linspace(0,1,11)
-        x_axis_tick_labels = [(tick_positions[i], str(np.round(tick,2))) for i, tick in enumerate(np.linspace(bounds[0][0],bounds[0][1],11))]
-        y_axis_tick_labels = [(tick_positions[i], str(np.round(tick,2))) for i, tick in enumerate(np.linspace(bounds[1][0],bounds[1][1],11))]
+        tick_positions = np.linspace(0,1, numberticks)
+        x_axis_tick_labels = [(tick_positions[i], str(np.round(tick,2))) for i, tick in enumerate(np.linspace(bounds[0][0],bounds[0][1],numberticks))]
+        y_axis_tick_labels = [(tick_positions[i], str(np.round(tick,2))) for i, tick in enumerate(np.linspace(bounds[1][0],bounds[1][1],numberticks))]
         X1, X2 = np.meshgrid(X1lin, X2lin)
 
 
@@ -209,7 +231,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     max_entropy = max(entropy for lst in patchwork.patch_to_history_of_avg_entropy.values() for _, entropy in lst)
     entropy_norm = mplcol.Normalize(vmin=0, vmax=max_entropy)
 
-    def create_colorbar(colormap, norm, label="Patch Transition Entropy"):
+    def create_colorbar(colormap, norm, label=r"Patch Transition Entropy $\mathrm{H}_{\mathrm{Sh}}(s)$"):
         """Creates a matplotlib colorbar using the given colormap and normalization."""
         fig, ax = plt.subplots(figsize=(3.5,0.3), dpi = 400)  # Adjust figure size for the colorbar
         sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
@@ -221,6 +243,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
         return fig
     
+
     # Tap Stream
     tap_stream = hv.streams.Tap(source = None)
 
@@ -363,7 +386,11 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 xlim=(0, 1), ylim=(0, 1),
                 width=600, height=600, tools=['hover'],
                 xticks=x_axis_tick_labels,  # Custom x-axis tick labels
-                yticks=y_axis_tick_labels   # Custom y-axis tick labels
+                yticks=y_axis_tick_labels,   # Custom y-axis tick labels
+                xlabel = "x₁",
+                ylabel = "x₂",
+                fontsize={'xlabel': labelfontsize, 'ylabel': labelfontsize,
+                          'xticks': tickfontsize, 'yticks': tickfontsize}
                 )
             # Identify patch borders
             patch_borders = []
@@ -436,6 +463,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
     
     #Save to .gif
+    """
     if save_to_path != None:
         patchworks = {step: get_current_patchwork(step, [], [], selected_color='Entropy') for step in range(0,number_of_steps,save_steps)}
         holomap = hv.HoloMap(patchworks, kdims=['Step'])
@@ -444,6 +472,87 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         #Save colorbar externally
         fig = create_colorbar(entropy_cmap, entropy_norm)
         fig.savefig(save_to_path + "_colormap.png", bbox_inches='tight')
+    """
+    
+    if pdfready and save_to_path != None:
+        def create_pdf_colorbar(colormap, norm, label=r"$\mathrm{H}_{\mathrm{Sh}}(s)$"):
+
+            """Creates a matplotlib colorbar using the given colormap and normalization."""
+            fig, ax = plt.subplots(figsize=(3,0.33), dpi = 400)  # Adjust figure size for the colorbar
+            sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
+            sm.set_array([])  # Needed for the colorbar to work
+            cbar = plt.colorbar(sm, cax=ax, orientation="horizontal")
+            cbar.outline.set_visible(False)  # Remove the outer frame
+            cbar.ax.tick_params(labelsize=10)  # Change the fontsize of the colorbar numbers
+            cbar.set_label(label, fontsize=10)
+            cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
+            cbar.ax.xaxis.set_tick_params(width=0.8)  # thinner tick lines
+            fig.tight_layout(pad=0.1)               # remove extra padding
+            return fig
+        
+
+        
+        def create_loss_function_plot_matplotlib(step=0, x_axis_mode='Step', x_transform='None', show_derivative=False):
+            """
+            Create a static, publication-ready Matplotlib plot of the loss function at a given step.
+            Exports directly to PDF/SVG.
+            """
+            history = patchwork.loss_function.history_of_loss_function_values
+            n_steps = len(list(history.values())[0])
+            steps = np.arange(n_steps)
+
+            # X-axis construction
+            if x_axis_mode == 'Step':
+                x_vals = steps
+            elif x_axis_mode == 'Number of Patches':
+                x_vals = np.array([len(patchwork.cell_to_patchindex) - i for i in steps])
+
+            if x_transform == 'log':
+                x_vals = np.log1p(x_vals)
+            elif x_transform == 'exp':
+                x_vals = np.exp(x_vals)
+
+            # Plotting
+            fig, ax = plt.subplots(figsize=(4,3))
+            color_cycle = plt.get_cmap('tab10').colors
+
+            for idx, (loss_type, values) in enumerate(history.items()):
+                color = color_cycle[idx % len(color_cycle)]
+                y_vals = values
+                if loss_type == 'Loss Function Value':
+                    ax.plot(x_vals, y_vals, color=color, linewidth=4, linestyle = (0,(1,4)), alpha=0.7,label=loss_type)
+                else:
+                    ax.plot(x_vals, y_vals, color=color, linewidth=2, alpha=0.7,label=loss_type)
+
+                if show_derivative:
+                    dy = np.gradient(values)
+                    ax.plot(x_vals, dy, color=color, linewidth=1.5, linestyle='dotted', alpha=0.5, label=f"d({loss_type})/dx")
+
+            # Vertical line for current step
+            ax.axvline(x=x_vals[step], color='k', linestyle='--', linewidth=1)
+
+            # Labels, legend, and styling
+            ax.set_xlabel("Step", fontsize=10)
+            ax.set_ylabel("Loss", fontsize=10)
+            leg = ax.legend(fontsize=8, ncol=len(history), loc='upper center', bbox_to_anchor=(0.5, -0.45), frameon=True, facecolor='white', edgecolor='gray', framealpha=0.8  )
+            leg.get_frame().set_linewidth(0.8)
+            ax.grid(True, linestyle='--', alpha=0.3)
+            xmin, xmax = ax.get_xlim()
+            ax.set_xlim(left=0, right=xmax) 
+            for spine in ["top", "bottom", "left", "right"]:
+                ax.spines[spine].set_linewidth(0.5) 
+                ax.spines[spine].set_color("0.4") 
+            ax.spines['left'].set_position(('data', 0))
+            #ax.spines['bottomt'].set_position(('data', bounds[1][0]))
+
+            fig.tight_layout()
+            return fig
+        
+        loss_fig = create_loss_function_plot_matplotlib()
+        loss_fig.savefig(save_to_path + "/loss_function.pdf", bbox_inches="tight")
+        color_fig = create_pdf_colorbar(entropy_cmap, entropy_norm)
+        color_fig.savefig(save_to_path + "/colorbar.pdf", bbox_inches="tight")
+    
 
     if show_interactive == True:
         # Interactive slider and selection widget
@@ -540,7 +649,7 @@ def create_plot_and_save_patchwork(db_name,
                                    gif_steps = 10, 
                                    title_interactive = "", 
                                    show_interactive = False, 
-                                   entropy_strategy_strg= 'ShannonEntropyOnlyMerged',
+                                   entropy_strategy_strg= 'ShannonEntropyAll',
                                    entropy_measure = 'shannon_entropy',
                                    loss_function_strg = 'TransitionEntropyLoss',
                                    size_loss_function_strg='shannonEntropy_size_loss',
@@ -560,11 +669,13 @@ def create_plot_and_save_patchwork(db_name,
     
     
     #Create subfolder and name
+    """
     if path_to_save != None:
         path_id = os.path.join(path_to_save, "-".join(run_ids)) 
         if not os.path.exists(path_id):
             os.makedirs(path_id)
         path_to_save = path_id + f"/Patchwork_{str(gif_steps)}stepsPerTime"
+    """
 
     patchwork, controls, solver = create_patchwork(db_name=db_name, 
                                                    table_name=table_name, 
@@ -573,8 +684,10 @@ def create_plot_and_save_patchwork(db_name,
                                                    entropy_measure=entropy_measure,
                                                    loss_function_strg=loss_function_strg,
                                                    size_loss_function_strg=size_loss_function_strg,
-                                                   loss_function_coeff=loss_function_coeff)
-    if path_to_save != None:
+                                                   loss_function_coeff=loss_function_coeff,
+                                                   )
+    
+    if path_to_save != None and False:
         fig, ax = plt.subplots(figsize=(7, 6))
         plot_2D_vector_field_over_grid(patchwork.grid, solver, control=controls[0], ax=ax, display_vectorfield=True, resolution = 21)
         plot_entropy_overlay(ax, patchwork, cmap='viridis', alpha=0.5)

@@ -157,7 +157,7 @@ def plot_2D_vector_field_over_grid(grid,
     
     # Plot streamlines
     if display_streamplot:
-        ax.streamplot(X1, X2, U, V, color=streamplot_colour, linewidth=0.7, density=1, arrowsize=0.8, broken_streamlines=broken_streamlines)
+        ax.streamplot(X1, X2, U, V, color=streamplot_colour, linewidth=0.5, density=1.2, arrowsize=0.8, broken_streamlines=broken_streamlines)
 
     # Plot nullclines if requested
     if display_nullclines:
@@ -189,7 +189,8 @@ def plot_2D_vector_field_over_grid(grid,
 
     ax.set_xlabel(axis_names[0])
     ax.set_ylabel(axis_names[1])
-    ax.set_title(title, pad=20)
+    #ax.set_title(title, pad=20)
+
     
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
