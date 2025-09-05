@@ -126,8 +126,14 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         db_paths: List of database paths
         max_parallel: Maximum number of parallel processes
     """
+    print("[DEBUG] Starting multi_train_drm_subprocess function")
+    sys.stdout.flush()
+    
     if max_parallel is None:
         max_parallel = len(seeds)
+    
+    print("="*60)
+    print(f"MULTI-RUN DRM TRAINING (SUBPROCESS)")
     
     print("="*60)
     print(f"MULTI-RUN DRM TRAINING (SUBPROCESS)")
@@ -137,6 +143,9 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     print(f"Total runs: {len(seeds) * len(db_paths)}")
     print(f"Max parallel processes: {max_parallel}")
     print("="*60)
+
+    print("[DEBUG] About to generate config combinations")
+    sys.stdout.flush()
     
     # Step 1: Generate individual run configs
     override_params = {
@@ -144,15 +153,27 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         "meta.db_path": db_paths,
         "meta.output_dir": [f"{output_dir}/{config_id}/individual_runs"]
     }
+
+    print("[DEBUG] About to call generate_config_combinations")
+    sys.stdout.flush()
     
     run_configs = generate_config_combinations(
         base_config_path=config_path,
         config_id=config_id,
         override_params=override_params
     )
+
+    print(f"[DEBUG] Generated {len(run_configs)} configs")
+    sys.stdout.flush()
+    
+    print("[DEBUG] About to setup output structure")
+    sys.stdout.flush()
     
     # Step 2: Set up output directory structure
     config_output_dir = setup_output_structure(output_dir, config_id, config_path)
+
+    print("[DEBUG] Output structure setup complete")
+    sys.stdout.flush()
     
     # Resource monitoring
     print(f"Available memory: {psutil.virtual_memory().available / 1024**3:.1f} GB")
