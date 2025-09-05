@@ -158,7 +158,7 @@ def train_drm_model(config_path, multi_run=False):
         test_size=test_size,
         seed=seed,
         num_workers=1,
-        verboise=verbose
+        verbose=verbose
     )
     
     # Get dimensions from first batch
