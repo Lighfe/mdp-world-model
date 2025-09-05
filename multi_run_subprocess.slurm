@@ -74,6 +74,12 @@ echo "========================================================"
 nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=30 > "log/gpu_subprocess_${SLURM_JOBID}.log" &
 GPU_MONITOR_PID=$!
 
+# Ensure we're in the project root directory
+cd /p/projects/ou/rd4/bega/mdp/dralle/mdp-world-model
+
+echo "Current directory: $(pwd)"
+echo "Python script exists: $(test -f neural_networks/train_drm_multi_sub.py && echo 'YES' || echo 'NO')"
+
 # Execute the subprocess-based multi-run training
 python neural_networks/train_drm_multi_sub.py "$CONFIG_PATH" \
     --output-dir "$OUTPUT_DIR" \
