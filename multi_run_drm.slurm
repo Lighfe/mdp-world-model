@@ -67,7 +67,7 @@ GPU_MONITOR_PID=$!
 # Define parameters for the job (example - modify as needed)
 CONFIG_PATH="configs/base.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="test_parallel5"
+CONFIG_ID="test_parallel6"
 SEEDS="15,16,17"
 DB_PATHS="datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
 MAX_PARALLEL="6"
