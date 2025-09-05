@@ -174,24 +174,44 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
 
     print("[DEBUG] Output structure setup complete")
     sys.stdout.flush()
-    
+
     # Resource monitoring
+    print("[DEBUG] About to check memory")
+    sys.stdout.flush()
     print(f"Available memory: {psutil.virtual_memory().available / 1024**3:.1f} GB")
+
+    print("[DEBUG] About to check CPU count")
+    sys.stdout.flush()
     print(f"CPU count: {psutil.cpu_count()}")
-    
+
+    print("[DEBUG] About to start subprocess execution")
+    sys.stdout.flush()
+
     # Step 3: Execute subprocess-based parallel training
     print(f"Starting subprocess-based parallel execution...")
-    
+
+    print("[DEBUG] About to initialize variables")
+    sys.stdout.flush()
+
     total_start_time = time.time()
-    
+
     # Track active processes and results
     active_processes = {}  # {process: (run_name, run_index, total_runs)}
     completed_results = []
     pending_configs = list(enumerate(run_configs, 1))  # [(run_index, config_info)]
-    
+
+    print(f"[DEBUG] About to start initial batch, pending_configs length: {len(pending_configs)}")
+    sys.stdout.flush()
+
     # Start initial batch of processes
     while len(active_processes) < max_parallel and pending_configs:
+        print(f"[DEBUG] Starting process {len(active_processes) + 1}")
+        sys.stdout.flush()
+        
         run_index, (config_file_path, run_name, override_values) = pending_configs.pop(0)
+        
+        print(f"[DEBUG] About to call run_subprocess_training for {run_name}")
+        sys.stdout.flush()
         
         process = run_subprocess_training(
             config_file_path, run_name, run_index, len(run_configs)
