@@ -22,35 +22,18 @@ from neural_networks.utils import (
     safe_json_dump
 )
 
-def run_subprocess_training(config_file_path, run_name, run_index, total_runs):
+def run_subprocess_training(config_file_path, run_name, run_index, total_runs, log_dir):
     """
     Launch a single training run as a subprocess.
     
-    Args:
-        config_file_path: Path to config file
-        run_name: Name for this run
-        run_index: Current run number (1-based)
-        total_runs: Total number of runs
-    
-    Returns:
-        subprocess.Popen object
+    ONLY CHANGE: Use file output instead of pipes to avoid deadlock.
     """
-    print(f"[DEBUG] Entering run_subprocess_training for {run_name}")
-    sys.stdout.flush()
-    
     cmd = [
         sys.executable,  # Current Python interpreter
         "neural_networks/train_drm.py", 
         config_file_path,
         "--multi_run"
     ]
-    
-    print(f"[DEBUG] Command prepared: {' '.join(cmd)}")
-    print(f"[DEBUG] sys.executable: {sys.executable}")
-    print(f"[DEBUG] config_file_path exists: {Path(config_file_path).exists()}")
-    print(f"[DEBUG] train_drm.py exists: {Path('neural_networks/train_drm.py').exists()}")
-    print(f"[DEBUG] Current working directory: {os.getcwd()}")
-    sys.stdout.flush()
     
     print(f"Starting subprocess {run_index}/{total_runs}: {run_name}")
     print(f"Command: {' '.join(cmd)}")
@@ -60,51 +43,45 @@ def run_subprocess_training(config_file_path, run_name, run_index, total_runs):
     # Ensure each subprocess gets proper CUDA environment
     env['CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '0')
     
-    print(f"[DEBUG] Environment prepared, CUDA_VISIBLE_DEVICES: {env.get('CUDA_VISIBLE_DEVICES')}")
-    print(f"[DEBUG] About to call subprocess.Popen")
-    sys.stdout.flush()
+    # Create log file for this run
+    log_file = log_dir / f"{run_name}.log"
     
+    # PIPE FIX: Write to file instead of pipe
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Combine stderr with stdout
-            text=True,
-            env=env,
-            cwd=str(PROJECT_ROOT)  # Set working directory to project root
-        )
-        
-        print(f"[DEBUG] subprocess.Popen succeeded, PID: {process.pid}")
-        sys.stdout.flush()
-        
-        return process
-        
+        with open(log_file, 'w') as f:
+            process = subprocess.Popen(
+                cmd,
+                stdout=f,
+                stderr=subprocess.STDOUT,  # Combine stderr with stdout
+                text=True,
+                env=env,
+                cwd=str(PROJECT_ROOT)  # Set working directory to project root
+            )
     except Exception as e:
-        print(f"[DEBUG] ERROR in subprocess.Popen: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
+        print(f"ERROR starting subprocess: {e}")
         raise
+    
+    return process, log_file
 
-def monitor_process(process, run_name, run_index, total_runs):
+def monitor_process(process, log_file, run_name, run_index, total_runs):
     """
     Monitor a subprocess and collect its output.
     
-    Args:
-        process: subprocess.Popen object
-        run_name: Name of the run
-        run_index: Run index
-        total_runs: Total runs
-    
-    Returns:
-        dict: Result dictionary with success status and metrics
+    ONLY CHANGE: Read from log file instead of process.communicate()
     """
     start_time = time.time()
     
     try:
-        # Wait for process to complete and capture output
-        stdout, _ = process.communicate()
+        # Wait for process to complete
+        process.wait()
         runtime = time.time() - start_time
+        
+        # Read output from log file
+        try:
+            with open(log_file, 'r') as f:
+                output = f.read()
+        except:
+            output = "Could not read log file"
         
         success = (process.returncode == 0)
         
@@ -113,7 +90,7 @@ def monitor_process(process, run_name, run_index, total_runs):
         else:
             print(f"✗ RUN {run_index}/{total_runs}: {run_name} failed in {runtime:.1f}s (exit code: {process.returncode})")
             # Print last few lines of output for debugging
-            output_lines = stdout.split('\n')[-10:]
+            output_lines = output.split('\n')[-10:]
             print("Last 10 lines of output:")
             for line in output_lines:
                 if line.strip():
@@ -124,7 +101,7 @@ def monitor_process(process, run_name, run_index, total_runs):
             'success': success,
             'runtime': runtime,
             'exit_code': process.returncode,
-            'output_lines': len(stdout.split('\n')) if stdout else 0
+            'output_lines': len(output.split('\n')) if output else 0
         }
         
     except Exception as e:
@@ -142,17 +119,8 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     """
     Main function to orchestrate multi-run training using subprocesses.
     
-    Args:
-        config_path: Path to base YAML config
-        output_dir: Output directory for results  
-        config_id: Identifier for this configuration
-        seeds: List of random seeds
-        db_paths: List of database paths
-        max_parallel: Maximum number of parallel processes
+    ONLY CHANGE: Create log directory and pass it to subprocess functions.
     """
-    print("[DEBUG] Entering multi_train_drm_subprocess function")
-    sys.stdout.flush()
-    
     if max_parallel is None:
         max_parallel = len(seeds)
     
@@ -165,9 +133,6 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     print(f"Max parallel processes: {max_parallel}")
     print("="*60)
     
-    print("[DEBUG] About to call generate_config_combinations")
-    sys.stdout.flush()
-    
     # Step 1: Generate individual run configs
     override_params = {
         "meta.seed": seeds,
@@ -175,151 +140,67 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         "meta.output_dir": [f"{output_dir}/{config_id}/individual_runs"]
     }
     
-    print("[DEBUG] About to call generate_config_combinations with params:", override_params)
-    sys.stdout.flush()
-    
-    try:
-        run_configs = generate_config_combinations(
-            base_config_path=config_path,
-            config_id=config_id,
-            override_params=override_params
-        )
-        print(f"[DEBUG] generate_config_combinations completed, got {len(run_configs)} configs")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"[DEBUG] ERROR in generate_config_combinations: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
-        raise
-    
-    print("[DEBUG] About to call setup_output_structure")
-    sys.stdout.flush()
+    run_configs = generate_config_combinations(
+        base_config_path=config_path,
+        config_id=config_id,
+        override_params=override_params
+    )
     
     # Step 2: Set up output directory structure
-    try:
-        config_output_dir = setup_output_structure(output_dir, config_id, config_path)
-        print(f"[DEBUG] setup_output_structure completed: {config_output_dir}")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"[DEBUG] ERROR in setup_output_structure: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
-        raise
+    config_output_dir = setup_output_structure(output_dir, config_id, config_path)
     
-    print("[DEBUG] About to check resources")
-    sys.stdout.flush()
+    # PIPE FIX: Create log directory for subprocess outputs
+    log_dir = config_output_dir / "logs"
+    log_dir.mkdir(exist_ok=True)
     
     # Resource monitoring
-    try:
-        available_mem = psutil.virtual_memory().available / 1024**3
-        cpu_count = psutil.cpu_count()
-        print(f"Available memory: {available_mem:.1f} GB")
-        print(f"CPU count: {cpu_count}")
-        print("[DEBUG] Resource check completed")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"[DEBUG] ERROR in resource check: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
-        raise
+    print(f"Available memory: {psutil.virtual_memory().available / 1024**3:.1f} GB")
+    print(f"CPU count: {psutil.cpu_count()}")
     
     # Step 3: Execute subprocess-based parallel training
     print(f"Starting subprocess-based parallel execution...")
-    print("[DEBUG] About to start subprocess monitoring")
-    sys.stdout.flush()
     
     total_start_time = time.time()
     
     # Track active processes and results
-    active_processes = {}  # {process: (run_name, run_index, total_runs)}
+    active_processes = {}  # {process: (log_file, run_name, run_index, total_runs)}
     completed_results = []
     pending_configs = list(enumerate(run_configs, 1))  # [(run_index, config_info)]
     
-    print(f"[DEBUG] Created pending_configs list with {len(pending_configs)} items")
-    sys.stdout.flush()
-    
     # Start initial batch of processes
-    print(f"[DEBUG] About to start process creation loop")
-    print(f"[DEBUG] max_parallel: {max_parallel}, pending_configs length: {len(pending_configs)}")
-    sys.stdout.flush()
-    
-    process_creation_count = 0
     while len(active_processes) < max_parallel and pending_configs:
-        process_creation_count += 1
-        print(f"[DEBUG] Process creation iteration {process_creation_count}")
-        sys.stdout.flush()
+        run_index, (config_file_path, run_name, override_values) = pending_configs.pop(0)
         
-        try:
-            run_index, (config_file_path, run_name, override_values) = pending_configs.pop(0)
-            print(f"[DEBUG] Processing config {run_index}: {run_name}, path: {config_file_path}")
-            sys.stdout.flush()
-            
-            print(f"[DEBUG] About to call run_subprocess_training")
-            sys.stdout.flush()
-            
-            process = run_subprocess_training(
-                config_file_path, run_name, run_index, len(run_configs)
-            )
-            
-            print(f"[DEBUG] run_subprocess_training returned, process PID: {process.pid}")
-            sys.stdout.flush()
-            
-            active_processes[process] = (run_name, run_index, len(run_configs))
-            
-            print(f"[DEBUG] Added process to active_processes, total active: {len(active_processes)}")
-            sys.stdout.flush()
-            
-            # Small delay to stagger process starts
-            time.sleep(0.2)
-            
-        except Exception as e:
-            print(f"[DEBUG] ERROR in process creation iteration {process_creation_count}: {e}")
-            import traceback
-            traceback.print_exc()
-            sys.stdout.flush()
-            break
+        # PIPE FIX: Pass log_dir to subprocess function
+        process, log_file = run_subprocess_training(
+            config_file_path, run_name, run_index, len(run_configs), log_dir
+        )
+        active_processes[process] = (log_file, run_name, run_index, len(run_configs))
+        
+        # Small delay to stagger process starts
+        time.sleep(0.2)
     
-    print(f"[DEBUG] Exited process creation loop")
     print(f"Started initial batch of {len(active_processes)} processes")
-    sys.stdout.flush()
     
     # Monitor processes and start new ones as they complete
-    print(f"[DEBUG] About to enter monitoring loop")
-    sys.stdout.flush()
-    
     monitor_count = 0
     while active_processes or pending_configs:
-        monitor_count += 1
-        
-        if monitor_count <= 5 or monitor_count % 10 == 0:  # Print first 5 iterations, then every 10th
-            print(f"[DEBUG] Monitoring iteration {monitor_count}: active={len(active_processes)}, pending={len(pending_configs)}")
-            sys.stdout.flush()
         
         # Check for completed processes
         completed_processes = []
-        for i, process in enumerate(list(active_processes.keys())):
-            poll_result = process.poll()
-            if poll_result is not None:  # Process has finished
+        for process in list(active_processes.keys()):
+            if process.poll() is not None:  # Process has finished
                 completed_processes.append(process)
-                if monitor_count <= 5:
-                    print(f"[DEBUG] Process {i} completed with exit code: {poll_result}")
-                    sys.stdout.flush()
         
-        if monitor_count <= 5 or monitor_count % 10 == 0:
-            print(f"[DEBUG] Found {len(completed_processes)} completed processes")
-            sys.stdout.flush()
-        
-        # Debug output every 10 iterations to avoid spam, but with more detail early on
-        if monitor_count <= 10 or monitor_count % 20 == 0:
+        # Debug output every 10 iterations to avoid spam
+        monitor_count += 1
+        if monitor_count % 10 == 0:
             print(f"[Monitor] Active: {len(active_processes)}, Pending: {len(pending_configs)}, Completed this check: {len(completed_processes)}")
             
             # If no progress after many iterations, check process status
             if monitor_count > 50 and len(completed_processes) == 0:
                 print("[DEBUG] No processes completing - checking first 3 process statuses:")
-                for i, (process, (run_name, run_index, total_runs)) in enumerate(list(active_processes.items())[:3]):
+                for i, (process, (log_file, run_name, run_index, total_runs)) in enumerate(list(active_processes.items())[:3]):
                     try:
                         poll_result = process.poll()
                         print(f"  Process {i+1} ({run_name}): poll()={poll_result}, pid={process.pid}")
@@ -332,14 +213,13 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
                             print(f"    PID {process.pid} does not exist!")
                     except Exception as e:
                         print(f"    Error checking process: {e}")
-                sys.stdout.flush()
         
         # Handle completed processes
         for process in completed_processes:
-            run_name, run_index, total_runs = active_processes[process]
+            log_file, run_name, run_index, total_runs = active_processes[process]
             
             # Monitor and collect results
-            result = monitor_process(process, run_name, run_index, total_runs)
+            result = monitor_process(process, log_file, run_name, run_index, total_runs)
             completed_results.append(result)
             
             # Remove from active processes
@@ -349,22 +229,16 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
             if pending_configs:
                 run_index, (config_file_path, run_name, override_values) = pending_configs.pop(0)
                 
-                new_process = run_subprocess_training(
-                    config_file_path, run_name, run_index, len(run_configs)
+                new_process, new_log_file = run_subprocess_training(
+                    config_file_path, run_name, run_index, len(run_configs), log_dir
                 )
-                active_processes[new_process] = (run_name, run_index, len(run_configs))
+                active_processes[new_process] = (new_log_file, run_name, run_index, len(run_configs))
                 
                 time.sleep(0.2)  # Small delay
         
         # Brief sleep to avoid busy waiting
         if active_processes:
             time.sleep(1.0)
-        
-        # Safety exit after too many iterations
-        if monitor_count > 1000:
-            print(f"[DEBUG] ERROR: Monitoring loop exceeded 1000 iterations, breaking")
-            sys.stdout.flush()
-            break
     
     # Final summary
     total_time = time.time() - total_start_time
