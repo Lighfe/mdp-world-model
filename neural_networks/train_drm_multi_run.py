@@ -159,7 +159,6 @@ def multi_train_drm_model(config_path, output_dir, config_id, seeds, db_paths, m
         print(f"Started process {i+1}/{len(worker_args)}")
         
     # Add this check
-    import time
     time.sleep(5)  # Wait a moment
     print("Checking if processes are still alive:")
     for i, p in enumerate(processes):
