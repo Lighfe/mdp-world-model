@@ -198,7 +198,7 @@ class SaddleSystemDataset(BaseDataset):
         
         # Infer number of saddles from data if not provided
         if self.num_saddles is None:
-            self._infer_num_saddles()
+            self._infer_num_saddles(verbose=verbose)
 
         # After inferring num_saddles, validate against system config
         self.saddle_config = get_saddle_configuration(db_path, verbose=verbose)
@@ -211,13 +211,14 @@ class SaddleSystemDataset(BaseDataset):
         
         self._validate_samples()
     
-    def _infer_num_saddles(self):
+    def _infer_num_saddles(self, verbose=False):
         """Infer number of saddle points from control values in the data"""
         if self.cached_data:
             # Use cached data to infer saddles
             unique_controls = set(row.c0 for row in self.cached_data)
             self.num_saddles = len(unique_controls)
-            print(f"Inferred {self.num_saddles} saddle points from cached control values: {sorted(unique_controls)}")
+            if verbose:
+                print(f"Inferred {self.num_saddles} saddle points from cached control values: {sorted(unique_controls)}")
         else:
             # Original database query method
             with Session(self.engine) as session:

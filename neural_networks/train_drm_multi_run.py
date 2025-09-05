@@ -60,26 +60,21 @@ def run_single_training_wrapper(args):
             yaml.dump(config, f, default_flow_style=False, indent=2)
         
         # Execute training with multi_run=True (minimal output)
-        print(f"[DEBUG] About to call train_drm_model()")
+        # Execute training with multi_run=True (minimal output)
         model, history = train_drm_model(str(updated_config_path), multi_run=True)
         print(f"[DEBUG] train_drm_model() returned successfully")
-        
-        run_time = time.time() - run_start_time
-        
+
         # Extract key metric for immediate feedback
         accuracy = None
-        if 'test_metrics' in history and 'prob_discrete_accuracy' in history['test_metrics']:
-            accuracy = history['test_metrics']['prob_discrete_accuracy']
-        
-        print(f"✓ RUN {run_index}/{total_runs}: {run_name} [PID: {os.getpid()}] - COMPLETED in {run_time:.1f}s"
-              + (f" (acc: {accuracy:.4f})" if accuracy else ""))
-        
-        # Return simplified result for aggregation
+        if history and 'training_completed' in history:
+            accuracy = history.get('test_accuracy')
+
+        # Return simplified result
         return {
             'run_name': run_name,
             'success': True,
             'run_time': run_time,
-            'history': history  # Let aggregation function extract what it needs
+            'accuracy': accuracy  # Just the key metric
         }
         
     except Exception as e:

@@ -792,13 +792,17 @@ def train_drm_model(config_path, multi_run=False):
         visualize_transition_matrices(transition_matrices, control_values, transitions_vis_path)
     
     # Calculate training time
-    training_time = time.time() - start_time
     if not multi_run:
+        training_time = time.time() - start_time
         print(f"Training completed in {training_time:.2f} seconds")
 
     # DEBUGGING
     print(f"[DEBUG] About to return from train_drm_model()")
     sys.stdout.flush()
+
+    if multi_run:
+        # Return minimal data:
+        return None, {"training_completed": True, "test_accuracy": test_metrics.get("prob_discrete_accuracy")}
     
     return model, history
 
