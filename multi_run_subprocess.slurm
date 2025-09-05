@@ -27,6 +27,13 @@ mkdir -p log
 module load anaconda
 source activate mdp-world-model
 
+# CRITICAL FIX: Explicitly set PATH to use conda environment
+export PATH="$CONDA_PREFIX/bin:$PATH"
+
+# Verify the fix worked
+echo "Python executable after PATH fix: $(which python)"
+python -c "import torch; print(f'Torch {torch.__version__} available')"
+
 # Set environment for subprocess approach
 export OMP_NUM_THREADS=2  # Lower per-process threading since we have multiple subprocesses
 export OMP_PROC_BIND=true
