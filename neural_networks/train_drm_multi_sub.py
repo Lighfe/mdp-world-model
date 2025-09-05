@@ -26,10 +26,21 @@ def run_subprocess_training(config_file_path, run_name, run_index, total_runs, l
     """
     Launch a single training run as a subprocess.
     
-    ONLY CHANGE: Use file output instead of pipes to avoid deadlock.
+    CHANGES: 
+    1. Use file output instead of pipes to avoid deadlock
+    2. Use explicit conda Python path to ensure correct environment
     """
+    # Use explicit conda environment Python instead of sys.executable
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix and os.path.exists(f"{conda_prefix}/bin/python"):
+        python_executable = f"{conda_prefix}/bin/python"
+        print(f"Using conda Python: {python_executable}")
+    else:
+        python_executable = sys.executable
+        print(f"Using sys.executable (fallback): {python_executable}")
+    
     cmd = [
-        sys.executable,  # Current Python interpreter
+        python_executable,
         "neural_networks/train_drm.py", 
         config_file_path,
         "--multi_run"
@@ -238,7 +249,7 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         
         # Brief sleep to avoid busy waiting
         if active_processes:
-            time.sleep(1.0)
+            time.sleep(5.0)
     
     # Final summary
     total_time = time.time() - total_start_time
@@ -267,7 +278,8 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     }
     
     summary_path = config_output_dir / "run_summary.json"
-    safe_json_dump(summary, summary_path)
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f, indent=2)
     
     print(f"Summary saved to {summary_path}")
     
