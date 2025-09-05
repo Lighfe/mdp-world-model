@@ -126,14 +126,8 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         db_paths: List of database paths
         max_parallel: Maximum number of parallel processes
     """
-    print("[DEBUG] Starting multi_train_drm_subprocess function")
-    sys.stdout.flush()
-    
     if max_parallel is None:
         max_parallel = len(seeds)
-    
-    print("="*60)
-    print(f"MULTI-RUN DRM TRAINING (SUBPROCESS)")
     
     print("="*60)
     print(f"MULTI-RUN DRM TRAINING (SUBPROCESS)")
@@ -143,9 +137,6 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     print(f"Total runs: {len(seeds) * len(db_paths)}")
     print(f"Max parallel processes: {max_parallel}")
     print("="*60)
-
-    print("[DEBUG] About to generate config combinations")
-    sys.stdout.flush()
     
     # Step 1: Generate individual run configs
     override_params = {
@@ -153,65 +144,33 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         "meta.db_path": db_paths,
         "meta.output_dir": [f"{output_dir}/{config_id}/individual_runs"]
     }
-
-    print("[DEBUG] About to call generate_config_combinations")
-    sys.stdout.flush()
     
     run_configs = generate_config_combinations(
         base_config_path=config_path,
         config_id=config_id,
         override_params=override_params
     )
-
-    print(f"[DEBUG] Generated {len(run_configs)} configs")
-    sys.stdout.flush()
-    
-    print("[DEBUG] About to setup output structure")
-    sys.stdout.flush()
     
     # Step 2: Set up output directory structure
     config_output_dir = setup_output_structure(output_dir, config_id, config_path)
-
-    print("[DEBUG] Output structure setup complete")
-    sys.stdout.flush()
-
+    
     # Resource monitoring
-    print("[DEBUG] About to check memory")
-    sys.stdout.flush()
     print(f"Available memory: {psutil.virtual_memory().available / 1024**3:.1f} GB")
-
-    print("[DEBUG] About to check CPU count")
-    sys.stdout.flush()
     print(f"CPU count: {psutil.cpu_count()}")
-
-    print("[DEBUG] About to start subprocess execution")
-    sys.stdout.flush()
-
+    
     # Step 3: Execute subprocess-based parallel training
     print(f"Starting subprocess-based parallel execution...")
-
-    print("[DEBUG] About to initialize variables")
-    sys.stdout.flush()
-
+    
     total_start_time = time.time()
-
+    
     # Track active processes and results
     active_processes = {}  # {process: (run_name, run_index, total_runs)}
     completed_results = []
     pending_configs = list(enumerate(run_configs, 1))  # [(run_index, config_info)]
-
-    print(f"[DEBUG] About to start initial batch, pending_configs length: {len(pending_configs)}")
-    sys.stdout.flush()
-
+    
     # Start initial batch of processes
     while len(active_processes) < max_parallel and pending_configs:
-        print(f"[DEBUG] Starting process {len(active_processes) + 1}")
-        sys.stdout.flush()
-        
         run_index, (config_file_path, run_name, override_values) = pending_configs.pop(0)
-        
-        print(f"[DEBUG] About to call run_subprocess_training for {run_name}")
-        sys.stdout.flush()
         
         process = run_subprocess_training(
             config_file_path, run_name, run_index, len(run_configs)
@@ -221,18 +180,11 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         # Small delay to stagger process starts
         time.sleep(0.2)
     
-    print(f"[DEBUG] Exited initial batch loop, active_processes: {len(active_processes)}")
-    sys.stdout.flush()
-
     print(f"Started initial batch of {len(active_processes)} processes")
-
-    print(f"[DEBUG] About to enter monitoring loop")
-    sys.stdout.flush()
-
+    
     # Monitor processes and start new ones as they complete
+    monitor_count = 0
     while active_processes or pending_configs:
-        print(f"[DEBUG] In monitoring loop, active: {len(active_processes)}, pending: {len(pending_configs)}")
-        sys.stdout.flush()
         
         # Check for completed processes
         completed_processes = []
@@ -240,8 +192,28 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
             if process.poll() is not None:  # Process has finished
                 completed_processes.append(process)
         
-        print(f"[DEBUG] Found {len(completed_processes)} completed processes")
-        sys.stdout.flush()
+        # Debug output every 10 iterations to avoid spam
+        if monitor_count % 10 == 0:
+            print(f"[Monitor] Active: {len(active_processes)}, Pending: {len(pending_configs)}, Completed this check: {len(completed_processes)}")
+            
+            # If no progress after many iterations, check process status
+            if monitor_count > 50 and len(completed_processes) == 0:
+                print("[DEBUG] No processes completing - checking first 3 process statuses:")
+                for i, (process, (run_name, run_index, total_runs)) in enumerate(list(active_processes.items())[:3]):
+                    try:
+                        poll_result = process.poll()
+                        print(f"  Process {i+1} ({run_name}): poll()={poll_result}, pid={process.pid}")
+                        
+                        # Check if process exists on system
+                        if psutil.pid_exists(process.pid):
+                            proc_info = psutil.Process(process.pid)
+                            print(f"    Status: {proc_info.status()}, CPU%: {proc_info.cpu_percent()}")
+                        else:
+                            print(f"    PID {process.pid} does not exist!")
+                    except Exception as e:
+                        print(f"    Error checking process: {e}")
+        
+        monitor_count += 1
         
         # Handle completed processes
         for process in completed_processes:
