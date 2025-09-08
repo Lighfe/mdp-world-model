@@ -9,6 +9,9 @@ import numpy as np
 from pathlib import Path
 import psutil
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -21,6 +24,244 @@ from neural_networks.utils import (
     setup_output_structure,
     safe_json_dump
 )
+
+# Add these functions to train_drm_multi.py
+
+def _calculate_descriptive_stats(values):
+    """Calculate descriptive statistics for a list of values."""
+    if not values:
+        return None
+    
+    values = np.array(values)
+    return {
+        'mean': float(np.mean(values)),
+        'std': float(np.std(values)),
+        'median': float(np.median(values)),
+        'min': float(np.min(values)),
+        'max': float(np.max(values)),
+        'count': len(values)
+    }
+
+def _aggregate_curve_data(all_curves):
+    """Aggregate training curve data (lists of values per epoch)."""
+    if not all_curves:
+        return None
+    
+    # Convert to numpy array: (num_runs, num_epochs)
+    curves_array = np.array(all_curves)
+    
+    return {
+        'mean': curves_array.mean(axis=0).tolist(),
+        'std': curves_array.std(axis=0).tolist(), 
+        'median': np.median(curves_array, axis=0).tolist(),
+        'min': curves_array.min(axis=0).tolist(),
+        'max': curves_array.max(axis=0).tolist(),
+        'count': curves_array.shape[0]
+    }
+
+def _aggregate_epoch_dict_data(all_epoch_dicts):
+    """Aggregate epoch-based dict data (like softmax_rank_metrics, state_metrics)."""
+    if not all_epoch_dicts or not any(all_epoch_dicts):
+        return {}
+    
+    # Find all unique metric keys across all runs
+    all_keys = set()
+    for epoch_list in all_epoch_dicts:
+        for epoch_dict in epoch_list:
+            all_keys.update(epoch_dict.keys())
+    
+    # Remove 'epoch' key as it's just indexing
+    metric_keys = [key for key in all_keys if key != 'epoch']
+    
+    aggregated_metrics = {}
+    
+    for key in metric_keys:
+        # Collect values for this metric across all runs and epochs
+        all_values_for_key = []
+        
+        for epoch_list in all_epoch_dicts:
+            run_values = [epoch_dict.get(key) for epoch_dict in epoch_list if key in epoch_dict]
+            # Filter out None values
+            run_values = [v for v in run_values if v is not None]
+            all_values_for_key.append(run_values)
+        
+        # Convert to curve format if we have consistent epoch data
+        if all_values_for_key and all(len(vals) == len(all_values_for_key[0]) for vals in all_values_for_key):
+            aggregated_metrics[key] = _aggregate_curve_data(all_values_for_key)
+        else:
+            # Fallback: flatten all values and get overall stats
+            flattened = [val for run_vals in all_values_for_key for val in run_vals]
+            if flattened:
+                aggregated_metrics[key] = _calculate_descriptive_stats(flattened)
+    
+    return aggregated_metrics
+
+def plot_training_curves_aggregated(aggregated_data, save_path):
+    """
+    Plot aggregated training curves with soft std visualization.
+    Uses Paul Tol's muted color scheme for colorblind accessibility.
+    """
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    training_curves = aggregated_data.get('training_curves', {})
+    if not training_curves:
+        print("No training curves found for aggregation plot")
+        return
+    
+    # Create subplots for different loss types
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Define plot configurations
+    plot_configs = [
+        {
+            'ax': axes[0, 0],
+            'title': 'Total Loss',
+            'curves': [('train_loss', 'Train', tol_muted[0]), ('val_loss', 'Val', tol_muted[1])]
+        },
+        {
+            'ax': axes[0, 1], 
+            'title': 'State Loss',
+            'curves': [('train_state_loss', 'Train', tol_muted[0]), ('val_state_loss', 'Val', tol_muted[1])]
+        },
+        {
+            'ax': axes[1, 0],
+            'title': 'Value Loss', 
+            'curves': [('train_value_loss', 'Train', tol_muted[0]), ('val_value_loss', 'Val', tol_muted[1])]
+        },
+        {
+            'ax': axes[1, 1],
+            'title': 'Entropy Loss',
+            'curves': [('train_entropy_loss', 'Train', tol_muted[0]), ('val_entropy_loss', 'Val', tol_muted[1])]
+        }
+    ]
+    
+    for config in plot_configs:
+        ax = config['ax']
+        
+        for curve_key, label, color in config['curves']:
+            if curve_key in training_curves and training_curves[curve_key] is not None:
+                curve_data = training_curves[curve_key]
+                
+                mean_values = np.array(curve_data['mean'])
+                std_values = np.array(curve_data['std'])
+                epochs = np.arange(len(mean_values))
+                
+                # Plot mean line
+                ax.plot(epochs, mean_values, label=label, color=color, linewidth=2)
+                
+                # Plot soft std band (very transparent)
+                ax.fill_between(epochs, 
+                               mean_values - std_values, 
+                               mean_values + std_values,
+                               color=color, alpha=0.15)
+        
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Loss')
+        ax.set_title(config['title'])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Set y-axis to start from 0 if all values are positive
+        if len([curve_key for curve_key, _, _ in config['curves'] if curve_key in training_curves]) > 0:
+            all_mins = []
+            for curve_key, _, _ in config['curves']:
+                if curve_key in training_curves and training_curves[curve_key] is not None:
+                    curve_data = training_curves[curve_key]
+                    mean_vals = np.array(curve_data['mean'])
+                    std_vals = np.array(curve_data['std'])
+                    all_mins.append(np.min(mean_vals - std_vals))
+            
+            if all_mins and min(all_mins) >= 0:
+                ax.set_ylim(bottom=0)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved training curves aggregated plot to {save_path}")
+
+def aggregate_results(config_output_dir):
+    """
+    Aggregate results from all successful runs (any history_*.json file).
+    
+    Returns:
+        float: mean_test_prob_discrete_accuracy for sweeper
+    """
+    individual_runs_dir = config_output_dir / "individual_runs"
+    history_files = list(individual_runs_dir.glob("history_*.json"))
+    
+    print(f"Found {len(history_files)} successful runs to aggregate")
+    
+    if len(history_files) == 0:
+        raise ValueError("No successful runs found for aggregation")
+    
+    # Load all histories
+    histories = []
+    for history_file in history_files:
+        with open(history_file, 'r') as f:
+            history = json.load(f)
+            histories.append(history)
+    
+    aggregated = {
+        'num_successful_runs': len(histories),
+        'training_curves': {},
+        'test_metrics': {},
+        'softmax_rank_metrics': {},
+        'state_metrics': {}
+    }
+    
+    # 1. Aggregate training curves (lists per epoch)
+    training_curve_keys = [
+        'train_loss', 'train_state_loss', 'train_value_loss', 'train_entropy_loss',
+        'val_loss', 'val_state_loss', 'val_value_loss', 'val_entropy_loss'
+    ]
+    
+    for key in training_curve_keys:
+        if key in histories[0]:  # Check if key exists
+            # Collect all curves for this metric
+            all_curves = [hist[key] for hist in histories if key in hist]
+            aggregated['training_curves'][key] = _aggregate_curve_data(all_curves)
+    
+    # 2. Aggregate test metrics (single values)
+    if 'test_metrics' in histories[0]:
+        test_keys = histories[0]['test_metrics'].keys()
+        for key in test_keys:
+            values = [hist['test_metrics'][key] for hist in histories 
+                     if 'test_metrics' in hist and key in hist['test_metrics'] and hist['test_metrics'][key] is not None]
+            if values:
+                aggregated['test_metrics'][key] = _calculate_descriptive_stats(values)
+    
+    # 3. Aggregate softmax rank metrics (lists of dicts per epoch)
+    if 'softmax_rank_metrics' in histories[0] and histories[0]['softmax_rank_metrics']:
+        aggregated['softmax_rank_metrics'] = _aggregate_epoch_dict_data(
+            [hist.get('softmax_rank_metrics', []) for hist in histories]
+        )
+    
+    # 4. Aggregate state metrics (lists of dicts per epoch)  
+    if 'state_metrics' in histories[0] and histories[0]['state_metrics']:
+        aggregated['state_metrics'] = _aggregate_epoch_dict_data(
+            [hist.get('state_metrics', []) for hist in histories]
+        )
+    
+    # Save aggregated results
+    output_path = config_output_dir / "aggregated_results.json"
+    with open(output_path, 'w') as f:
+        safe_json_dump(aggregated, f, indent=2)
+    
+    print(f"Saved aggregated results to {output_path}")
+    
+    # Create training curves visualization
+    training_curves_path = config_output_dir / "training_curves_aggregated.png"
+    plot_training_curves_aggregated(aggregated, training_curves_path)
+    
+    # Return primary metric for sweeper
+    if 'prob_discrete_accuracy' in aggregated['test_metrics']:
+        mean_test_prob_discrete_accuracy = aggregated['test_metrics']['prob_discrete_accuracy']['mean']
+        print(f"Primary metric (test_prob_discrete_accuracy): {mean_test_prob_discrete_accuracy:.4f}")
+        return mean_test_prob_discrete_accuracy
+    else:
+        print("WARNING: prob_discrete_accuracy not found in test metrics")
+        return 0.0
 
 def run_subprocess_training(config_file_path, run_name, run_index, total_runs, log_dir):
     """
@@ -130,7 +371,12 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     """
     Main function to orchestrate multi-run training using subprocesses.
     
-    ONLY CHANGE: Create log directory and pass it to subprocess functions.
+    Returns:
+        tuple: (successful_runs, failed_runs, output_dir_path, primary_metric)
+            - successful_runs: List of successful run results
+            - failed_runs: List of failed run results  
+            - output_dir_path: Path to output directory
+            - primary_metric: Mean test_prob_discrete_accuracy for sweeper
     """
     if max_parallel is None:
         max_parallel = len(seeds)
@@ -282,8 +528,22 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         json.dump(summary, f, indent=2)
     
     print(f"Summary saved to {summary_path}")
-    
-    return successful_runs, failed_runs, str(config_output_dir)
+
+    # Step 4: Aggregate results
+    print(f"\n{'='*60}")
+    print("AGGREGATING RESULTS")
+    print("="*60)
+
+    try:
+        primary_metric = aggregate_results(config_output_dir)
+        print(f"Aggregation completed. Primary metric: {primary_metric:.4f}")
+    except Exception as e:
+        print(f"Error during aggregation: {e}")
+        import traceback
+        traceback.print_exc()
+        primary_metric = 0.0
+
+    return successful_runs, failed_runs, str(config_output_dir), primary_metric
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-run DRM training with subprocess execution")
@@ -340,7 +600,7 @@ def main():
             print(f"WARNING: Database file not found: {db_path}")
     
     # Execute multi-run training
-    successful_runs, failed_runs, output_dir = multi_train_drm_subprocess(
+    successful_runs, failed_runs, output_dir, primary_metric = multi_train_drm_subprocess(
         config_path=args.config_path,
         output_dir=args.output_dir,
         config_id=args.config_id,
@@ -348,6 +608,16 @@ def main():
         db_paths=db_paths,
         max_parallel=args.max_parallel
     )
+    
+    # Print final summary with primary metric
+    print(f"\n{'='*60}")
+    print("FINAL SUMMARY")
+    print("="*60)
+    print(f"Successful runs: {len(successful_runs)}")
+    print(f"Failed runs: {len(failed_runs)}")
+    print(f"Primary metric (test_prob_discrete_accuracy): {primary_metric:.4f}")
+    print(f"Results saved to: {output_dir}")
+    print("="*60)
 
 if __name__ == "__main__":
     main()

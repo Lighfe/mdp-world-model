@@ -80,11 +80,11 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # ============= END THREAD CONTROL =============
 
 # Job parameters
-CONFIG_PATH="configs/base.yaml"
+CONFIG_PATH="configs/test.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="mps_test"
-SEEDS="11,12,13,14,15"
-DB_PATHS="datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
+CONFIG_ID="test_aggregate"
+SEEDS="11,12,13,14,15,16,17,18,19,20"
+DB_PATHS="datasets/results/multi_saddle_5.db,datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
 MAX_PARALLEL="10"
 
 echo "========================================================"
