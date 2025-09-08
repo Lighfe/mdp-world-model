@@ -478,7 +478,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         def create_pdf_colorbar(colormap, norm, label=r"$\mathrm{H}_{\mathrm{Sh}}(s)$"):
 
             """Creates a matplotlib colorbar using the given colormap and normalization."""
-            fig, ax = plt.subplots(figsize=(3,0.33), dpi = 400)  # Adjust figure size for the colorbar
+            fig, ax = plt.subplots(figsize=(2.5,0.33), dpi = 400)  # Adjust figure size for the colorbar
             sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
             sm.set_array([])  # Needed for the colorbar to work
             cbar = plt.colorbar(sm, cax=ax, orientation="horizontal")
@@ -513,35 +513,51 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 x_vals = np.exp(x_vals)
 
             # Plotting
-            fig, ax = plt.subplots(figsize=(4,3))
+            fig, ax = plt.subplots(figsize=(5.1,1.7))
+
             color_cycle = plt.get_cmap('tab10').colors
 
-            for idx, (loss_type, values) in enumerate(history.items()):
-                color = color_cycle[idx % len(color_cycle)]
+            for (loss_type, values) in history.items():
+                
                 y_vals = values
                 if loss_type == 'Loss Function Value':
-                    ax.plot(x_vals, y_vals, color=color, linewidth=4, linestyle = (0,(1,4)), alpha=0.7,label=loss_type)
-                else:
-                    ax.plot(x_vals, y_vals, color=color, linewidth=2, alpha=0.7,label=loss_type)
+                    ax.plot(x_vals, y_vals, color=color_cycle[1], linewidth=3, linestyle = (0,(1,1)), alpha=0.7,label=r"$L(S)$")
+                elif loss_type == 'Total Transition Loss':
+                    ax.plot(x_vals, y_vals, color=color_cycle[0], linewidth=1.5, alpha=0.9,label=r"$L_{\mathrm{tr}}(S)$")
+                elif loss_type == 'Total Size Loss':
+                    ax.plot(x_vals, y_vals, color=color_cycle[2], linewidth=1.5, alpha=0.9,label=r"$L_{\mathrm{sz}}(S)$")
 
                 if show_derivative:
                     dy = np.gradient(values)
-                    ax.plot(x_vals, dy, color=color, linewidth=1.5, linestyle='dotted', alpha=0.5, label=f"d({loss_type})/dx")
+                    ax.plot(x_vals, dy, color=color_cycle[3], linewidth=1.5, linestyle='dotted', alpha=0.5, label=f"d({loss_type})/dx")
 
             # Vertical line for current step
             ax.axvline(x=x_vals[step], color='k', linestyle='--', linewidth=1)
 
             # Labels, legend, and styling
             ax.set_xlabel("Step", fontsize=10)
-            ax.set_ylabel("Loss", fontsize=10)
-            leg = ax.legend(fontsize=8, ncol=len(history), loc='upper center', bbox_to_anchor=(0.5, -0.45), frameon=True, facecolor='white', edgecolor='gray', framealpha=0.8  )
+            ax.set_ylabel("Global Loss", fontsize=10)
+            #leg = ax.legend(fontsize=8, ncol=len(history), loc='upper center', bbox_to_anchor=(0.5, -0.45), frameon=True, facecolor='white', edgecolor='gray', framealpha=0.8  )
+            leg = ax.legend(
+                        fontsize=10,
+                        ncol=1,                        # vertical stack
+                        loc='center left',             # align legend’s left edge
+                        bbox_to_anchor=(1.02, 0.5),    # just outside the right edge, centered vertically
+                        frameon=True,
+                        facecolor='white',
+                        edgecolor='gray',
+                        framealpha=0.8
+                    )
             leg.get_frame().set_linewidth(0.8)
             ax.grid(True, linestyle='--', alpha=0.3)
             xmin, xmax = ax.get_xlim()
-            ax.set_xlim(left=0, right=xmax) 
-            for spine in ["top", "bottom", "left", "right"]:
+            ax.set_xlim(left=0, right=xmax-1) 
+            for spine in ["bottom", "left"]:
                 ax.spines[spine].set_linewidth(0.5) 
                 ax.spines[spine].set_color("0.4") 
+            for spine in ["top", "right"]:
+                ax.spines[spine].set_linewidth(0.1) 
+                ax.spines[spine].set_color("0.8") 
             ax.spines['left'].set_position(('data', 0))
             #ax.spines['bottomt'].set_position(('data', bounds[1][0]))
 
