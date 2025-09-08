@@ -104,7 +104,7 @@ GPU_MONITOR_PID=$!
 cd /p/projects/ou/rd4/bega/mdp/dralle/mdp-world-model
 
 # Execute training with MPS
-python neural_networks/train_drm_multi_sub.py "$CONFIG_PATH" \
+python neural_networks/train_drm_multi.py "$CONFIG_PATH" \
     --output-dir "$OUTPUT_DIR" \
     --config-id "$CONFIG_ID" \
     --seeds "$SEEDS" \
