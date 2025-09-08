@@ -32,6 +32,9 @@ data_generation/figs/*
 *.swp
 .ipynb_checkpoints/
 
+# Jupyter Notebooks
+*.ipynb
+
 # Operating system files
 .DS_Store
 Thumbs.db

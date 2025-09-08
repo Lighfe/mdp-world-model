@@ -25,6 +25,13 @@ from neural_networks.utils import (
     safe_json_dump
 )
 
+from neural_networks.drm_viz import (
+    plot_training_curves_aggregated,
+    plot_softmax_rank_aggregated, 
+    plot_state_metrics_aggregated,
+    plot_test_metrics_summary
+)
+
 # Add these functions to train_drm_multi.py
 
 def _calculate_descriptive_stats(values):
@@ -210,39 +217,6 @@ def aggregate_results(config_output_dir):
         'state_metrics': {}
     }
     
-    # 1. Aggregate training curves (lists per epoch)
-    training_curve_keys = [
-        'train_loss', 'train_state_loss', 'train_value_loss', 'train_entropy_loss',
-        'val_loss', 'val_state_loss', 'val_value_loss', 'val_entropy_loss'
-    ]
-    
-    for key in training_curve_keys:
-        if key in histories[0]:  # Check if key exists
-            # Collect all curves for this metric
-            all_curves = [hist[key] for hist in histories if key in hist]
-            aggregated['training_curves'][key] = _aggregate_curve_data(all_curves)
-    
-    # 2. Aggregate test metrics (single values)
-    if 'test_metrics' in histories[0]:
-        test_keys = histories[0]['test_metrics'].keys()
-        for key in test_keys:
-            values = [hist['test_metrics'][key] for hist in histories 
-                     if 'test_metrics' in hist and key in hist['test_metrics'] and hist['test_metrics'][key] is not None]
-            if values:
-                aggregated['test_metrics'][key] = _calculate_descriptive_stats(values)
-    
-    # 3. Aggregate softmax rank metrics (lists of dicts per epoch)
-    if 'softmax_rank_metrics' in histories[0] and histories[0]['softmax_rank_metrics']:
-        aggregated['softmax_rank_metrics'] = _aggregate_epoch_dict_data(
-            [hist.get('softmax_rank_metrics', []) for hist in histories]
-        )
-    
-    # 4. Aggregate state metrics (lists of dicts per epoch)  
-    if 'state_metrics' in histories[0] and histories[0]['state_metrics']:
-        aggregated['state_metrics'] = _aggregate_epoch_dict_data(
-            [hist.get('state_metrics', []) for hist in histories]
-        )
-    
     # Save aggregated results
     output_path = config_output_dir / "aggregated_results.json"
     with open(output_path, 'w') as f:
@@ -250,9 +224,26 @@ def aggregate_results(config_output_dir):
     
     print(f"Saved aggregated results to {output_path}")
     
-    # Create training curves visualization
+    # Create all 4 visualizations
+    print("Creating aggregated visualizations...")
+    
+    # 1. Training curves
     training_curves_path = config_output_dir / "training_curves_aggregated.png"
     plot_training_curves_aggregated(aggregated, training_curves_path)
+    
+    # 2. Softmax rank evolution
+    softmax_rank_path = config_output_dir / "softmax_rank_aggregated.png"
+    plot_softmax_rank_aggregated(aggregated, softmax_rank_path)
+    
+    # 3. State metrics
+    state_metrics_path = config_output_dir / "state_metrics_aggregated.png"
+    plot_state_metrics_aggregated(aggregated, state_metrics_path)
+    
+    # 4. Test metrics summary
+    test_summary_path = config_output_dir / "test_metrics_summary.png"
+    plot_test_metrics_summary(aggregated, test_summary_path)
+    
+    print("All visualizations created successfully!")
     
     # Return primary metric for sweeper
     if 'prob_discrete_accuracy' in aggregated['test_metrics']:

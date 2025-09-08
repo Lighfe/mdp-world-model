@@ -1078,7 +1078,7 @@ def plot_softmax_rank_evolution(history, save_path):
     ax = axes[1, 1]
     
     # Plot first 4 globally normalized singular values for hidden layer
-    colors_sv = [tol_muted[4], tol_muted[5], tol_muted[6], tol_muted[7]]
+    colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
     for i in range(4):
         sv_global_key = f'hidden_sv_global_norm_{i}'
         if sv_global_key in metrics_list[0]:  # Check if globally normalized values exist
@@ -1100,6 +1100,321 @@ def plot_softmax_rank_evolution(history, save_path):
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Saved softmax rank evolution plot to {save_path}")
+
+def plot_training_curves_aggregated(aggregated_data, save_path):
+    """
+    Plot aggregated training curves with soft std visualization for train curves only.
+    Uses Paul Tol's muted color scheme consistent with other visualizations.
+    """
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    training_curves = aggregated_data.get('training_curves', {})
+    if not training_curves:
+        print("No training curves found for aggregation plot")
+        return
+    
+    # Create subplots for different loss types
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Define plot configurations - align colors with existing train/val pattern
+    plot_configs = [
+        {
+            'ax': axes[0, 0],
+            'title': 'Total Loss',
+            'train_key': 'train_loss',
+            'val_key': 'val_loss'
+        },
+        {
+            'ax': axes[0, 1], 
+            'title': 'State Loss',
+            'train_key': 'train_state_loss',
+            'val_key': 'val_state_loss'
+        },
+        {
+            'ax': axes[1, 0],
+            'title': 'Value Loss', 
+            'train_key': 'train_value_loss',
+            'val_key': 'val_value_loss'
+        },
+        {
+            'ax': axes[1, 1],
+            'title': 'Entropy Loss',
+            'train_key': 'train_entropy_loss',
+            'val_key': 'val_entropy_loss'
+        }
+    ]
+    
+    # Consistent train/val colors
+    train_color = tol_muted[1]  # '#332288' - blue (to match existing)
+    val_color = tol_muted[2]    # '#DDCC77' - yellow (to match existing)
+    
+    for config in plot_configs:
+        ax = config['ax']
+        
+        # Plot training curve with std band
+        if config['train_key'] in training_curves and training_curves[config['train_key']] is not None:
+            curve_data = training_curves[config['train_key']]
+            
+            mean_values = np.array(curve_data['mean'])
+            std_values = np.array(curve_data['std'])
+            epochs = np.arange(len(mean_values))
+            
+            # Plot mean line
+            ax.plot(epochs, mean_values, label='Train', color=train_color, linewidth=2)
+            
+            # Plot std band (higher alpha as requested)
+            ax.fill_between(epochs, 
+                           mean_values - std_values, 
+                           mean_values + std_values,
+                           color=train_color, alpha=0.1)
+        
+        # Plot validation curve (NO std band)
+        if config['val_key'] in training_curves and training_curves[config['val_key']] is not None:
+            curve_data = training_curves[config['val_key']]
+            
+            mean_values = np.array(curve_data['mean'])
+            epochs = np.arange(len(mean_values))
+            
+            # Plot mean line only
+            ax.plot(epochs, mean_values, label='Val', color=val_color, linewidth=2)
+        
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Loss')
+        ax.set_title(config['title'])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(bottom=0)  # Start from 0 for loss curves
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved training curves aggregated plot to {save_path}")
+
+def plot_softmax_rank_aggregated(aggregated_data, save_path):
+    """
+    Plot aggregated softmax rank evolution with std bands.
+    Based on existing plot_softmax_rank_evolution structure.
+    """
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    softmax_metrics = aggregated_data.get('softmax_rank_metrics', {})
+    if not softmax_metrics:
+        print("No softmax rank metrics found for aggregation plot")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Helper function to plot metric with std
+    def plot_metric_with_std(ax, metric_key, label, color, epochs):
+        if metric_key in softmax_metrics and softmax_metrics[metric_key] is not None:
+            data = softmax_metrics[metric_key]
+            mean_values = np.array(data['mean'])
+            std_values = np.array(data['std'])
+            
+            ax.plot(epochs, mean_values, 'o-', label=label, 
+                   linewidth=2, markersize=4, color=color)
+            ax.fill_between(epochs, 
+                           mean_values - std_values, 
+                           mean_values + std_values,
+                           color=color, alpha=0.1)
+    
+    # Determine epochs from any available metric
+    epochs = None
+    for key in ['hidden_rank', 'logit_rank']:
+        if key in softmax_metrics and softmax_metrics[key] is not None:
+            epochs = np.arange(len(softmax_metrics[key]['mean']))
+            break
+    
+    if epochs is None:
+        print("No epoch data found for softmax rank metrics")
+        return
+    
+    # Plot 1: Rank Evolution
+    ax = axes[0, 0]
+    plot_metric_with_std(ax, 'hidden_rank', 'Hidden Layer (32-dim)', tol_muted[0], epochs)
+    plot_metric_with_std(ax, 'logit_rank', 'Logit Layer (4-dim)', tol_muted[1], epochs)
+    plot_metric_with_std(ax, 'softmax_rank', 'Post-Softmax (4-dim)', tol_muted[2], epochs)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Numerical Rank')
+    ax.set_title('Rank Evolution During Training')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=0)
+    
+    # Plot 2: Norm Evolution
+    ax = axes[0, 1]
+    plot_metric_with_std(ax, 'hidden_frobenius_norm', 'Hidden ||A₃||_F', tol_muted[0], epochs)
+    plot_metric_with_std(ax, 'logit_frobenius_norm', 'Logit ||M₄||_F', tol_muted[1], epochs)
+    plot_metric_with_std(ax, 'softmax_frobenius_norm', 'Softmax ||A₄||_F', tol_muted[2], epochs)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Frobenius Norm')
+    ax.set_title('Norm Evolution During Training')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    
+    # Plot 3: Logit Singular Values (if globally normalized data exists)
+    ax = axes[1, 0]
+    colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
+    for i in range(4):
+        sv_key = f'logit_sv_global_norm_{i}'
+        plot_metric_with_std(ax, sv_key, f'σ_{i+1}', colors_sv[i], epochs)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Globally Normalized Singular Value')
+    ax.set_title('Logit Singular Values Evolution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.1)
+    
+    # Plot 4: Hidden Singular Values
+    ax = axes[1, 1]
+    colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
+    for i in range(4):
+        sv_key = f'hidden_sv_global_norm_{i}'
+        plot_metric_with_std(ax, sv_key, f'σ_{i+1}', colors_sv[i], epochs)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Globally Normalized Singular Value')
+    ax.set_title('Hidden Layer Singular Values Evolution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.1)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved softmax rank aggregated plot to {save_path}")
+
+def plot_state_metrics_aggregated(aggregated_data, save_path):
+    """
+    Plot aggregated state assignment quality metrics (stability and sharpness).
+    """
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    state_metrics = aggregated_data.get('state_metrics', {})
+    if not state_metrics:
+        print("No state metrics found for aggregation plot")
+        return
+    
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Helper function to plot metric with std
+    def plot_metric_with_std(ax, metric_key, label, color, epochs):
+        if metric_key in state_metrics and state_metrics[metric_key] is not None:
+            data = state_metrics[metric_key]
+            mean_values = np.array(data['mean'])
+            std_values = np.array(data['std'])
+            
+            ax.plot(epochs, mean_values, 'o-', label=label, 
+                   linewidth=2, markersize=4, color=color)
+            ax.fill_between(epochs, 
+                           mean_values - std_values, 
+                           mean_values + std_values,
+                           color=color, alpha=0.1)
+    
+    # Determine epochs from available metrics
+    epochs = None
+    for key in ['sharpness_mean', 'dominant_stability']:
+        if key in state_metrics and state_metrics[key] is not None:
+            epochs = np.arange(len(state_metrics[key]['mean']))
+            break
+    
+    if epochs is None:
+        print("No epoch data found for state metrics")
+        return
+    
+    # Plot 1: Sharpness metrics
+    ax = axes[0]
+    plot_metric_with_std(ax, 'sharpness_mean', 'Mean Sharpness', tol_muted[0], epochs)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Entropy (Sharpness)')
+    ax.set_title('State Assignment Sharpness')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 2: Stability metrics
+    ax = axes[1]
+    plot_metric_with_std(ax, 'dominant_stability', 'Dominant State Stability', tol_muted[0], epochs)
+    
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Stability (%)')
+    ax.set_title('State Assignment Stability')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 100)  # Stability is in percentage
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved state metrics aggregated plot to {save_path}")
+
+def plot_test_metrics_summary(aggregated_data, save_path):
+    """
+    Plot summary of final test metrics with error bars.
+    """
+    # Paul Tol's muted color scheme
+    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
+    
+    test_metrics = aggregated_data.get('test_metrics', {})
+    if not test_metrics:
+        print("No test metrics found for summary plot")
+        return
+    
+    # Define important metrics and their display names
+    metric_configs = [
+        ('test_loss', 'Total Loss'),
+        ('test_state_loss', 'State Loss'), 
+        ('test_value_loss', 'Value Loss'),
+        ('prob_discrete_accuracy', 'Discrete Accuracy'),
+        ('test_batch_entropy', 'Batch Entropy'),
+        ('test_individual_entropy', 'Individual Entropy')
+    ]
+    
+    # Filter to available metrics
+    available_metrics = [(key, name) for key, name in metric_configs 
+                        if key in test_metrics and test_metrics[key] is not None]
+    
+    if not available_metrics:
+        print("No available test metrics for summary plot")
+        return
+    
+    # Create bar plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    metric_names = [name for _, name in available_metrics]
+    means = [test_metrics[key]['mean'] for key, _ in available_metrics]
+    stds = [test_metrics[key]['std'] for key, _ in available_metrics]
+    
+    x_pos = np.arange(len(metric_names))
+    bars = ax.bar(x_pos, means, yerr=stds, capsize=5, 
+                  color=[tol_muted[i % len(tol_muted)] for i in range(len(metric_names))],
+                  alpha=0.8, edgecolor='black', linewidth=0.5)
+    
+    ax.set_xlabel('Test Metrics')
+    ax.set_ylabel('Value')
+    ax.set_title('Final Test Metrics Summary')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(metric_names, rotation=45, ha='right')
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    # Add value labels on bars
+    for i, (bar, mean, std) in enumerate(zip(bars, means, stds)):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + std + 0.01*max(means),
+                f'{mean:.3f}±{std:.3f}', ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved test metrics summary plot to {save_path}")
+
 
 ### NOTE: NO LONGER IN USE
 

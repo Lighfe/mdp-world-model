@@ -82,7 +82,7 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # Job parameters
 CONFIG_PATH="configs/test.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="test_aggregate"
+CONFIG_ID="test_aggregate2"
 SEEDS="11,12,13,14,15,16,17,18,19,20"
 DB_PATHS="datasets/results/multi_saddle_5.db,datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
 MAX_PARALLEL="10"
@@ -113,22 +113,35 @@ python neural_networks/train_drm_multi.py "$CONFIG_PATH" \
 
 PYTHON_EXIT_CODE=$?
 
-# Stop GPU monitoring
-kill $GPU_MONITOR_PID 2>/dev/null
-
 # ============= MPS CLEANUP =============
 echo "Cleaning up CUDA MPS..."
-echo quit | nvidia-cuda-mps-control
 
-# Wait for MPS to shut down
-sleep 2
+# First try graceful shutdown
+echo quit | nvidia-cuda-mps-control 2>/dev/null || true
 
-if pgrep nvidia-cuda-mps > /dev/null; then
-    echo "Warning: MPS processes still running, force killing..."
-    pkill nvidia-cuda-mps
+# Wait for graceful shutdown
+sleep 3
+
+# Check if MPS processes are still running (only our own processes)
+if pgrep -u $USER nvidia-cuda-mps > /dev/null; then
+    echo "Warning: MPS processes still running, attempting cleanup..."
+    
+    # Try to kill only our own MPS processes
+    pkill -u $USER nvidia-cuda-mps 2>/dev/null || true
+    
+    # Wait a bit more
+    sleep 2
+    
+    # Final check
+    if pgrep -u $USER nvidia-cuda-mps > /dev/null; then
+        echo "Some MPS processes may still be running (not owned by us or protected)"
+        pgrep -u $USER nvidia-cuda-mps || echo "No processes found"
+    else
+        echo "✓ All MPS processes cleaned up"
+    fi
+else
+    echo "✓ MPS processes already terminated"
 fi
-
-echo "✓ CUDA MPS cleaned up"
 # ============= END MPS CLEANUP =============
 
 echo "========================================================"
