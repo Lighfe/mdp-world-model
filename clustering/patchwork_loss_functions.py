@@ -59,8 +59,8 @@ class TransitionEntropyLoss(LossFunction):
 
     def __init__(self, size_loss_function=None):
         self.current_transition_entropy = 0
-        self.history_of_loss_function_values = {"Total Transition Entropy": [], "Loss Function Value": []}
-        self.loss_function_strg = f"Loss_fct = Total Transition Entropy"
+        self.history_of_loss_function_values = {"Total Transition Loss": [], "Loss Function Value": []}
+        self.loss_function_strg = f"Loss_fct = Total Transition Loss"
 
     @property
     def current_total_loss_function_value(self):
@@ -72,7 +72,7 @@ class TransitionEntropyLoss(LossFunction):
         :param patchwork: The patchwork object containing the patches.
         """
         self.current_transition_entropy = patchwork.entropy_strategy.overall_entropy
-        self.history_of_loss_function_values["Total Transition Entropy"].append(self.current_transition_entropy)
+        self.history_of_loss_function_values["Total Transition Loss"].append(self.current_transition_entropy)
         self.history_of_loss_function_values["Loss Function Value"].append(self.current_total_loss_function_value)
 
 
@@ -85,7 +85,7 @@ class TransitionEntropyLoss(LossFunction):
         :param patch2_rel: The relevance of the second patch.
         """
         self.current_transition_entropy = total_transition_entropy
-        self.history_of_loss_function_values["Total Transition Entropy"].append(self.current_transition_entropy)
+        self.history_of_loss_function_values["Total Transition Loss"].append(self.current_transition_entropy)
         self.history_of_loss_function_values["Loss Function Value"].append(self.current_total_loss_function_value)
         return
 

@@ -6,6 +6,8 @@ import platform
 import psutil
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar, differential_evolution
 from data_generation.models import tech_substitution as ts
@@ -57,7 +59,6 @@ class Simulator:
         n_samples = X.shape[0]
         
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-
 
         # Convert control to full array format
         control = np.array(control)

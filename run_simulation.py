@@ -202,20 +202,7 @@ def run_and_store_simulations(config, config_path):
                 save_result=True )
 
             logging.info(f"Simulation completed for control: {control}")         
-            # Store results
-            db_path = config['output_path'] / config['db-name']
-            simulator.store_results_to_sqlite(db_path)
-            
-            run_ids.append(simulator.configs['run_id'][0])
-            
-            # Log success and details
-            logging.info(f"Stored {len(simulator.results)} rows of simulation data in {db_path}")
-            logging.info("\nConfigs data:")
-            logging.info(simulator.configs.drop(columns=['cell_centers'], errors='ignore').head().to_string())  # Exclude 'cell centers' column for logging
-            logging.info("\nResults data:")
-            logging.info(simulator.results.head().to_string())  # Convert DataFrame to string for logging
-            
-            logging.info("Simulation completed successfully.")
+           
         
         except Exception as e:
             # Remove stored data for the specific run_ids from the database in case of failure
@@ -234,7 +221,23 @@ def run_and_store_simulations(config, config_path):
                           
             sys.exit(1)  # Exit the program with an error code
         
-        time.sleep(1) #if the simulation is faster than 1 second, to keep the ids unique
+        time.sleep(2) #if the simulation is faster than 1 second, to keep the ids unique
+
+    
+           
+    # Store results
+    run_ids = simulator.configs['run_id']
+    db_path = config['output_path'] / config['db-name']
+    simulator.store_results_to_sqlite(db_path)
+        
+    # Log success and details
+    logging.info(f"Stored {len(simulator.results)} rows of simulation data in {db_path}")
+    logging.info("\nConfigs data:")
+    logging.info(simulator.configs.drop(columns=['cell_centers'], errors='ignore').head().to_string())  # Exclude 'cell centers' column for logging
+    logging.info("\nResults data:")
+    logging.info(simulator.results.head().to_string())  # Convert DataFrame to string for logging
+    
+    logging.info("Simulation completed successfully.")
 
     if config["run_dict_name"]:
         key_run_dict, run_dict = update_run_dict(config)
