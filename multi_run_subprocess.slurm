@@ -2,12 +2,12 @@
 #SBATCH --job-name=multi_run_mps
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=1:30:00
+#SBATCH --time=00:40:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=11
+#SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
+#SBATCH --mem=24G
 #SBATCH --output=log/multi_run_mps_%j.out
 #SBATCH --error=log/multi_run_mps_%j.err
 
@@ -82,10 +82,10 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # Job parameters
 CONFIG_PATH="configs/test.yaml"
 OUTPUT_DIR="neural_networks/output"
-CONFIG_ID="test_aggregate2"
+CONFIG_ID="test_aggregate3"
 SEEDS="11,12,13,14,15,16,17,18,19,20"
 DB_PATHS="datasets/results/multi_saddle_5.db,datasets/results/multi_saddle_7.db,datasets/results/multi_saddle_9.db"
-MAX_PARALLEL="10"
+MAX_PARALLEL="15"
 
 echo "========================================================"
 echo "Starting MPS-enabled multiprocessing training..."

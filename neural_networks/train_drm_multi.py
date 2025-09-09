@@ -32,8 +32,6 @@ from neural_networks.drm_viz import (
     plot_test_metrics_summary
 )
 
-# Add these functions to train_drm_multi.py
-
 def _calculate_descriptive_stats(values):
     """Calculate descriptive statistics for a list of values."""
     if not values:
@@ -103,90 +101,6 @@ def _aggregate_epoch_dict_data(all_epoch_dicts):
     
     return aggregated_metrics
 
-def plot_training_curves_aggregated(aggregated_data, save_path):
-    """
-    Plot aggregated training curves with soft std visualization.
-    Uses Paul Tol's muted color scheme for colorblind accessibility.
-    """
-    # Paul Tol's muted color scheme
-    tol_muted = ['#CC6677', '#332288', '#DDCC77', '#117733', '#88CCEE', '#882255', '#44AA99', '#999933']
-    
-    training_curves = aggregated_data.get('training_curves', {})
-    if not training_curves:
-        print("No training curves found for aggregation plot")
-        return
-    
-    # Create subplots for different loss types
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
-    # Define plot configurations
-    plot_configs = [
-        {
-            'ax': axes[0, 0],
-            'title': 'Total Loss',
-            'curves': [('train_loss', 'Train', tol_muted[0]), ('val_loss', 'Val', tol_muted[1])]
-        },
-        {
-            'ax': axes[0, 1], 
-            'title': 'State Loss',
-            'curves': [('train_state_loss', 'Train', tol_muted[0]), ('val_state_loss', 'Val', tol_muted[1])]
-        },
-        {
-            'ax': axes[1, 0],
-            'title': 'Value Loss', 
-            'curves': [('train_value_loss', 'Train', tol_muted[0]), ('val_value_loss', 'Val', tol_muted[1])]
-        },
-        {
-            'ax': axes[1, 1],
-            'title': 'Entropy Loss',
-            'curves': [('train_entropy_loss', 'Train', tol_muted[0]), ('val_entropy_loss', 'Val', tol_muted[1])]
-        }
-    ]
-    
-    for config in plot_configs:
-        ax = config['ax']
-        
-        for curve_key, label, color in config['curves']:
-            if curve_key in training_curves and training_curves[curve_key] is not None:
-                curve_data = training_curves[curve_key]
-                
-                mean_values = np.array(curve_data['mean'])
-                std_values = np.array(curve_data['std'])
-                epochs = np.arange(len(mean_values))
-                
-                # Plot mean line
-                ax.plot(epochs, mean_values, label=label, color=color, linewidth=2)
-                
-                # Plot soft std band (very transparent)
-                ax.fill_between(epochs, 
-                               mean_values - std_values, 
-                               mean_values + std_values,
-                               color=color, alpha=0.15)
-        
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Loss')
-        ax.set_title(config['title'])
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        # Set y-axis to start from 0 if all values are positive
-        if len([curve_key for curve_key, _, _ in config['curves'] if curve_key in training_curves]) > 0:
-            all_mins = []
-            for curve_key, _, _ in config['curves']:
-                if curve_key in training_curves and training_curves[curve_key] is not None:
-                    curve_data = training_curves[curve_key]
-                    mean_vals = np.array(curve_data['mean'])
-                    std_vals = np.array(curve_data['std'])
-                    all_mins.append(np.min(mean_vals - std_vals))
-            
-            if all_mins and min(all_mins) >= 0:
-                ax.set_ylim(bottom=0)
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Saved training curves aggregated plot to {save_path}")
-
 def aggregate_results(config_output_dir):
     """
     Aggregate results from all successful runs (any history_*.json file).
@@ -216,6 +130,39 @@ def aggregate_results(config_output_dir):
         'softmax_rank_metrics': {},
         'state_metrics': {}
     }
+    
+    # 1. Aggregate training curves (lists per epoch)
+    training_curve_keys = [
+        'train_loss', 'train_state_loss', 'train_value_loss', 'train_entropy_loss',
+        'val_loss', 'val_state_loss', 'val_value_loss', 'val_entropy_loss'
+    ]
+    
+    for key in training_curve_keys:
+        if key in histories[0]:  # Check if key exists
+            # Collect all curves for this metric
+            all_curves = [hist[key] for hist in histories if key in hist]
+            aggregated['training_curves'][key] = _aggregate_curve_data(all_curves)
+    
+    # 2. Aggregate test metrics (single values)
+    if 'test_metrics' in histories[0]:
+        test_keys = histories[0]['test_metrics'].keys()
+        for key in test_keys:
+            values = [hist['test_metrics'][key] for hist in histories 
+                     if 'test_metrics' in hist and key in hist['test_metrics'] and hist['test_metrics'][key] is not None]
+            if values:
+                aggregated['test_metrics'][key] = _calculate_descriptive_stats(values)
+    
+    # 3. Aggregate softmax rank metrics (lists of dicts per epoch)
+    if 'softmax_rank_metrics' in histories[0] and histories[0]['softmax_rank_metrics']:
+        aggregated['softmax_rank_metrics'] = _aggregate_epoch_dict_data(
+            [hist.get('softmax_rank_metrics', []) for hist in histories]
+        )
+    
+    # 4. Aggregate state metrics (lists of dicts per epoch)  
+    if 'state_metrics' in histories[0] and histories[0]['state_metrics']:
+        aggregated['state_metrics'] = _aggregate_epoch_dict_data(
+            [hist.get('state_metrics', []) for hist in histories]
+        )
     
     # Save aggregated results
     output_path = config_output_dir / "aggregated_results.json"
@@ -253,6 +200,7 @@ def aggregate_results(config_output_dir):
     else:
         print("WARNING: prob_discrete_accuracy not found in test metrics")
         return 0.0
+
 
 def run_subprocess_training(config_file_path, run_name, run_index, total_runs, log_dir):
     """
