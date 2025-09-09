@@ -1215,22 +1215,11 @@ def plot_softmax_rank_aggregated(aggregated_data, save_path):
             epochs = np.arange(len(mean_values))  # Individual epochs per metric
             
             ax.plot(epochs, mean_values, 'o-', label=label, 
-                linewidth=2, markersize=4, color=color)
+                   linewidth=2, markersize=4, color=color)
             ax.fill_between(epochs, 
-                        mean_values - std_values, 
-                        mean_values + std_values,
-                        color=color, alpha=0.1)
-    
-    # Determine epochs from any available metric
-    epochs = None
-    for key in ['hidden_rank', 'logit_rank']:
-        if key in softmax_metrics and softmax_metrics[key] is not None:
-            epochs = np.arange(len(softmax_metrics[key]['mean']))
-            break
-    
-    if epochs is None:
-        print("No epoch data found for softmax rank metrics")
-        return
+                           mean_values - std_values, 
+                           mean_values + std_values,
+                           color=color, alpha=0.1)
     
     # Plot 1: Rank Evolution
     ax = axes[0, 0]
@@ -1263,7 +1252,7 @@ def plot_softmax_rank_aggregated(aggregated_data, save_path):
     colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
     for i in range(4):
         sv_key = f'logit_sv_global_norm_{i}'
-        plot_metric_with_std(ax, sv_key, f'σ_{i+1}', colors_sv[i], epochs)
+        plot_metric_with_std(ax, sv_key, f'σ_{i+1}', colors_sv[i])
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Globally Normalized Singular Value')
@@ -1277,7 +1266,7 @@ def plot_softmax_rank_aggregated(aggregated_data, save_path):
     colors_sv = [tol_muted[0], tol_muted[1], tol_muted[2], tol_muted[3]]
     for i in range(4):
         sv_key = f'hidden_sv_global_norm_{i}'
-        plot_metric_with_std(ax, sv_key, f'σ_{i+1}', colors_sv[i], epochs)
+        plot_metric_with_std(ax, sv_key, f'σ_{i+1}', colors_sv[i])
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Globally Normalized Singular Value')
