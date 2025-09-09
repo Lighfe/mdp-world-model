@@ -1207,18 +1207,19 @@ def plot_softmax_rank_aggregated(aggregated_data, save_path):
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     
     # Helper function to plot metric with std
-    def plot_metric_with_std(ax, metric_key, label, color, epochs):
+    def plot_metric_with_std(ax, metric_key, label, color):
         if metric_key in softmax_metrics and softmax_metrics[metric_key] is not None:
             data = softmax_metrics[metric_key]
             mean_values = np.array(data['mean'])
             std_values = np.array(data['std'])
+            epochs = np.arange(len(mean_values))  # Individual epochs per metric
             
             ax.plot(epochs, mean_values, 'o-', label=label, 
-                   linewidth=2, markersize=4, color=color)
+                linewidth=2, markersize=4, color=color)
             ax.fill_between(epochs, 
-                           mean_values - std_values, 
-                           mean_values + std_values,
-                           color=color, alpha=0.1)
+                        mean_values - std_values, 
+                        mean_values + std_values,
+                        color=color, alpha=0.1)
     
     # Determine epochs from any available metric
     epochs = None
@@ -1233,9 +1234,9 @@ def plot_softmax_rank_aggregated(aggregated_data, save_path):
     
     # Plot 1: Rank Evolution
     ax = axes[0, 0]
-    plot_metric_with_std(ax, 'hidden_rank', 'Hidden Layer (32-dim)', tol_muted[0], epochs)
-    plot_metric_with_std(ax, 'logit_rank', 'Logit Layer (4-dim)', tol_muted[1], epochs)
-    plot_metric_with_std(ax, 'softmax_rank', 'Post-Softmax (4-dim)', tol_muted[2], epochs)
+    plot_metric_with_std(ax, 'hidden_rank', 'Hidden Layer (32-dim)', tol_muted[0])
+    plot_metric_with_std(ax, 'logit_rank', 'Logit Layer (4-dim)', tol_muted[1])
+    plot_metric_with_std(ax, 'softmax_rank', 'Post-Softmax (4-dim)', tol_muted[2])
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Numerical Rank')
@@ -1304,34 +1305,24 @@ def plot_state_metrics_aggregated(aggregated_data, save_path):
     
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
-    # Helper function to plot metric with std
-    def plot_metric_with_std(ax, metric_key, label, color, epochs):
+    # Helper function to plot metric with std - FIXED to handle epochs per metric
+    def plot_metric_with_std(ax, metric_key, label, color):
         if metric_key in state_metrics and state_metrics[metric_key] is not None:
             data = state_metrics[metric_key]
             mean_values = np.array(data['mean'])
             std_values = np.array(data['std'])
+            epochs = np.arange(len(mean_values))  # Create epochs for THIS metric specifically
             
             ax.plot(epochs, mean_values, 'o-', label=label, 
                    linewidth=2, markersize=4, color=color)
             ax.fill_between(epochs, 
                            mean_values - std_values, 
                            mean_values + std_values,
-                           color=color, alpha=0.1)
-    
-    # Determine epochs from available metrics
-    epochs = None
-    for key in ['sharpness_mean', 'dominant_stability']:
-        if key in state_metrics and state_metrics[key] is not None:
-            epochs = np.arange(len(state_metrics[key]['mean']))
-            break
-    
-    if epochs is None:
-        print("No epoch data found for state metrics")
-        return
+                           color=color, alpha=0.1)  # Lower alpha for softer appearance
     
     # Plot 1: Sharpness metrics
     ax = axes[0]
-    plot_metric_with_std(ax, 'sharpness_mean', 'Mean Sharpness', tol_muted[0], epochs)
+    plot_metric_with_std(ax, 'sharpness_mean', 'Mean Sharpness', tol_muted[1])
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Entropy (Sharpness)')
@@ -1341,7 +1332,7 @@ def plot_state_metrics_aggregated(aggregated_data, save_path):
     
     # Plot 2: Stability metrics
     ax = axes[1]
-    plot_metric_with_std(ax, 'dominant_stability', 'Dominant State Stability', tol_muted[0], epochs)
+    plot_metric_with_std(ax, 'dominant_stability', 'Dominant State Stability', tol_muted[1])
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Stability (%)')
