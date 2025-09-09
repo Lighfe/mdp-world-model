@@ -191,6 +191,14 @@ def aggregate_results(config_output_dir):
     plot_test_metrics_summary(aggregated, test_summary_path)
     
     print("All visualizations created successfully!")
+
+    # DEBUG
+    print("DEBUG: Checking aggregated test_metrics in memory:")
+    print(f"  aggregated['test_metrics'] keys: {list(aggregated['test_metrics'].keys())}")
+    if 'prob_discrete_accuracy' in aggregated['test_metrics']:
+        print(f"  prob_discrete_accuracy found: {aggregated['test_metrics']['prob_discrete_accuracy']}")
+    else:
+        print("  prob_discrete_accuracy NOT found in memory")
     
     # Return primary metric for sweeper
     if 'prob_discrete_accuracy' in aggregated['test_metrics']:

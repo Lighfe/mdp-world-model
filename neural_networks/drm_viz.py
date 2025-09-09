@@ -1247,9 +1247,9 @@ def plot_softmax_rank_aggregated(aggregated_data, save_path):
     
     # Plot 2: Norm Evolution
     ax = axes[0, 1]
-    plot_metric_with_std(ax, 'hidden_frobenius_norm', 'Hidden ||A₃||_F', tol_muted[0], epochs)
-    plot_metric_with_std(ax, 'logit_frobenius_norm', 'Logit ||M₄||_F', tol_muted[1], epochs)
-    plot_metric_with_std(ax, 'softmax_frobenius_norm', 'Softmax ||A₄||_F', tol_muted[2], epochs)
+    plot_metric_with_std(ax, 'hidden_frobenius_norm', 'Hidden ||A₃||_F', tol_muted[0])
+    plot_metric_with_std(ax, 'logit_frobenius_norm', 'Logit ||M₄||_F', tol_muted[1])
+    plot_metric_with_std(ax, 'softmax_frobenius_norm', 'Softmax ||A₄||_F', tol_muted[2])
     
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Frobenius Norm')
