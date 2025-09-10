@@ -11,6 +11,7 @@ import subprocess
 import optuna
 import json
 import time
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -20,7 +21,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from scripts.parameter_sampler import SweepParameterSampler
-from scripts.config_generator import create_sweep_folder, create_trial_config, copy_sweep_config_to_folder, cleanup_trial_config
+from scripts.config_generator import create_trial_config
 
 
 class ParameterSweep:
@@ -29,7 +30,8 @@ class ParameterSweep:
     """
     
     def __init__(self, sweep_config_path: str, sweep_id: Optional[str] = None, 
-                 study_name: Optional[str] = None, storage: Optional[str] = None):
+                 study_name: Optional[str] = None, storage: Optional[str] = None,
+                 sampler_type: str = 'balanced'):
         """
         Initialize parameter sweep.
         
@@ -38,31 +40,90 @@ class ParameterSweep:
             sweep_id: Custom sweep identifier (default: datetime-based)
             study_name: Optuna study name (default: from sweep config)
             storage: Optuna storage URL (default: SQLite in sweep folder)
+            sampler_type: TPE sampler type ('explorative', 'balanced', 'exploitative')
         """
         self.sweep_config_path = sweep_config_path
         self.sampler = SweepParameterSampler(sweep_config_path)
         
-        # Create sweep folder
-        self.sweep_folder = create_sweep_folder(sweep_id)
-        print(f"Sweep folder: {self.sweep_folder}")
-        
-        # Copy sweep config to folder for reference
-        copy_sweep_config_to_folder(sweep_config_path, self.sweep_folder)
-        
-        # Get sweep info
+        # Get sweep info early
         self.sweep_info = self.sampler.get_sweep_info()
         self.multi_run_config = self.sampler.get_multi_run_config()
         
-        # Set up Optuna study
+        # Generate sweep_id if not provided
+        if sweep_id is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            sweep_id = f"sweep_{timestamp}"
+        
+        self.sweep_id = sweep_id
+        
+        # === OUTPUT DIRECTORY ORGANIZATION ===
+        # Create main sweep directory in neural_networks/output/{sweep_id}/
+        self.sweep_output_dir = Path("neural_networks/output") / sweep_id
+        self.sweep_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create subdirectories for organization
+        self.sweep_configs_dir = self.sweep_output_dir / "configs"
+        self.sweep_configs_dir.mkdir(exist_ok=True)
+        
+        print(f"Sweep output directory: {self.sweep_output_dir}")
+        
+        # Copy sweep config to sweep directory for reference
+        dest_config = self.sweep_configs_dir / "sweep_config.yaml"
+        shutil.copy2(sweep_config_path, dest_config)
+        
+        # Set up Optuna study with custom sampler
         self.study_name = study_name or self.sweep_info.get('name', 'parameter_sweep')
-        self.storage = storage or f"sqlite:///{self.sweep_folder}/optuna_study.db"
+        self.storage = storage or f"sqlite:///{self.sweep_output_dir.absolute()}/optuna_study.db"
+        self.sampler_type = sampler_type
         
         # Results tracking
-        self.results_file = self.sweep_folder / "sweep_results.json"
+        self.results_file = self.sweep_output_dir / "sweep_results.json"
         self.trial_results = []
         
         print(f"Study name: {self.study_name}")
         print(f"Storage: {self.storage}")
+        print(f"Sampler type: {sampler_type}")
+        
+        # Create custom TPE sampler based on type
+        self.tpe_sampler = self._create_tpe_sampler(sampler_type)
+        print(f"TPE sampler configured: {type(self.tpe_sampler).__name__}")
+    
+    def _create_tpe_sampler(self, sampler_type: str) -> optuna.samplers.TPESampler:
+        """
+        Create TPE sampler based on exploration/exploitation strategy.
+        
+        Args:
+            sampler_type: 'explorative', 'balanced', or 'exploitative'
+            
+        Returns:
+            Configured TPESampler
+        """
+        if sampler_type == 'explorative':
+            # MORE EXPLORATIVE: Good for unknown parameter spaces
+            return optuna.samplers.TPESampler(
+                n_startup_trials=20,      # More random exploration (20% of 100 trials)
+                gamma=0.35,               # Top 35% considered "good" (less selective)
+                multivariate=True,        # Model parameter interactions (critical!)
+                seed=42                   # Reproducible results
+            )
+        
+        elif sampler_type == 'exploitative':
+            # MORE EXPLOITATIVE: Good when you have prior knowledge
+            return optuna.samplers.TPESampler(
+                n_startup_trials=8,       # Less random exploration (8% of 100 trials)
+                gamma=0.15,               # Top 15% considered "good" (very selective)
+                multivariate=True,        # Model parameter interactions
+                seed=42
+            )
+        
+        else:  # 'balanced' (default)
+            # BALANCED: Recommended for most cases
+            return optuna.samplers.TPESampler(
+                n_startup_trials=12,      # Standard exploration (12% of 100 trials)
+                gamma=0.25,               # Top 25% considered "good" (standard)
+                multivariate=True,        # Model parameter interactions
+                seed=42
+            )
     
     def objective(self, trial: optuna.Trial) -> float:
         """
@@ -79,6 +140,7 @@ class ParameterSweep:
         
         print(f"\n{'='*60}")
         print(f"STARTING TRIAL {trial_number}")
+        print(f"Sampler type: {self.sampler_type}")
         print(f"{'='*60}")
         
         try:
@@ -89,17 +151,17 @@ class ParameterSweep:
                 if value is not None:
                     print(f"  {key}: {value}")
             
-            # 2. Generate trial config file
+            # 2. Generate trial config file - store in sweep configs directory
             trial_config_path = create_trial_config(
                 trial_params=trial_params,
                 trial_number=trial_number,
                 base_config_path=self.sampler.get_base_config_path(),
-                sweep_folder=self.sweep_folder,
+                sweep_folder=self.sweep_configs_dir,  # Store in {sweep_id}/configs/
                 fixed_params=self.sampler.get_fixed_params()
             )
             print(f"Generated config: {trial_config_path}")
             
-            # 3. Run train_drm_multi.py
+            # 3. Run train_drm_multi.py with organized output directory structure
             performance_metric = self._run_training(trial_config_path, trial_number)
             
             # 4. Record results
@@ -163,20 +225,24 @@ class ParameterSweep:
         db_paths_str = ','.join(self.multi_run_config['db_paths'])
         max_parallel = self.multi_run_config.get('max_parallel', 15)
         
-        # Construct command
+        # === ORGANIZED OUTPUT DIRECTORY STRUCTURE ===
+        # Each trial gets its own subdirectory: {sweep_id}/trial_000/, trial_001/, etc.
+        trial_config_id = f"trial_{trial_number:03d}"
+        
+        # Construct command - output will go to neural_networks/output/{sweep_id}/trial_xxx/
         cmd = [
             sys.executable,  # Use same Python interpreter
             'neural_networks/train_drm_multi.py',
             config_path,
-            '--output-dir', 'neural_networks/output',
-            '--config-id', f'trial_{trial_number:03d}',
+            '--output-dir', str(self.sweep_output_dir),  # neural_networks/output/{sweep_id}
+            '--config-id', trial_config_id,              # Creates trial_000/, trial_001/, etc.
             '--seeds', seeds_str,
             '--db-paths', db_paths_str,
             '--max-parallel', str(max_parallel)
         ]
         
         print(f"Running command: {' '.join(cmd)}")
-        print(f"Working directory: {os.getcwd()}")
+        print(f"Trial output will be in: {self.sweep_output_dir}/{trial_config_id}/")
         
         # Run the command
         try:
@@ -269,18 +335,42 @@ class ParameterSweep:
         print(f"Seeds per trial: {len(self.multi_run_config['seeds'])}")
         print(f"Datasets per trial: {len(self.multi_run_config['db_paths'])}")
         print(f"Total runs: {n_trials * len(self.multi_run_config['seeds']) * len(self.multi_run_config['db_paths'])}")
+        print(f"Output directory: {self.sweep_output_dir}")
+        print(f"Sampler: {self.sampler_type} TPE")
         print(f"{'='*60}")
         
-        # Create or load Optuna study
-        study = optuna.create_study(
-            study_name=self.study_name,
-            storage=self.storage,
-            direction='maximize',  # We want to maximize prob_discrete_accuracy
-            load_if_exists=True
-        )
+        # === DEBUG DATABASE CREATION ===
+        print(f"Creating Optuna study...")
+        print(f"  Study name: {self.study_name}")
+        print(f"  Storage: {self.storage}")
+        print(f"  Storage path exists: {Path(self.storage.replace('sqlite:///', '')).parent.exists()}")
         
-        print(f"Study created/loaded: {study.study_name}")
-        print(f"Previous trials: {len(study.trials)}")
+        try:
+            # Create or load Optuna study
+            study = optuna.create_study(
+                study_name=self.study_name,
+                storage=self.storage,
+                direction='maximize',  # We want to maximize prob_discrete_accuracy
+                sampler=self.tpe_sampler,  # Use custom TPE sampler
+                load_if_exists=True
+            )
+            
+            print(f"✓ Study created/loaded successfully: {study.study_name}")
+            print(f"Previous trials: {len(study.trials)}")
+            
+            # Verify database file was created
+            db_path = Path(self.storage.replace('sqlite:///', ''))
+            if db_path.exists():
+                print(f"✓ Database file created: {db_path}")
+                print(f"  Database size: {db_path.stat().st_size} bytes")
+            else:
+                print(f"⚠ Database file not found at: {db_path}")
+        
+        except Exception as e:
+            print(f"✗ Error creating study: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         # Run optimization
         sweep_start_time = time.time()
@@ -294,6 +384,13 @@ class ParameterSweep:
             print(f"\nSweep failed with error: {e}")
             import traceback
             traceback.print_exc()
+        
+        # === FINAL DATABASE CHECK ===
+        db_path = Path(self.storage.replace('sqlite:///', ''))
+        if db_path.exists():
+            print(f"\n✓ Final database check: {db_path} ({db_path.stat().st_size} bytes)")
+        else:
+            print(f"\n✗ Final database check: Database missing at {db_path}")
         
         # Final summary
         sweep_runtime = time.time() - sweep_start_time
@@ -315,10 +412,28 @@ class ParameterSweep:
             for key, value in study.best_params.items():
                 print(f"  {key}: {value}")
         
-        print(f"\nResults saved to: {self.sweep_folder}")
-        print(f"Optuna database: {self.storage}")
-        print(f"Trial configs: {self.sweep_folder}/trial_*_config.yaml")
-        print(f"Results summary: {self.results_file}")
+        print(f"\nResults saved to: {self.sweep_output_dir}")
+        print(f"Directory structure:")
+        print(f"  - Trial outputs: {self.sweep_output_dir}/trial_*/")
+        print(f"  - Trial configs: {self.sweep_configs_dir}/trial_*_config.yaml")
+        print(f"  - Optuna database: {self.sweep_output_dir}/optuna_study.db")
+        print(f"  - Results summary: {self.results_file}")
+        
+        # TPE Sampler info
+        print(f"\nTPE Sampler Summary ({self.sampler_type}):")
+        if self.sampler_type == 'explorative':
+            print(f"  - Used 20 random startup trials")
+            print(f"  - Considered top 35% as 'good' trials")  
+            print(f"  - Good for unknown parameter spaces")
+        elif self.sampler_type == 'exploitative':
+            print(f"  - Used 8 random startup trials")
+            print(f"  - Considered top 15% as 'good' trials")
+            print(f"  - Good for refining known good regions")
+        else:
+            print(f"  - Used 12 random startup trials")
+            print(f"  - Considered top 25% as 'good' trials")
+            print(f"  - Balanced exploration/exploitation")
+        
         print(f"{'='*60}")
 
 
@@ -346,6 +461,12 @@ def main():
         "--storage", 
         help="Optuna storage URL (default: SQLite in sweep folder)"
     )
+    parser.add_argument(
+        "--sampler-type",
+        choices=['explorative', 'balanced', 'exploitative'],
+        default='balanced',
+        help="TPE sampler strategy (default: balanced)"
+    )
     
     args = parser.parse_args()
     
@@ -360,7 +481,8 @@ def main():
             sweep_config_path=args.sweep_config,
             sweep_id=args.sweep_id,
             study_name=args.study_name,
-            storage=args.storage
+            storage=args.storage,
+            sampler_type=args.sampler_type
         )
         
         sweep.run_sweep(n_trials=args.n_trials)

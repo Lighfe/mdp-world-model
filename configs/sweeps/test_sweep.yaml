@@ -1,0 +1,67 @@
+# configs/sweeps/test_sweep.yaml
+# Reduced parameter set for testing (7 parameters instead of 14)
+
+sweep:
+  name: "test_sweep"
+  description: "Test sweep with reduced parameter set - 7 key parameters"
+  n_trials: 30
+
+# Base configuration to start from
+base_config: "configs/base.yaml"
+
+# Parameters to optimize (reduced from 14 to 7 key parameters)
+parameters:
+  # Model architecture - most important
+  model.num_states:
+    type: "categorical"
+    choices: [4, 6, 8]
+    
+  # Gumbel softmax (conditional) - TOP PRIORITY 
+  model.use_gumbel:
+    type: "categorical"
+    choices: [true, false]
+    
+  model.initial_temp:
+    type: "float"
+    min: 0.5
+    max: 5.0
+    condition: "model.use_gumbel == true"
+    
+  # Training parameters - high impact
+  training.lr:
+    type: "float"
+    min: 1.0e-5
+    max: 1.0e-3
+    log: true
+    
+  # Derived parameters (computed from other params)
+  training.min_lr:
+    type: "derived"
+    formula: "training.lr / 10"
+    
+  # Loss function - high impact
+  loss.state_loss_type:
+    type: "categorical"
+    choices: ["kl_div", "cross_entropy", "mse", "js_div"]
+    
+  loss.state_loss_weight:
+    type: "float"
+    conditional_ranges:
+      - condition: "loss.state_loss_type in [\"cross_entropy\", \"kl_div\"]"
+        min: 0.5
+        max: 2.0
+      - condition: "loss.state_loss_type == \"js_div\""
+        min: 1.0
+        max: 3.0
+      - condition: "loss.state_loss_type == \"mse\""
+        min: 1.0
+        max: 5.0
+
+# Multi-run settings (keep all seeds and datasets for statistical significance)
+multi_run:
+  seeds: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  db_paths: 
+    - "datasets/results/multi_saddle_5.db"
+    - "datasets/results/multi_saddle_7.db"
+    - "datasets/results/multi_saddle_9.db"
+  max_parallel: 15
