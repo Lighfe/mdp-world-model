@@ -1,173 +1,307 @@
 #!/usr/bin/env python3
 """
-Step 1: Parameter Space Definition and Sampling
-Handles conditional parameter sampling for Optuna-based hyperparameter optimization.
+Generic Parameter Sampler - Data-Driven Approach
+Reads sweep configuration files and samples parameters accordingly.
 """
 
+import yaml
 import optuna
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+import re
 
 
-def sample_trial_params(trial: optuna.Trial) -> Dict[str, Any]:
+class SweepParameterSampler:
     """
-    Sample trial parameters with proper conditional logic.
-    
-    Args:
-        trial: Optuna trial object for parameter sampling
-    
-    Returns:
-        Dictionary of sampled parameters ready for config generation
+    Data-driven parameter sampler that reads sweep configuration files.
     """
-    params = {}
     
-    # === MODEL ARCHITECTURE ===
-    params['num_states'] = trial.suggest_categorical('num_states', [4, 6, 8])
-    params['value_method'] = trial.suggest_categorical('value_method', ['angular', 'identity'])
-    
-    # Target encoder settings (conditional)
-    params['use_target_encoder'] = trial.suggest_categorical('use_target_encoder', [True, False])
-    if params['use_target_encoder']:
-        params['ema_decay'] = trial.suggest_float('ema_decay', 0.5, 0.996)
-    else:
-        params['ema_decay'] = None  # Will use base.yaml default
-    
-    # Gumbel softmax settings (conditional) 
-    params['use_gumbel'] = trial.suggest_categorical('use_gumbel', [True, False])
-    if params['use_gumbel']:
-        params['initial_temp'] = trial.suggest_float('initial_temp', 0.5, 5.0)
-        params['min_temp'] = trial.suggest_float('min_temp', 0.1, 0.5)
-    else:
-        params['initial_temp'] = None
-        params['min_temp'] = None
-    
-    # Weight initialization
-    params['encoder_init_method'] = trial.suggest_categorical('encoder_init_method', ['he', 'xavier_uniform'])
-    
-    # === TRAINING PARAMETERS ===
-    params['epochs'] = trial.suggest_int('epochs', 50, 100, step=25)  # [50, 75, 100]
-    
-    # Optimizer settings
-    params['lr'] = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
-    params['weight_decay'] = trial.suggest_float('weight_decay', 0.0, 0.04)
-    
-    # Derived parameter: min_lr = lr / 10
-    params['min_lr'] = params['lr'] / 10
-    
-    # === LOSS FUNCTION CONFIGURATION ===
-    params['state_loss_type'] = trial.suggest_categorical('state_loss_type', 
-                                                         ['kl_div', 'cross_entropy', 'mse', 'js_div'])
-    
-    # Loss weights - keep wide ranges for now, but we can add conditional logic later
-    params['state_loss_weight'] = trial.suggest_float('state_loss_weight', 0.5, 5.0)
-    params['value_loss_weight'] = trial.suggest_float('value_loss_weight', 0.1, 5.0)
-    
-    # Entropy regularization (conditional)
-    params['use_entropy_reg'] = trial.suggest_categorical('use_entropy_reg', [True, False])
-    # Note: entropy_weight and related params are not in the reduced parameter set
-    
-    return params
-
-
-def validate_trial_params(params: Dict[str, Any]) -> bool:
-    """
-    Validate that sampled parameters are consistent.
-    
-    Args:
-        params: Dictionary of trial parameters
-    
-    Returns:
-        True if parameters are valid, False otherwise
-    """
-    # Check conditional dependencies
-    if params['use_target_encoder'] and params['ema_decay'] is None:
-        return False
-    
-    if params['use_gumbel'] and (params['initial_temp'] is None or params['min_temp'] is None):
-        return False
-    
-    # Check value constraints
-    if params['use_gumbel'] and params['min_temp'] > params['initial_temp']:
-        return False
-    
-    if params['min_lr'] > params['lr']:
-        return False
-    
-    return True
-
-
-def print_trial_summary(trial_number: int, params: Dict[str, Any]) -> None:
-    """
-    Print a human-readable summary of trial parameters.
-    
-    Args:
-        trial_number: Current trial number
-        params: Dictionary of trial parameters
-    """
-    print(f"\n=== TRIAL {trial_number} PARAMETERS ===")
-    
-    # Model architecture
-    print("Model:")
-    print(f"  num_states: {params['num_states']}")
-    print(f"  value_method: {params['value_method']}")
-    print(f"  encoder_init_method: {params['encoder_init_method']}")
-    
-    if params['use_target_encoder']:
-        print(f"  use_target_encoder: True (ema_decay: {params['ema_decay']:.3f})")
-    else:
-        print(f"  use_target_encoder: False")
-    
-    if params['use_gumbel']:
-        print(f"  use_gumbel: True (initial_temp: {params['initial_temp']:.2f}, min_temp: {params['min_temp']:.2f})")
-    else:
-        print(f"  use_gumbel: False")
-    
-    # Training
-    print("Training:")
-    print(f"  epochs: {params['epochs']}")
-    print(f"  lr: {params['lr']:.2e} (min_lr: {params['min_lr']:.2e})")
-    print(f"  weight_decay: {params['weight_decay']:.3f}")
-    
-    # Loss
-    print("Loss:")
-    print(f"  state_loss_type: {params['state_loss_type']}")
-    print(f"  state_loss_weight: {params['state_loss_weight']:.2f}")
-    print(f"  value_loss_weight: {params['value_loss_weight']:.2f}")
-    print(f"  use_entropy_reg: {params['use_entropy_reg']}")
-    
-    print("="*40)
-
-
-def test_parameter_sampling(n_samples: int = 5) -> None:
-    """
-    Test the parameter sampling function with dummy trials.
-    
-    Args:
-        n_samples: Number of test samples to generate
-    """
-    print("Testing parameter sampling function...")
-    
-    for i in range(n_samples):
-        # Create a dummy study and trial for testing
-        study = optuna.create_study()
-        trial = study.ask()
+    def __init__(self, sweep_config_path: str):
+        """
+        Initialize sampler with sweep configuration.
         
-        # Sample parameters
-        params = sample_trial_params(trial)
+        Args:
+            sweep_config_path: Path to sweep configuration YAML file
+        """
+        self.sweep_config_path = sweep_config_path
+        self.sweep_config = self._load_sweep_config()
+        self.parameters = self.sweep_config.get('parameters', {})
         
-        # Validate
-        is_valid = validate_trial_params(params)
+    def _load_sweep_config(self) -> Dict[str, Any]:
+        """Load and validate sweep configuration."""
+        with open(self.sweep_config_path, 'r') as f:
+            config = yaml.safe_load(f)
         
-        # Print summary
-        print_trial_summary(i+1, params)
-        print(f"Validation: {'✓ VALID' if is_valid else '✗ INVALID'}")
+        required_sections = ['sweep', 'base_config', 'parameters']
+        for section in required_sections:
+            if section not in config:
+                raise ValueError(f"Missing required section '{section}' in sweep config")
         
-        if not is_valid:
-            print("ERROR: Invalid parameter combination detected!")
-            break
+        return config
     
-    print(f"\nTesting completed. Generated {n_samples} parameter sets.")
+    def _evaluate_condition(self, condition: str, current_params: Dict[str, Any]) -> bool:
+        """
+        Evaluate a conditional parameter expression.
+        
+        Args:
+            condition: String condition like "model.use_gumbel == true"
+            current_params: Currently sampled parameters
+            
+        Returns:
+            True if condition is met, False otherwise
+        """
+        if not condition:
+            return True
+            
+        # Simple condition parsing: "param_path == value" or "param_path != value"
+        if "==" in condition:
+            param_path, expected_value = condition.split("==")
+            param_path = param_path.strip()
+            expected_value = expected_value.strip()
+            
+            # Convert string values to appropriate types
+            if expected_value.lower() == 'true':
+                expected_value = True
+            elif expected_value.lower() == 'false':
+                expected_value = False
+            elif expected_value.replace('.', '').isdigit():
+                expected_value = float(expected_value) if '.' in expected_value else int(expected_value)
+            else:
+                expected_value = expected_value.strip('"\'')  # Remove quotes
+            
+            return current_params.get(param_path) == expected_value
+            
+        elif "!=" in condition:
+            param_path, expected_value = condition.split("!=")
+            param_path = param_path.strip()
+            expected_value = expected_value.strip()
+            
+            # Same type conversion as above
+            if expected_value.lower() == 'true':
+                expected_value = True
+            elif expected_value.lower() == 'false':
+                expected_value = False
+            elif expected_value.replace('.', '').isdigit():
+                expected_value = float(expected_value) if '.' in expected_value else int(expected_value)
+            else:
+                expected_value = expected_value.strip('"\'')
+            
+            return current_params.get(param_path) != expected_value
+        
+        # If we can't parse the condition, assume it's true (safe fallback)
+        print(f"Warning: Could not parse condition '{condition}', assuming True")
+        return True
+    
+    def _compute_derived_parameter(self, formula: str, current_params: Dict[str, Any]) -> Any:
+        """
+        Compute a derived parameter from a formula.
+        
+        Args:
+            formula: Formula string like "training.lr / 10"
+            current_params: Currently sampled parameters
+            
+        Returns:
+            Computed value
+        """
+        # Simple formula evaluation - for now just handle basic arithmetic
+        # Replace parameter paths with actual values
+        eval_formula = formula
+        for param_path, value in current_params.items():
+            if param_path in formula:
+                eval_formula = eval_formula.replace(param_path, str(value))
+        
+        try:
+            # Use eval for simple arithmetic (be careful in production!)
+            result = eval(eval_formula)
+            return result
+        except Exception as e:
+            print(f"Error evaluating formula '{formula}': {e}")
+            return None
+    
+    def sample_trial_params(self, trial: optuna.Trial) -> Dict[str, Any]:
+        """
+        Sample trial parameters based on sweep configuration.
+        
+        Args:
+            trial: Optuna trial object
+            
+        Returns:
+            Dictionary of sampled parameters
+        """
+        sampled_params = {}
+        
+        # First pass: sample non-conditional and non-derived parameters
+        for param_path, param_config in self.parameters.items():
+            param_type = param_config.get('type')
+            condition = param_config.get('condition')
+            
+            # Skip conditional and derived parameters for now
+            if condition or param_type == 'derived':
+                continue
+                
+            value = self._sample_single_parameter(trial, param_path, param_config)
+            sampled_params[param_path] = value
+        
+        # Second pass: sample conditional parameters
+        for param_path, param_config in self.parameters.items():
+            param_type = param_config.get('type')
+            condition = param_config.get('condition')
+            
+            if condition and param_type != 'derived':
+                if self._evaluate_condition(condition, sampled_params):
+                    value = self._sample_single_parameter(trial, param_path, param_config)
+                    sampled_params[param_path] = value
+                else:
+                    sampled_params[param_path] = None  # Will be skipped in config generation
+        
+        # Third pass: compute derived parameters
+        for param_path, param_config in self.parameters.items():
+            param_type = param_config.get('type')
+            
+            if param_type == 'derived':
+                formula = param_config.get('formula')
+                if formula:
+                    value = self._compute_derived_parameter(formula, sampled_params)
+                    sampled_params[param_path] = value
+        
+        return sampled_params
+    
+    def _sample_single_parameter(self, trial: optuna.Trial, param_path: str, param_config: Dict[str, Any]) -> Any:
+        """
+        Sample a single parameter based on its configuration.
+        
+        Args:
+            trial: Optuna trial object
+            param_path: Parameter path (e.g., "model.num_states")
+            param_config: Parameter configuration dict
+            
+        Returns:
+            Sampled parameter value
+        """
+        param_type = param_config.get('type')
+        
+        if param_type == 'categorical':
+            choices = param_config.get('choices', [])
+            return trial.suggest_categorical(param_path, choices)
+        
+        elif param_type == 'float':
+            min_val = param_config.get('min')
+            max_val = param_config.get('max')
+            log_scale = param_config.get('log', False)
+            
+            if log_scale:
+                return trial.suggest_float(param_path, min_val, max_val, log=True)
+            else:
+                return trial.suggest_float(param_path, min_val, max_val)
+        
+        elif param_type == 'int':
+            min_val = param_config.get('min')
+            max_val = param_config.get('max')
+            step = param_config.get('step', 1)
+            return trial.suggest_int(param_path, min_val, max_val, step=step)
+        
+        else:
+            raise ValueError(f"Unknown parameter type '{param_type}' for parameter '{param_path}'")
+    
+    def get_sweep_info(self) -> Dict[str, Any]:
+        """Get sweep metadata."""
+        return self.sweep_config.get('sweep', {})
+    
+    def get_multi_run_config(self) -> Dict[str, Any]:
+        """Get multi-run configuration for train_drm_multi.py."""
+        return self.sweep_config.get('multi_run', {})
+    
+    def get_base_config_path(self) -> str:
+        """Get base configuration file path."""
+        return self.sweep_config.get('base_config', 'configs/base.yaml')
+    
+    def get_fixed_params(self) -> Dict[str, Any]:
+        """Get fixed parameters for this sweep."""
+        return self.sweep_config.get('fixed_params', {})
+
+
+def test_generic_sampler():
+    """Test the generic parameter sampler."""
+    # For testing, create a minimal sweep config
+    test_config = {
+        'sweep': {'name': 'test_sweep', 'n_trials': 10},
+        'base_config': 'configs/base.yaml',
+        'parameters': {
+            'model.num_states': {
+                'type': 'categorical',
+                'choices': [4, 6, 8]
+            },
+            'model.use_gumbel': {
+                'type': 'categorical',
+                'choices': [True, False]
+            },
+            'model.initial_temp': {
+                'type': 'float',
+                'min': 0.5,
+                'max': 5.0,
+                'condition': 'model.use_gumbel == true'
+            },
+            'training.lr': {
+                'type': 'float',
+                'min': 1e-5,
+                'max': 1e-3,
+                'log': True
+            },
+            'training.min_lr': {
+                'type': 'derived',
+                'formula': 'training.lr / 10'
+            }
+        }
+    }
+    
+    # Save test config
+    test_config_path = "/tmp/test_sweep_config.yaml"
+    with open(test_config_path, 'w') as f:
+        yaml.dump(test_config, f, default_flow_style=False, indent=2)
+    
+    # Test the sampler
+    print("Testing generic parameter sampler...")
+    
+    try:
+        sampler = SweepParameterSampler(test_config_path)
+        
+        # Generate a few test samples
+        for i in range(3):
+            study = optuna.create_study()
+            trial = study.ask()
+            
+            params = sampler.sample_trial_params(trial)
+            
+            print(f"\n=== Test Sample {i+1} ===")
+            for key, value in params.items():
+                print(f"  {key}: {value}")
+            
+            # Verify conditional logic
+            if params.get('model.use_gumbel') is True:
+                assert params.get('model.initial_temp') is not None, "initial_temp should be sampled when use_gumbel=True"
+            else:
+                assert params.get('model.initial_temp') is None, "initial_temp should be None when use_gumbel=False"
+            
+            # Verify derived parameter
+            expected_min_lr = params.get('training.lr', 0) / 10
+            actual_min_lr = params.get('training.min_lr')
+            assert abs(actual_min_lr - expected_min_lr) < 1e-10, f"Derived parameter incorrect: {actual_min_lr} != {expected_min_lr}"
+        
+        print("\n✓ All tests passed!")
+        
+    except Exception as e:
+        print(f"Error during testing: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        # Cleanup
+        try:
+            import os
+            os.remove(test_config_path)
+        except:
+            pass
 
 
 if __name__ == "__main__":
-    # Test the parameter sampling
-    test_parameter_sampling(n_samples=3)
+    test_generic_sampler()
