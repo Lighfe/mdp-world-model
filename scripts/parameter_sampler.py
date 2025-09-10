@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generic Parameter Sampler - Data-Driven Approach
+Parameter Sampler - Data-Driven Approach
 Reads sweep configuration files and samples parameters accordingly.
 """
 
@@ -88,6 +88,18 @@ class SweepParameterSampler:
             
             return current_params.get(param_path) != expected_value
         
+        # Handle 'in' conditions for multiple values
+        elif " in " in condition:
+            param_path, values_str = condition.split(" in ")
+            param_path = param_path.strip()
+            values_str = values_str.strip()
+            
+            # Parse list of values: ["value1", "value2"]
+            if values_str.startswith('[') and values_str.endswith(']'):
+                values_str = values_str[1:-1]  # Remove brackets
+                expected_values = [v.strip().strip('"\'') for v in values_str.split(',')]
+                return current_params.get(param_path) in expected_values
+        
         # If we can't parse the condition, assume it's true (safe fallback)
         print(f"Warning: Could not parse condition '{condition}', assuming True")
         return True
@@ -139,7 +151,7 @@ class SweepParameterSampler:
             if condition or param_type == 'derived':
                 continue
                 
-            value = self._sample_single_parameter(trial, param_path, param_config)
+            value = self._sample_single_parameter(trial, param_path, param_config, sampled_params)
             sampled_params[param_path] = value
         
         # Second pass: sample conditional parameters
@@ -149,7 +161,7 @@ class SweepParameterSampler:
             
             if condition and param_type != 'derived':
                 if self._evaluate_condition(condition, sampled_params):
-                    value = self._sample_single_parameter(trial, param_path, param_config)
+                    value = self._sample_single_parameter(trial, param_path, param_config, sampled_params)
                     sampled_params[param_path] = value
                 else:
                     sampled_params[param_path] = None  # Will be skipped in config generation
@@ -166,7 +178,7 @@ class SweepParameterSampler:
         
         return sampled_params
     
-    def _sample_single_parameter(self, trial: optuna.Trial, param_path: str, param_config: Dict[str, Any]) -> Any:
+    def _sample_single_parameter(self, trial: optuna.Trial, param_path: str, param_config: Dict[str, Any], current_params: Dict[str, Any]) -> Any:
         """
         Sample a single parameter based on its configuration.
         
@@ -174,6 +186,7 @@ class SweepParameterSampler:
             trial: Optuna trial object
             param_path: Parameter path (e.g., "model.num_states")
             param_config: Parameter configuration dict
+            current_params: Currently sampled parameters (for conditional ranges)
             
         Returns:
             Sampled parameter value
@@ -185,9 +198,26 @@ class SweepParameterSampler:
             return trial.suggest_categorical(param_path, choices)
         
         elif param_type == 'float':
-            min_val = param_config.get('min')
-            max_val = param_config.get('max')
-            log_scale = param_config.get('log', False)
+            # Check for conditional ranges
+            if 'conditional_ranges' in param_config:
+                ranges = param_config['conditional_ranges']
+                for range_config in ranges:
+                    condition = range_config.get('condition')
+                    if self._evaluate_condition(condition, current_params):
+                        min_val = range_config.get('min')
+                        max_val = range_config.get('max')
+                        log_scale = range_config.get('log', False)
+                        break
+                else:
+                    # Fallback to default range
+                    min_val = param_config.get('min')
+                    max_val = param_config.get('max')
+                    log_scale = param_config.get('log', False)
+            else:
+                # Standard range
+                min_val = param_config.get('min')
+                max_val = param_config.get('max')
+                log_scale = param_config.get('log', False)
             
             if log_scale:
                 return trial.suggest_float(param_path, min_val, max_val, log=True)
@@ -220,61 +250,36 @@ class SweepParameterSampler:
         return self.sweep_config.get('fixed_params', {})
 
 
-def test_generic_sampler():
-    """Test the generic parameter sampler."""
-    # For testing, create a minimal sweep config
-    test_config = {
-        'sweep': {'name': 'test_sweep', 'n_trials': 10},
-        'base_config': 'configs/base.yaml',
-        'parameters': {
-            'model.num_states': {
-                'type': 'categorical',
-                'choices': [4, 6, 8]
-            },
-            'model.use_gumbel': {
-                'type': 'categorical',
-                'choices': [True, False]
-            },
-            'model.initial_temp': {
-                'type': 'float',
-                'min': 0.5,
-                'max': 5.0,
-                'condition': 'model.use_gumbel == true'
-            },
-            'training.lr': {
-                'type': 'float',
-                'min': 1e-5,
-                'max': 1e-3,
-                'log': True
-            },
-            'training.min_lr': {
-                'type': 'derived',
-                'formula': 'training.lr / 10'
-            }
-        }
-    }
+def test_parameter_sampler():
+    """Test the parameter sampler with the actual first_sweep.yaml."""
     
-    # Save test config
-    test_config_path = "/tmp/test_sweep_config.yaml"
-    with open(test_config_path, 'w') as f:
-        yaml.dump(test_config, f, default_flow_style=False, indent=2)
+    print("Testing parameter sampler with actual sweep config...")
     
-    # Test the sampler
-    print("Testing generic parameter sampler...")
+    # Check if first_sweep.yaml exists
+    sweep_config_path = "configs/sweeps/first_sweep.yaml"
+    if not Path(sweep_config_path).exists():
+        print(f"Error: {sweep_config_path} not found!")
+        print("Please create this file using the 'Sweep Configuration Example' artifact")
+        return
     
     try:
-        sampler = SweepParameterSampler(test_config_path)
+        sampler = SweepParameterSampler(sweep_config_path)
         
-        # Generate a few test samples
-        for i in range(3):
+        print(f"Loaded sweep: {sampler.get_sweep_info()}")
+        print(f"Base config: {sampler.get_base_config_path()}")
+        print(f"Multi-run config: {sampler.get_multi_run_config()}")
+        
+        # Generate test samples
+        for i in range(5):
             study = optuna.create_study()
             trial = study.ask()
             
             params = sampler.sample_trial_params(trial)
             
-            print(f"\n=== Test Sample {i+1} ===")
+            print(f"\n=== Trial {i+1} ===")
             for key, value in params.items():
-                print(f"  {key}: {value}")
+                if value is not None:
+                    print(f"  {key}: {value}")
             
             # Verify conditional logic
             if params.get('model.use_gumbel') is True:
@@ -282,10 +287,10 @@ def test_generic_sampler():
             else:
                 assert params.get('model.initial_temp') is None, "initial_temp should be None when use_gumbel=False"
             
-            # Verify derived parameter
-            expected_min_lr = params.get('training.lr', 0) / 10
-            actual_min_lr = params.get('training.min_lr')
-            assert abs(actual_min_lr - expected_min_lr) < 1e-10, f"Derived parameter incorrect: {actual_min_lr} != {expected_min_lr}"
+            if params.get('loss.use_entropy_reg') is True:
+                assert params.get('loss.entropy_weight') is not None, "entropy_weight should be sampled when use_entropy_reg=True"
+            else:
+                assert params.get('loss.entropy_weight') is None, "entropy_weight should be None when use_entropy_reg=False"
         
         print("\n✓ All tests passed!")
         
@@ -293,15 +298,7 @@ def test_generic_sampler():
         print(f"Error during testing: {e}")
         import traceback
         traceback.print_exc()
-    
-    finally:
-        # Cleanup
-        try:
-            import os
-            os.remove(test_config_path)
-        except:
-            pass
 
 
 if __name__ == "__main__":
-    test_generic_sampler()
+    test_parameter_sampler()

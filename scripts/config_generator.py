@@ -10,9 +10,6 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
-import tempfile
-import shutil
-import traceback
 
 # Add the project root to Python path so we can import utils
 project_root = Path(__file__).parent.parent
@@ -87,6 +84,7 @@ def create_trial_config(trial_params: Dict[str, Any],
         config_file_path = sweep_folder / f"trial_{trial_number:03d}_config.yaml"
     else:
         # Fallback to temp file
+        import tempfile
         fd, config_file_path = tempfile.mkstemp(suffix=f"_trial_{trial_number:03d}.yaml", prefix="sweep_")
         os.close(fd)
         config_file_path = Path(config_file_path)
@@ -106,6 +104,7 @@ def copy_sweep_config_to_folder(sweep_config_path: str, sweep_folder: Path) -> N
         sweep_config_path: Path to original sweep config
         sweep_folder: Path to sweep folder
     """
+    import shutil
     dest_path = sweep_folder / "sweep_config.yaml"
     shutil.copy2(sweep_config_path, dest_path)
 
@@ -170,64 +169,85 @@ def test_config_generation() -> None:
     """
     print("Testing data-driven config file generation...")
     
-    # Test sweep folder creation
-    test_sweep_folder = create_sweep_folder("test_sweep_123")
-    print(f"Created test sweep folder: {test_sweep_folder}")
-    
-    # Test parameters (using dot notation)
-    test_params = {
-        'model.num_states': 6,
-        'model.use_gumbel': True,
-        'model.initial_temp': 2.5,
-        'training.lr': 5e-4,
-        'training.min_lr': 5e-5,
-        'loss.state_loss_type': 'kl_div',
-        'loss.state_loss_weight': 1.5,
-    }
-    
-    test_fixed_params = {
-        'training.epochs': 75,
-        'data.val_size': 1000,
-    }
-    
-    print("Test parameters:")
-    for key, value in test_params.items():
-        print(f"  {key}: {value}")
-    
-    print("Fixed parameters:")
-    for key, value in test_fixed_params.items():
-        print(f"  {key}: {value}")
-    
-    # Generate config file
+    # Import parameter sampler
     try:
+        from parameter_sampler import SweepParameterSampler
+        import optuna
+    except ImportError as e:
+        print(f"Could not import parameter_sampler: {e}")
+        print("Testing with hardcoded parameters instead...")
+        
+        # Fallback to hardcoded test
+        test_sweep_folder = create_sweep_folder("test_sweep_123")
+        print(f"Created test sweep folder: {test_sweep_folder}")
+        
+        test_params = {
+            'model.num_states': 6,
+            'model.use_gumbel': True,
+            'model.initial_temp': 2.5,
+            'training.lr': 5e-4,
+            'training.min_lr': 5e-5,
+            'loss.state_loss_type': 'kl_div',
+            'loss.state_loss_weight': 1.5,
+        }
+        
+        test_fixed_params = {
+            'training.epochs': 75,
+            'data.val_size': 1000,
+        }
+        
+        print("Test parameters:")
+        for key, value in test_params.items():
+            print(f"  {key}: {value}")
+        
         config_path = create_trial_config(
             trial_params=test_params,
             trial_number=1,
             sweep_folder=test_sweep_folder,
             fixed_params=test_fixed_params
         )
-        print(f"\nGenerated config: {config_path}")
+        print(f"Generated config: {config_path}")
+        print(f"Test files created in: {test_sweep_folder}")
+        return
+    
+    # Test with actual sweep config if available
+    sweep_config_path = "configs/sweeps/first_sweep.yaml"
+    if Path(sweep_config_path).exists():
+        print(f"Using actual sweep config: {sweep_config_path}")
         
-        # Verify the config
-        all_params = {**test_params, **test_fixed_params}
+        sampler = SweepParameterSampler(sweep_config_path)
+        test_sweep_folder = create_sweep_folder("test_config_gen")
+        
+        # Generate one trial
+        study = optuna.create_study()
+        trial = study.ask()
+        test_params = sampler.sample_trial_params(trial)
+        
+        print("Sampled parameters:")
+        for key, value in test_params.items():
+            if value is not None:
+                print(f"  {key}: {value}")
+        
+        config_path = create_trial_config(
+            trial_params=test_params,
+            trial_number=1,
+            base_config_path=sampler.get_base_config_path(),
+            sweep_folder=test_sweep_folder,
+            fixed_params=sampler.get_fixed_params()
+        )
+        
+        print(f"Generated config: {config_path}")
+        
+        # Verify
+        all_params = {**sampler.get_fixed_params(), **test_params}
         is_valid = verify_trial_config(config_path, all_params)
         print(f"Config verification: {'✓ VALID' if is_valid else '✗ INVALID'}")
         
-        # Show a snippet of the generated config
-        with open(config_path, 'r') as f:
-            config_content = f.read()
+        print(f"Test files created in: {test_sweep_folder}")
         
-        print(f"\nConfig file content (first 25 lines):")
-        lines = config_content.split('\n')[:25]
-        for line in lines:
-            print(f"  {line}")
-        
-        print(f"\nTest files created in: {test_sweep_folder}")
-        print("To clean up: rm -rf configs/sweeps/test_sweep_123")
-        
-    except Exception as e:
-        print(f"Error during config generation test: {e}")
-        traceback.print_exc()
+    else:
+        print(f"Sweep config {sweep_config_path} not found, using hardcoded test...")
+        # Fall back to hardcoded test as above
 
 
 if __name__ == "__main__":

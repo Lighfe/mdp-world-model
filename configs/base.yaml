@@ -6,7 +6,7 @@
 meta:
   db_path: "datasets/results/multi_saddle_8.db"
   seed: 42
-  output_dir: "neural_networks/output/test_batch"
+  output_dir: "neural_networks/output/test_subprocess"
   run_id: "test_batch"
 
 # Data parameters
@@ -60,7 +60,7 @@ loss:
   value_loss_weight: 0.3
   
   # Loss types
-  state_loss_type: "kl_div"  # choices: kl_div, cross_entropy, mse, js_div
+  state_loss_type: "js_div"  # choices: kl_div, cross_entropy, mse, js_div
   value_loss_type: null      # null = use system default
   
   # Entropy regularization
