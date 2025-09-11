@@ -26,7 +26,7 @@ from scripts.config_generator import create_trial_config
 
 class ParameterSweep:
     """
-    Main parameter sweep orchestrator using Optuna with configurable TPESampler strategies.
+    Main parameter sweep orchestrator using Optuna.
     """
     
     def __init__(self, sweep_config_path: str, sweep_id: Optional[str] = None, 
@@ -96,15 +96,15 @@ class ParameterSweep:
             sampler_type: 'explorative', 'balanced', or 'exploitative'
             
         Returns:
-            Configured TPESampler
+            Configured TPESampler with multivariate=True and group=True for conditional parameters
         """
         if sampler_type == 'explorative':
             # MORE EXPLORATIVE: Good for unknown parameter spaces
             return optuna.samplers.TPESampler(
                 n_startup_trials=20,                    # More random exploration (20% of 100 trials)
                 gamma=lambda n: max(1, int(0.35 * n)),  # Top 35% considered "good" (less selective)
-                multivariate=False,                     # Disable multivariate to avoid conditional param issues
-                warn_independent_sampling=False,        # Suppress warnings about independent sampling
+                multivariate=True,                      # Model parameter interactions
+                group=True,                             # Handle conditional parameters properly
                 seed=42                                 # Reproducible results
             )
         
@@ -113,28 +113,18 @@ class ParameterSweep:
             return optuna.samplers.TPESampler(
                 n_startup_trials=8,                     # Less random exploration (8% of 100 trials)
                 gamma=lambda n: max(1, int(0.15 * n)),  # Top 15% considered "good" (very selective)
-                multivariate=False,                     # Disable multivariate to avoid conditional param issues
-                warn_independent_sampling=False,        # Suppress warnings
-                seed=42
-            )
-        
-        elif sampler_type == 'multivariate':
-            # MULTIVARIATE: Experimental - handles parameter interactions but may have warnings
-            return optuna.samplers.TPESampler(
-                n_startup_trials=15,                    # Balanced startup
-                gamma=lambda n: max(1, int(0.25 * n)),  # Standard good/bad split
-                multivariate=True,                      # Model parameter interactions (may cause warnings)
-                warn_independent_sampling=False,        # Suppress warnings about conditional parameters
+                multivariate=True,                      # Model parameter interactions
+                group=True,                             # Handle conditional parameters properly
                 seed=42
             )
         
         else:  # 'balanced' (default)
-            # BALANCED: Recommended for most cases - avoids conditional parameter issues
+            # BALANCED: Recommended for most cases
             return optuna.samplers.TPESampler(
                 n_startup_trials=12,                    # Standard exploration (12% of 100 trials)
                 gamma=lambda n: max(1, int(0.25 * n)),  # Top 25% considered "good" (standard)
-                multivariate=False,                     # Disable multivariate to avoid conditional param issues
-                warn_independent_sampling=False,        # Suppress warnings
+                multivariate=True,                      # Model parameter interactions
+                group=True,                             # Handle conditional parameters properly
                 seed=42
             )
     
@@ -278,15 +268,13 @@ class ParameterSweep:
         
         # Print sampler details
         if self.sampler_type == 'explorative':
-            print(f"Sampler details: 20 startup trials, top 35% as 'good', no multivariate")
+            print(f"Strategy: 20 startup trials, top 35% as 'good' (more exploration)")
         elif self.sampler_type == 'exploitative':
-            print(f"Sampler details: 8 startup trials, top 15% as 'good', no multivariate")
-        elif self.sampler_type == 'multivariate':
-            print(f"Sampler details: 15 startup trials, top 25% as 'good', WITH multivariate")
-            print(f"⚠️  Warning: May see RandomSampler fallback for conditional parameters")
+            print(f"Strategy: 8 startup trials, top 15% as 'good' (focused exploitation)")
         else:  # balanced
-            print(f"Sampler details: 12 startup trials, top 25% as 'good', no multivariate")
+            print(f"Strategy: 12 startup trials, top 25% as 'good' (balanced)")
         
+        print(f"All strategies use: multivariate=True, group=True (handles conditional parameters)")
         print(f"{'='*60}")
         
         # Create or load study
@@ -333,22 +321,15 @@ class ParameterSweep:
             print(f"  - Used 20 random startup trials")
             print(f"  - Considered top 35% as 'good' trials")  
             print(f"  - Good for unknown parameter spaces")
-            print(f"  - Disabled multivariate to avoid conditional parameter issues")
         elif self.sampler_type == 'exploitative':
             print(f"  - Used 8 random startup trials")
             print(f"  - Considered top 15% as 'good' trials")
             print(f"  - Good for refining known good regions")
-            print(f"  - Disabled multivariate to avoid conditional parameter issues")
-        elif self.sampler_type == 'multivariate':
-            print(f"  - Used 15 random startup trials")
-            print(f"  - Considered top 25% as 'good' trials")
-            print(f"  - ENABLED multivariate for parameter interactions")
-            print(f"  - May show warnings for conditional parameters (expected)")
         else:
             print(f"  - Used 12 random startup trials")
             print(f"  - Considered top 25% as 'good' trials")
             print(f"  - Balanced exploration/exploitation")
-            print(f"  - Disabled multivariate to avoid conditional parameter issues")
+        print(f"  - All strategies use multivariate=True + group=True for optimal conditional parameter handling")
         
         print(f"{'='*60}")
 
@@ -367,7 +348,7 @@ def main():
     parser.add_argument('--n-trials', type=int, default=100,
                        help='Number of trials to run (default: 100)')
     parser.add_argument('--sampler-type', type=str, default='balanced',
-                       choices=['explorative', 'balanced', 'exploitative', 'multivariate'],
+                       choices=['explorative', 'balanced', 'exploitative'],
                        help='TPE sampler strategy (default: balanced)')
     
     args = parser.parse_args()
