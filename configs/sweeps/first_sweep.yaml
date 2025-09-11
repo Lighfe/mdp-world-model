@@ -18,8 +18,10 @@ fixed_params:
 parameters:
   # Model architecture
   model.num_states:
-    type: "categorical"
-    choices: [4, 6, 8]
+    type: int
+    min: 4
+    max: 8
+    step: 1
     
   model.value_method:
     type: "categorical" 
@@ -32,7 +34,7 @@ parameters:
   # Target encoder (conditional)
   model.use_target_encoder:
     type: "categorical"
-    choices: [true, false]
+    choices: [false, true]
     
   model.ema_decay:
     type: "float"
@@ -59,8 +61,10 @@ parameters:
     
   # Training parameters
   training.epochs:
-    type: "categorical"
-    choices: [50, 75, 100]
+    type: int
+    min: 50
+    max: 100
+    step: 5
     
   training.lr:
     type: "float"
@@ -69,9 +73,8 @@ parameters:
     log: true
     
   training.weight_decay:
-    type: "float"
-    min: 0.0
-    max: 0.04
+    type: "categorical"
+    choices: [0.0, 0.01, 0.04]
     
   # Derived parameters (computed from other params)
   training.min_lr:
@@ -104,11 +107,12 @@ parameters:
   # Entropy regularization (conditional)
   loss.use_entropy_reg:
     type: "categorical"
-    choices: [true, false]
+    choices: [false, true]
     
   loss.entropy_weight:
-    type: "categorical"
-    choices: [0.5, 1.0]
+    type: float
+    min: 0.5
+    max: 1.0
     condition: "loss.use_entropy_reg == true"
 
 # Multi-run settings (seeds and datasets for train_drm_multi.py)
