@@ -337,7 +337,7 @@ class ParameterSweep:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Run parameter sweep with Optuna")
-    parser.add_argument('--config', type=str, required=True,
+    parser.add_argument('sweep_config', type=str,
                        help='Path to sweep configuration file')
     parser.add_argument('--sweep-id', type=str, default=None,
                        help='Custom sweep identifier (default: auto-generated)')
@@ -354,13 +354,13 @@ def main():
     args = parser.parse_args()
     
     # Validate sweep config exists
-    if not Path(args.config).exists():
-        print(f"Error: Sweep config not found: {args.config}")
+    if not Path(args.sweep_config).exists():
+        print(f"Error: Sweep config not found: {args.sweep_config}")
         sys.exit(1)
     
     # Create and run sweep
     sweep = ParameterSweep(
-        sweep_config_path=args.config,
+        sweep_config_path=args.sweep_config,
         sweep_id=args.sweep_id,
         study_name=args.study_name,
         storage=args.storage,
