@@ -83,7 +83,7 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # ============= TEST SWEEP CONFIGURATION =============
 SWEEP_CONFIG="configs/sweeps/test_sweep.yaml"
 SWEEP_ID="test_sweep"
-N_TRIALS="30"
+N_TRIALS="33"
 SAMPLER_TYPE="balanced"
 
 echo "========================================================"

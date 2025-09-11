@@ -26,7 +26,7 @@ from scripts.config_generator import create_trial_config
 
 class ParameterSweep:
     """
-    Main parameter sweep orchestrator using Optuna.
+    Main parameter sweep orchestrator using Optuna with configurable TPESampler strategies.
     """
     
     def __init__(self, sweep_config_path: str, sweep_id: Optional[str] = None, 
@@ -103,25 +103,38 @@ class ParameterSweep:
             return optuna.samplers.TPESampler(
                 n_startup_trials=20,                    # More random exploration (20% of 100 trials)
                 gamma=lambda n: max(1, int(0.35 * n)),  # Top 35% considered "good" (less selective)
-                multivariate=True,                      # Model parameter interactions (critical!)
+                multivariate=False,                     # Disable multivariate to avoid conditional param issues
+                warn_independent_sampling=False,        # Suppress warnings about independent sampling
                 seed=42                                 # Reproducible results
             )
         
         elif sampler_type == 'exploitative':
             # MORE EXPLOITATIVE: Good when you have prior knowledge
             return optuna.samplers.TPESampler(
-            n_startup_trials=8,                         # Less random exploration (8% of 100 trials)
+                n_startup_trials=8,                     # Less random exploration (8% of 100 trials)
                 gamma=lambda n: max(1, int(0.15 * n)),  # Top 15% considered "good" (very selective)
-                multivariate=True,                      # Model parameter interactions
+                multivariate=False,                     # Disable multivariate to avoid conditional param issues
+                warn_independent_sampling=False,        # Suppress warnings
+                seed=42
+            )
+        
+        elif sampler_type == 'multivariate':
+            # MULTIVARIATE: Experimental - handles parameter interactions but may have warnings
+            return optuna.samplers.TPESampler(
+                n_startup_trials=15,                    # Balanced startup
+                gamma=lambda n: max(1, int(0.25 * n)),  # Standard good/bad split
+                multivariate=True,                      # Model parameter interactions (may cause warnings)
+                warn_independent_sampling=False,        # Suppress warnings about conditional parameters
                 seed=42
             )
         
         else:  # 'balanced' (default)
-            # BALANCED: Recommended for most cases
+            # BALANCED: Recommended for most cases - avoids conditional parameter issues
             return optuna.samplers.TPESampler(
                 n_startup_trials=12,                    # Standard exploration (12% of 100 trials)
                 gamma=lambda n: max(1, int(0.25 * n)),  # Top 25% considered "good" (standard)
-                multivariate=True,                      # Model parameter interactions
+                multivariate=False,                     # Disable multivariate to avoid conditional param issues
+                warn_independent_sampling=False,        # Suppress warnings
                 seed=42
             )
     
@@ -151,253 +164,148 @@ class ParameterSweep:
                 if value is not None:
                     print(f"  {key}: {value}")
             
-            # 2. Generate trial config file - store in sweep configs directory
-            trial_config_path = create_trial_config(
-                trial_params=trial_params,
-                trial_number=trial_number,
+            # 2. Generate trial config
+            trial_config_path = self.sweep_configs_dir / f"trial_{trial_number:03d}_config.yaml"
+            create_trial_config(
                 base_config_path=self.sampler.get_base_config_path(),
-                sweep_folder=self.sweep_configs_dir,  # Store in {sweep_id}/configs/
-                fixed_params=self.sampler.get_fixed_params()
+                trial_params=trial_params,
+                fixed_params=self.sampler.get_fixed_params(),
+                output_config_path=trial_config_path,
+                trial_output_dir=self.sweep_output_dir / f"trial_{trial_number:03d}"
             )
+            
             print(f"Generated config: {trial_config_path}")
             
-            # 3. Run train_drm_multi.py with organized output directory structure
-            performance_metric = self._run_training(trial_config_path, trial_number)
+            # 3. Run training with train_drm_multi.py
+            multi_run_config = self.multi_run_config
+            n_seeds = len(multi_run_config.get('seeds', [42]))
+            n_datasets = len(multi_run_config.get('datasets', [1]))
+            aggregation = multi_run_config.get('aggregation', 'mean')
             
-            # 4. Record results
-            trial_result = {
-                'trial_number': trial_number,
-                'performance_metric': performance_metric,
-                'parameters': {k: v for k, v in trial_params.items() if v is not None},
-                'config_path': str(trial_config_path),
-                'runtime_seconds': time.time() - trial_start_time,
-                'timestamp': datetime.now().isoformat(),
-                'status': 'completed'
-            }
+            print(f"Running multi-run: {n_seeds} seeds × {n_datasets} datasets")
+            print(f"Aggregation method: {aggregation}")
             
-            self.trial_results.append(trial_result)
-            self._save_results()
+            # Build command for train_drm_multi.py
+            cmd = [
+                'python', 'train_drm_multi.py',
+                '--config', str(trial_config_path),
+                '--seeds'] + [str(s) for s in multi_run_config.get('seeds', [42])]
             
-            print(f"{'='*60}")
-            print(f"TRIAL {trial_number} COMPLETED")
-            print(f"Performance metric: {performance_metric:.4f}")
-            print(f"Runtime: {trial_result['runtime_seconds']:.1f} seconds")
-            print(f"{'='*60}")
+            if 'datasets' in multi_run_config:
+                cmd.extend(['--datasets'] + [str(d) for d in multi_run_config['datasets']])
             
-            return performance_metric
+            cmd.extend([
+                '--aggregation', aggregation,
+                '--save_configs'  # Save individual run configs for debugging
+            ])
             
-        except Exception as e:
-            # Record failed trial
-            trial_result = {
-                'trial_number': trial_number,
-                'performance_metric': 0.0,
-                'parameters': {k: v for k, v in trial_params.items() if v is not None} if 'trial_params' in locals() else {},
-                'error': str(e),
-                'runtime_seconds': time.time() - trial_start_time,
-                'timestamp': datetime.now().isoformat(),
-                'status': 'failed'
-            }
+            print(f"Command: {' '.join(cmd)}")
             
-            self.trial_results.append(trial_result)
-            self._save_results()
-            
-            print(f"{'='*60}")
-            print(f"TRIAL {trial_number} FAILED")
-            print(f"Error: {e}")
-            print(f"{'='*60}")
-            
-            # Re-raise for Optuna to handle
-            raise
-    
-    def _run_training(self, config_path: str, trial_number: int) -> float:
-        """
-        Run train_drm_multi.py and extract performance metric.
-        
-        Args:
-            config_path: Path to trial config file
-            trial_number: Current trial number
-            
-        Returns:
-            Performance metric (prob_discrete_accuracy)
-        """
-        # Prepare command arguments
-        seeds_str = ','.join(map(str, self.multi_run_config['seeds']))
-        db_paths_str = ','.join(self.multi_run_config['db_paths'])
-        max_parallel = self.multi_run_config.get('max_parallel', 15)
-        
-        # === ORGANIZED OUTPUT DIRECTORY STRUCTURE ===
-        # Each trial gets its own subdirectory: {sweep_id}/trial_000/, trial_001/, etc.
-        trial_config_id = f"trial_{trial_number:03d}"
-        
-        # Construct command - output will go to neural_networks/output/{sweep_id}/trial_xxx/
-        cmd = [
-            sys.executable,  # Use same Python interpreter
-            'neural_networks/train_drm_multi.py',
-            config_path,
-            '--output-dir', str(self.sweep_output_dir),  # neural_networks/output/{sweep_id}
-            '--config-id', trial_config_id,              # Creates trial_000/, trial_001/, etc.
-            '--seeds', seeds_str,
-            '--db-paths', db_paths_str,
-            '--max-parallel', str(max_parallel)
-        ]
-        
-        print(f"Running command: {' '.join(cmd)}")
-        print(f"Trial output will be in: {self.sweep_output_dir}/{trial_config_id}/")
-        
-        # Run the command
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=project_root,  # Ensure we run from project root
-                timeout=3600  # 1 hour timeout per trial
-            )
+            # Execute training
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=project_root)
             
             if result.returncode != 0:
-                print(f"Command failed with return code {result.returncode}")
-                print(f"STDERR: {result.stderr}")
-                print(f"STDOUT: {result.stdout}")
-                raise RuntimeError(f"train_drm_multi.py failed with return code {result.returncode}")
+                print(f"❌ Training failed for trial {trial_number}")
+                print("STDERR:", result.stderr)
+                print("STDOUT:", result.stdout)
+                raise optuna.TrialPruned()
             
-            # Extract performance metric from stdout
-            performance_metric = self._extract_performance_metric(result.stdout)
+            # 4. Parse results from train_drm_multi.py output
+            trial_output_dir = self.sweep_output_dir / f"trial_{trial_number:03d}"
+            results_file = trial_output_dir / "aggregated_results.json"
             
-            print(f"Training completed successfully")
-            print(f"Performance metric: {performance_metric:.4f}")
+            if not results_file.exists():
+                print(f"❌ Results file not found: {results_file}")
+                raise optuna.TrialPruned()
             
-            return performance_metric
+            with open(results_file, 'r') as f:
+                results = json.load(f)
             
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Training timeout (1 hour exceeded)")
-        except Exception as e:
-            print(f"Error running training: {e}")
+            # Extract primary metric for optimization
+            prob_discrete_accuracy = results.get('prob_discrete_accuracy', {}).get(aggregation, 0.0)
+            
+            trial_runtime = time.time() - trial_start_time
+            
+            print(f"✅ Trial {trial_number} completed in {trial_runtime:.1f}s")
+            print(f"Primary metric (prob_discrete_accuracy): {prob_discrete_accuracy:.4f}")
+            
+            # Store trial results for later analysis
+            trial_result = {
+                'trial_number': trial_number,
+                'parameters': trial_params,
+                'prob_discrete_accuracy': prob_discrete_accuracy,
+                'all_metrics': results,
+                'runtime_seconds': trial_runtime,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            self.trial_results.append(trial_result)
+            
+            # Save incremental results
+            with open(self.results_file, 'w') as f:
+                json.dump(self.trial_results, f, indent=2)
+            
+            return prob_discrete_accuracy
+            
+        except optuna.TrialPruned:
+            print(f"🚫 Trial {trial_number} was pruned")
             raise
+        except Exception as e:
+            print(f"❌ Trial {trial_number} failed with error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise optuna.TrialPruned()
     
-    def _extract_performance_metric(self, stdout: str) -> float:
+    def run_sweep(self, n_trials: int = 100) -> None:
         """
-        Extract the primary performance metric from train_drm_multi.py output.
+        Execute the parameter sweep.
         
         Args:
-            stdout: Standard output from train_drm_multi.py
-            
-        Returns:
-            Primary metric (prob_discrete_accuracy)
+            n_trials: Number of trials to run
         """
-        # Look for the final summary line
-        lines = stdout.strip().split('\n')
-        
-        for line in reversed(lines):  # Search from end
-            if 'Primary metric (test_prob_discrete_accuracy):' in line:
-                try:
-                    # Extract number after the colon
-                    metric_str = line.split(':')[-1].strip()
-                    return float(metric_str)
-                except (ValueError, IndexError) as e:
-                    print(f"Error parsing metric from line: {line}")
-                    print(f"Parse error: {e}")
-        
-        # Fallback: look for other patterns
-        for line in reversed(lines):
-            if 'test_prob_discrete_accuracy' in line and ':' in line:
-                try:
-                    metric_str = line.split(':')[-1].strip()
-                    return float(metric_str)
-                except (ValueError, IndexError):
-                    continue
-        
-        print("Could not extract performance metric from output:")
-        print("="*50)
-        print(stdout)
-        print("="*50)
-        raise ValueError("Could not extract performance metric from train_drm_multi.py output")
-    
-    def _save_results(self):
-        """Save current results to JSON file."""
-        with open(self.results_file, 'w') as f:
-            json.dump(self.trial_results, f, indent=2)
-    
-    def run_sweep(self, n_trials: Optional[int] = None) -> None:
-        """
-        Run the complete parameter sweep.
-        
-        Args:
-            n_trials: Number of trials to run (default: from sweep config)
-        """
-        if n_trials is None:
-            n_trials = self.sweep_info.get('n_trials', 100)
+        sweep_start_time = time.time()
         
         print(f"\n{'='*60}")
         print(f"STARTING PARAMETER SWEEP")
-        print(f"Sweep: {self.sweep_info.get('name', 'Unknown')}")
-        print(f"Description: {self.sweep_info.get('description', 'No description')}")
+        print(f"{'='*60}")
+        print(f"Sweep ID: {self.sweep_id}")
         print(f"Number of trials: {n_trials}")
-        print(f"Seeds per trial: {len(self.multi_run_config['seeds'])}")
-        print(f"Datasets per trial: {len(self.multi_run_config['db_paths'])}")
-        print(f"Total runs: {n_trials * len(self.multi_run_config['seeds']) * len(self.multi_run_config['db_paths'])}")
+        print(f"Study name: {self.study_name}")
+        print(f"Storage: {self.storage}")
         print(f"Output directory: {self.sweep_output_dir}")
-        print(f"Sampler: {self.sampler_type} TPE")
+        print(f"Sampler type: {self.sampler_type}")
+        print(f"TPE sampler: {type(self.tpe_sampler).__name__}")
+        
+        # Print sampler details
+        if self.sampler_type == 'explorative':
+            print(f"Sampler details: 20 startup trials, top 35% as 'good', no multivariate")
+        elif self.sampler_type == 'exploitative':
+            print(f"Sampler details: 8 startup trials, top 15% as 'good', no multivariate")
+        elif self.sampler_type == 'multivariate':
+            print(f"Sampler details: 15 startup trials, top 25% as 'good', WITH multivariate")
+            print(f"⚠️  Warning: May see RandomSampler fallback for conditional parameters")
+        else:  # balanced
+            print(f"Sampler details: 12 startup trials, top 25% as 'good', no multivariate")
+        
         print(f"{'='*60}")
         
-        # === DEBUG DATABASE CREATION ===
-        print(f"Creating Optuna study...")
-        print(f"  Study name: {self.study_name}")
-        print(f"  Storage: {self.storage}")
-        print(f"  Storage path exists: {Path(self.storage.replace('sqlite:///', '')).parent.exists()}")
+        # Create or load study
+        study = optuna.create_study(
+            study_name=self.study_name,
+            storage=self.storage,
+            direction='maximize',  # We want to maximize prob_discrete_accuracy
+            sampler=self.tpe_sampler,
+            load_if_exists=True
+        )
         
-        try:
-            # Create or load Optuna study
-            study = optuna.create_study(
-                study_name=self.study_name,
-                storage=self.storage,
-                direction='maximize',  # We want to maximize prob_discrete_accuracy
-                sampler=self.tpe_sampler,  # Use custom TPE sampler
-                load_if_exists=True
-            )
-            
-            print(f"✓ Study created/loaded successfully: {study.study_name}")
-            print(f"Previous trials: {len(study.trials)}")
-            
-            # Verify database file was created
-            db_path = Path(self.storage.replace('sqlite:///', ''))
-            if db_path.exists():
-                print(f"✓ Database file created: {db_path}")
-                print(f"  Database size: {db_path.stat().st_size} bytes")
-            else:
-                print(f"⚠ Database file not found at: {db_path}")
-        
-        except Exception as e:
-            print(f"✗ Error creating study: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        print(f"Study created/loaded. Existing trials: {len(study.trials)}")
         
         # Run optimization
-        sweep_start_time = time.time()
+        study.optimize(self.objective, n_trials=n_trials)
         
-        try:
-            study.optimize(self.objective, n_trials=n_trials)
-            
-        except KeyboardInterrupt:
-            print("\nSweep interrupted by user")
-        except Exception as e:
-            print(f"\nSweep failed with error: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # === FINAL DATABASE CHECK ===
-        db_path = Path(self.storage.replace('sqlite:///', ''))
-        if db_path.exists():
-            print(f"\n✓ Final database check: {db_path} ({db_path.stat().st_size} bytes)")
-        else:
-            print(f"\n✗ Final database check: Database missing at {db_path}")
-        
-        # Final summary
         sweep_runtime = time.time() - sweep_start_time
-        self._print_final_summary(study, sweep_runtime)
-    
-    def _print_final_summary(self, study: optuna.Study, sweep_runtime: float):
-        """Print final sweep summary."""
+        
+        # Print final summary
         print(f"\n{'='*60}")
         print(f"SWEEP COMPLETED")
         print(f"{'='*60}")
@@ -425,73 +333,60 @@ class ParameterSweep:
             print(f"  - Used 20 random startup trials")
             print(f"  - Considered top 35% as 'good' trials")  
             print(f"  - Good for unknown parameter spaces")
+            print(f"  - Disabled multivariate to avoid conditional parameter issues")
         elif self.sampler_type == 'exploitative':
             print(f"  - Used 8 random startup trials")
             print(f"  - Considered top 15% as 'good' trials")
             print(f"  - Good for refining known good regions")
+            print(f"  - Disabled multivariate to avoid conditional parameter issues")
+        elif self.sampler_type == 'multivariate':
+            print(f"  - Used 15 random startup trials")
+            print(f"  - Considered top 25% as 'good' trials")
+            print(f"  - ENABLED multivariate for parameter interactions")
+            print(f"  - May show warnings for conditional parameters (expected)")
         else:
             print(f"  - Used 12 random startup trials")
             print(f"  - Considered top 25% as 'good' trials")
             print(f"  - Balanced exploration/exploitation")
+            print(f"  - Disabled multivariate to avoid conditional parameter issues")
         
         print(f"{'='*60}")
 
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Run parameter sweep optimization")
-    parser.add_argument(
-        "sweep_config", 
-        help="Path to sweep configuration YAML file"
-    )
-    parser.add_argument(
-        "--sweep-id", 
-        help="Custom sweep identifier (default: datetime-based)"
-    )
-    parser.add_argument(
-        "--n-trials", 
-        type=int,
-        help="Number of trials to run (default: from sweep config)"
-    )
-    parser.add_argument(
-        "--study-name", 
-        help="Optuna study name (default: from sweep config)"
-    )
-    parser.add_argument(
-        "--storage", 
-        help="Optuna storage URL (default: SQLite in sweep folder)"
-    )
-    parser.add_argument(
-        "--sampler-type",
-        choices=['explorative', 'balanced', 'exploitative'],
-        default='balanced',
-        help="TPE sampler strategy (default: balanced)"
-    )
+    parser = argparse.ArgumentParser(description="Run parameter sweep with Optuna")
+    parser.add_argument('--config', type=str, required=True,
+                       help='Path to sweep configuration file')
+    parser.add_argument('--sweep-id', type=str, default=None,
+                       help='Custom sweep identifier (default: auto-generated)')
+    parser.add_argument('--study-name', type=str, default=None,
+                       help='Optuna study name (default: from config)')
+    parser.add_argument('--storage', type=str, default=None,
+                       help='Optuna storage URL (default: SQLite in output dir)')
+    parser.add_argument('--n-trials', type=int, default=100,
+                       help='Number of trials to run (default: 100)')
+    parser.add_argument('--sampler-type', type=str, default='balanced',
+                       choices=['explorative', 'balanced', 'exploitative', 'multivariate'],
+                       help='TPE sampler strategy (default: balanced)')
     
     args = parser.parse_args()
     
     # Validate sweep config exists
-    if not Path(args.sweep_config).exists():
-        print(f"Error: Sweep config file not found: {args.sweep_config}")
+    if not Path(args.config).exists():
+        print(f"Error: Sweep config not found: {args.config}")
         sys.exit(1)
     
     # Create and run sweep
-    try:
-        sweep = ParameterSweep(
-            sweep_config_path=args.sweep_config,
-            sweep_id=args.sweep_id,
-            study_name=args.study_name,
-            storage=args.storage,
-            sampler_type=args.sampler_type
-        )
-        
-        sweep.run_sweep(n_trials=args.n_trials)
-        
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    sweep = ParameterSweep(
+        sweep_config_path=args.config,
+        sweep_id=args.sweep_id,
+        study_name=args.study_name,
+        storage=args.storage,
+        sampler_type=args.sampler_type
+    )
+    
+    sweep.run_sweep(n_trials=args.n_trials)
 
 
 if __name__ == "__main__":
