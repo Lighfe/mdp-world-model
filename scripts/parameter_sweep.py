@@ -101,27 +101,27 @@ class ParameterSweep:
         if sampler_type == 'explorative':
             # MORE EXPLORATIVE: Good for unknown parameter spaces
             return optuna.samplers.TPESampler(
-                n_startup_trials=20,              # More random exploration (20% of 100 trials)
-                gamma=lambda n: int(0.35 * n),    # Top 35% considered "good" (less selective)
-                multivariate=True,                # Model parameter interactions (critical!)
-                seed=42                           # Reproducible results
+                n_startup_trials=20,                    # More random exploration (20% of 100 trials)
+                gamma=lambda n: max(1, int(0.35 * n)),  # Top 35% considered "good" (less selective)
+                multivariate=True,                      # Model parameter interactions (critical!)
+                seed=42                                 # Reproducible results
             )
         
         elif sampler_type == 'exploitative':
             # MORE EXPLOITATIVE: Good when you have prior knowledge
             return optuna.samplers.TPESampler(
-                n_startup_trials=8,               # Less random exploration (8% of 100 trials)
-                gamma=lambda n: int(0.15 * n),    # Top 15% considered "good" (very selective)
-                multivariate=True,                # Model parameter interactions
+            n_startup_trials=8,                         # Less random exploration (8% of 100 trials)
+                gamma=lambda n: max(1, int(0.15 * n)),  # Top 15% considered "good" (very selective)
+                multivariate=True,                      # Model parameter interactions
                 seed=42
             )
         
         else:  # 'balanced' (default)
             # BALANCED: Recommended for most cases
             return optuna.samplers.TPESampler(
-                n_startup_trials=12,              # Standard exploration (12% of 100 trials)
-                gamma=lambda n: int(0.25 * n),    # Top 25% considered "good" (standard)
-                multivariate=True,                # Model parameter interactions
+                n_startup_trials=12,                    # Standard exploration (12% of 100 trials)
+                gamma=lambda n: max(1, int(0.25 * n)),  # Top 25% considered "good" (standard)
+                multivariate=True,                      # Model parameter interactions
                 seed=42
             )
     
