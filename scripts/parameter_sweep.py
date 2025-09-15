@@ -101,7 +101,7 @@ class ParameterSweep:
             if sampler_type == 'explorative':
                 # MORE EXPLORATIVE: Good for unknown parameter spaces
                 return optuna.samplers.TPESampler(
-                    n_startup_trials=100,
+                    n_startup_trials=75,
                     gamma=lambda n: max(1, int(0.35 * n)),  # Top 35% considered "good" (less selective)
                     multivariate=True,                      # Model parameter interactions (critical!)
                     group=True,                             # Handle conditional parameters properly
