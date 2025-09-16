@@ -525,7 +525,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 elif loss_type == 'Total Transition Loss':
                     ax.plot(x_vals, y_vals, color=color_cycle[0], linewidth=1.5, alpha=0.9,label=r"$L_{\mathrm{tr}}(S)$")
                 elif loss_type == 'Total Size Loss':
-                    ax.plot(x_vals, y_vals, color=color_cycle[2], linewidth=1.5, alpha=0.9,label=r"$L_{\mathrm{sz}}(S)$")
+                    ax.plot(x_vals, y_vals, color=color_cycle[2], linewidth=1.5, alpha=0.9,label=r"$\alpha L_{\mathrm{sz}}(S)$")
 
                 if show_derivative:
                     dy = np.gradient(values)
