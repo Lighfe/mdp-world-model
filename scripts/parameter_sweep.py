@@ -91,7 +91,7 @@ class CyclicCategoricalSampler(SweepParameterSampler):
                     sampled_params[param_path] = None
                     continue
                 
-                sampled_params[param_path] = self._sample_parameter(
+                sampled_params[param_path] = self._sample_single_parameter(
                     trial, param_path, param_config, sampled_params
                 )
         
@@ -505,21 +505,34 @@ class ParameterSweep:
         sweep_runtime = time.time() - sweep_start_time
         self._print_final_summary(study, sweep_runtime)
     
-    def _print_final_summary(self, study: optuna.Study, sweep_runtime: float):
-        """Print final sweep summary."""
+    def _print_final_summary(self, study, sweep_runtime):
+        """Print final sweep summary with safe error handling."""
+        
         print(f"\n{'='*60}")
         print(f"SWEEP COMPLETED")
         print(f"{'='*60}")
         print(f"Total runtime: {sweep_runtime:.1f} seconds ({sweep_runtime/3600:.1f} hours)")
-        print(f"Completed trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])}")
-        print(f"Failed trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.FAIL])}")
         
-        if study.best_trial:
-            print(f"\nBest trial: {study.best_trial.number}")
-            print(f"Best performance: {study.best_value:.4f}")
-            print("Best parameters:")
-            for key, value in study.best_params.items():
-                print(f"  {key}: {value}")
+        completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        failed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.FAIL]
+        
+        print(f"Completed trials: {len(completed_trials)}")
+        print(f"Failed trials: {len(failed_trials)}")
+        
+        # Safe best trial access
+        try:
+            if len(completed_trials) > 0 and study.best_trial:
+                print(f"\nBest trial: {study.best_trial.number}")
+                print(f"Best performance: {study.best_value:.4f}")
+                print("Best parameters:")
+                for key, value in study.best_params.items():
+                    print(f"  {key}: {value}")
+            else:
+                print(f"\nNo completed trials - cannot determine best configuration.")
+                if len(failed_trials) > 0:
+                    print("Check the error messages above to diagnose issues.")
+        except Exception as e:
+            print(f"\nCould not access best trial (no successful completions): {e}")
         
         print(f"\nResults saved to: {self.sweep_output_dir}")
         print(f"Directory structure:")
@@ -535,11 +548,11 @@ class ParameterSweep:
             print(f"  - Considered top 35% as 'good' trials")  
             print(f"  - Good for unknown parameter spaces")
         elif self.sampler_type == 'exploitative':
-            print(f"  - Used 8 random startup trials")
+            print(f"  - Used 15 random startup trials")
             print(f"  - Considered top 15% as 'good' trials")
             print(f"  - Good for refining known good regions")
         else:
-            print(f"  - Used 12 random startup trials")
+            print(f"  - Used 20 random startup trials")
             print(f"  - Considered top 25% as 'good' trials")
             print(f"  - Balanced exploration/exploitation")
         
