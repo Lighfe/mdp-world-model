@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib as mpl
+import matplotlib.patheffects as pe
 import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplcol
@@ -475,16 +476,16 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
     """
     
     if pdfready and save_to_path != None:
-        def create_pdf_colorbar(colormap, norm, label=r"$\mathrm{H}_{\mathrm{Sh}}(s)$"):
+        def create_pdf_colorbar(colormap, norm, label=r"$\mathrm{H}(s)$"):
 
             """Creates a matplotlib colorbar using the given colormap and normalization."""
-            fig, ax = plt.subplots(figsize=(2.5,0.33), dpi = 400)  # Adjust figure size for the colorbar
+            fig, ax = plt.subplots(figsize=(0.33, 2), dpi = 400)  # Adjust figure size for the colorbar
             sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
             sm.set_array([])  # Needed for the colorbar to work
-            cbar = plt.colorbar(sm, cax=ax, orientation="horizontal")
+            cbar = plt.colorbar(sm, cax=ax, orientation="vertical")
             cbar.outline.set_visible(False)  # Remove the outer frame
-            cbar.ax.tick_params(labelsize=10)  # Change the fontsize of the colorbar numbers
-            cbar.set_label(label, fontsize=10)
+            cbar.ax.tick_params(labelsize=9)  # Change the fontsize of the colorbar numbers
+            cbar.set_label(label, fontsize=9)
             cbar.solids.set_alpha(0.6)  # Set alpha value for the colorbar
             cbar.ax.xaxis.set_tick_params(width=0.8)  # thinner tick lines
             fig.tight_layout(pad=0.1)               # remove extra padding
@@ -492,11 +493,15 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         
 
         
-        def create_loss_function_plot_matplotlib(step=0, x_axis_mode='Step', x_transform='None', show_derivative=False):
+        def create_loss_function_plot_matplotlib(step=0, x_axis_mode='Step', x_transform='None'):
             """
             Create a static, publication-ready Matplotlib plot of the loss function at a given step.
             Exports directly to PDF/SVG.
             """
+            # Delta computation helper
+            def compute_deltas(values):
+                return np.diff(values)  # gives [v1-v0, v2-v1, ..., vn-v(n-1)]
+
             history = patchwork.loss_function.history_of_loss_function_values
             n_steps = len(list(history.values())[0])
             steps = np.arange(n_steps)
@@ -513,33 +518,124 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 x_vals = np.exp(x_vals)
 
             # Plotting
-            fig, ax = plt.subplots(figsize=(5.1,1.7))
+            #fig, ax = plt.subplots(figsize=(4,2), dpi=400)
+            # Subplots: original on the left, deltas on the right
+            fig, (ax, ax_delta) = plt.subplots(1, 2, figsize=(4.4, 2), dpi=400, sharex=False)
 
             color_cycle = plt.get_cmap('tab10').colors
+            
+            
+            handles_orig, labels_orig = [], []
+            handles_delta, labels_delta = [], []
+
 
             for (loss_type, values) in history.items():
-                
-                y_vals = values
+                y_vals = np.array(values)
+
+                # choose base style
                 if loss_type == 'Loss Function Value':
-                    ax.plot(x_vals, y_vals, color=color_cycle[1], linewidth=3, linestyle = (0,(1,1)), alpha=0.7,label=r"$L(S)$")
+                    color = color_cycle[1]
+                    base_ls = (0, (1, 1))
+                    lw = 3
+                    label = r"$L(S)$"
+                    alpha = 0.7
                 elif loss_type == 'Total Transition Loss':
-                    ax.plot(x_vals, y_vals, color=color_cycle[0], linewidth=1.5, alpha=0.9,label=r"$L_{\mathrm{tr}}(S)$")
+                    color = color_cycle[0]
+                    base_ls = "-"
+                    lw = 1.5
+                    label = r"$L_{\mathrm{tr}}(S)$"
+                    alpha = 0.9
                 elif loss_type == 'Total Size Loss':
-                    ax.plot(x_vals, y_vals, color=color_cycle[2], linewidth=1.5, alpha=0.9,label=r"$\alpha L_{\mathrm{sz}}(S)$")
+                    color = color_cycle[2]
+                    base_ls = "-"
+                    lw = 1.5
+                    label = r"$\alpha L_{\mathrm{sz}}(S)$"
+                    alpha = 0.9
+                else:
+                    continue
 
-                if show_derivative:
-                    dy = np.gradient(values)
-                    ax.plot(x_vals, dy, color=color_cycle[3], linewidth=1.5, linestyle='dotted', alpha=0.5, label=f"d({loss_type})/dx")
+                # --- Original values
+                h1, = ax.plot(
+                    x_vals, y_vals,
+                    color=color, linewidth=lw, linestyle=base_ls,
+                    alpha=alpha, label=label
+                )
+                handles_orig.append(h1)
+                labels_orig.append(label)
 
-            # Vertical line for current step
-            ax.axvline(x=x_vals[step], color='k', linestyle='--', linewidth=1)
+                # --- Delta values
+                deltas = compute_deltas(y_vals)
+                x_deltas = x_vals[1:]
+                h2, = ax_delta.plot(
+                    x_deltas, deltas,
+                    color=color, linewidth=0.8, linestyle="-",
+                    alpha=alpha, label=r"$\Delta$ " + label
+                )
+
+                handles_delta.append(h2)
+                labels_delta.append(r"$\Delta$ " + label)
+
+
+            # --- Find step where Total Transition Loss first reaches zero
+            ttl_vals = np.array(history.get("Total Transition Loss", []))
+            zero_step = None
+            if ttl_vals.size > 0:
+                zero_indices = np.where(ttl_vals <= 1e-6)[0]
+                if zero_indices.size > 0:
+                    zero_step = zero_indices[0]  # first index
+                    x_zero = x_vals[zero_step]
+
+                    # Add vertical line to both subplots
+                    for axis in [ax, ax_delta]:
+                        axis.axvline(x_zero,
+                            color="darkred",
+                            linestyle=":",
+                            linewidth=1,
+                            alpha=0.6,
+                            path_effects=[pe.withStroke(linewidth=3, alpha=0.2, foreground="red")])
+
+                    # Get vertical midpoint of y-axis
+                    y_min, y_max = ax.get_ylim()
+                    y_anker = (y_min + y_max) / 3
+                    # Annotate in the left plot
+                    ax.text(
+                        x_zero - 20, y_anker,   # slightly below top
+                        r"$L_{\mathrm{tr}}(S) \approx 0$",
+                        color="darkred", fontsize=7,
+                        rotation=0, ha="right", va="top",
+                        bbox=dict(facecolor="none", edgecolor="none", pad=0.5)  # transparent bg
+                    )    
+
+            '''
+            for (loss_type, values) in history.items():
+
+                # Main Plot
+                if loss_type == 'Loss Function Value':
+                    ax.plot(x_vals, values, color=color_cycle[1], linewidth=3, linestyle = (0,(1,1)), alpha=0.7,label=r"$L(S)$")
+                elif loss_type == 'Total Transition Loss':
+                    ax.plot(x_vals, values, color=color_cycle[0], linewidth=1.5, alpha=0.9,label=r"$L_{\mathrm{tr}}(S)$")
+                elif loss_type == 'Total Size Loss':
+                    ax.plot(x_vals, values, color=color_cycle[2], linewidth=1.5, alpha=0.9,label=r"$\alpha L_{\mathrm{sz}}(S)$")
+
+                # Delta Plot
+                deltas = compute_deltas(values)
+                x_deltas = x_vals[1:]  # because deltas are between steps
+                ax_delta.plot(x_deltas, deltas, label=fr"$\Delta$ {loss_type}")
+            '''
+
+            # Use symlog for delta axis
+            ax_delta.set_yscale("symlog", linthresh=1e-2)
+
 
             # Labels, legend, and styling
-            ax.set_xlabel("Step", fontsize=10)
-            ax.set_ylabel("Global Loss", fontsize=10)
+            ax.set_xlabel("Step", fontsize=9)
+            ax.set_ylabel("Global Loss", fontsize=9)
+            ax_delta.set_xlabel("Step", fontsize=9)
+            ax_delta.set_ylabel(r"$\Delta$ Global Loss", fontsize=9)
             #leg = ax.legend(fontsize=8, ncol=len(history), loc='upper center', bbox_to_anchor=(0.5, -0.45), frameon=True, facecolor='white', edgecolor='gray', framealpha=0.8  )
-            leg = ax.legend(
-                        fontsize=10,
+            '''
+            leg = fig.legend(
+                        fontsize=8,
                         ncol=1,                        # vertical stack
                         loc='center left',             # align legend’s left edge
                         bbox_to_anchor=(1.02, 0.5),    # just outside the right edge, centered vertically
@@ -548,7 +644,21 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                         edgecolor='gray',
                         framealpha=0.8
                     )
-            leg.get_frame().set_linewidth(0.8)
+            leg.get_frame().set_linewidth(0.8)'''
+            fig.legend(
+                handles_orig + handles_delta, 
+                labels_orig + labels_delta,
+                fontsize=8, ncol=1,
+                loc="center left",
+                bbox_to_anchor=(1.02, 0.6),
+                frameon=True,
+                facecolor='white',
+                edgecolor='gray',
+                framealpha=0.8
+            )
+            #ax_delta.legend(fontsize=7)
+
+            # making it look nice for ax
             ax.grid(True, linestyle='--', alpha=0.3)
             xmin, xmax = ax.get_xlim()
             ax.set_xlim(left=0, right=xmax-1) 
@@ -559,6 +669,18 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 ax.spines[spine].set_linewidth(0.1) 
                 ax.spines[spine].set_color("0.8") 
             ax.spines['left'].set_position(('data', 0))
+
+            # making it look nice for ax_delta
+            ax_delta.grid(True, linestyle='--', alpha=0.3)
+            xmin, xmax = ax_delta.get_xlim()
+            ax_delta.set_xlim(left=0, right=xmax-1) 
+            for spine in ["bottom", "left"]:
+                ax_delta.spines[spine].set_linewidth(0.5) 
+                ax_delta.spines[spine].set_color("0.4") 
+            for spine in ["top", "right"]:
+                ax_delta.spines[spine].set_linewidth(0.1) 
+                ax_delta.spines[spine].set_color("0.8") 
+            ax_delta.spines['left'].set_position(('data', 0))
             #ax.spines['bottomt'].set_position(('data', bounds[1][0]))
 
             fig.tight_layout()
