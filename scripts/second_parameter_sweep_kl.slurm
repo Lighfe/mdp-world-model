@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=param_sweep
+#SBATCH --job-name=cyclic_sweep_kl
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=18:00:00
@@ -8,11 +8,11 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
 #SBATCH --mem=24G
-#SBATCH --output=log/param_sweep_%j.out
-#SBATCH --error=log/param_sweep_%j.err
+#SBATCH --output=log/cyclic_sweep_kl_%j.out
+#SBATCH --error=log/cyclic_sweep_kl_%j.err
 
 echo "========================================================"
-echo "PARAMETER SWEEP - OPTUNA OPTIMIZATION"
+echo "CYCLIC CATEGORICAL PARAMETER SWEEP - KL DIVERGENCE"
 echo "Job started at $(date)"
 echo "Running on $(hostname)"
 echo "SLURM_JOBID: $SLURM_JOBID"
@@ -82,18 +82,20 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # ============= PARAMETER SWEEP CONFIGURATION =============
 # MODIFY THESE PARAMETERS AS NEEDED
-SWEEP_CONFIG="configs/sweeps/second_sweep_kl.yaml"
-SWEEP_ID="second_parameter_sweep_kl" # hardcode date
+SWEEP_CONFIG="scripts/configs/sweeps/second_sweep_kl.yaml"
+SWEEP_ID="second_sweep_kl"
 N_TRIALS="100"
 SAMPLER_TYPE="explorative"  # Options: explorative, balanced, exploitative
 
 echo "========================================================"
-echo "Parameter Sweep Configuration:"
+echo "Cyclic Categorical Parameter Sweep Configuration:"
 echo "  Sweep config: $SWEEP_CONFIG"
 echo "  Sweep ID: $SWEEP_ID"
 echo "  Number of trials: $N_TRIALS"
-echo "  Sampler type: $SAMPLER_TYPE"
+echo "  Sampler type: $SAMPLER_TYPE (with cyclic categorical sampling)"
 echo "  Working directory: $(pwd)"
+echo "  Categorical combinations: 4 (he/xavier × angle/identity)"
+echo "  Trials per combo: ~25"
 echo "========================================================"
 
 # Validate sweep config exists
@@ -118,16 +120,15 @@ done) > "log/system_sweep_${SLURM_JOBID}.log" &
 SYSTEM_MONITOR_PID=$!
 
 # ============= RUN PARAMETER SWEEP =============
-echo "Starting parameter sweep at $(date)..."
+echo "Starting cyclic categorical parameter sweep at $(date)..."
 
 # Change to project directory
 cd /p/projects/ou/rd4/bega/mdp/dralle/mdp-world-model
 
-# Run the parameter sweep
+# Run the parameter sweep with cyclic categorical sampling
 python scripts/parameter_sweep.py "$SWEEP_CONFIG" \
     --sweep-id "$SWEEP_ID" \
     --n-trials "$N_TRIALS" \
-    --sampler-type "$SAMPLER_TYPE" \
     --sampler-type "$SAMPLER_TYPE"
 
 SWEEP_EXIT_CODE=$?
@@ -172,7 +173,7 @@ kill $SYSTEM_MONITOR_PID 2>/dev/null || true
 
 # ============= FINAL SUMMARY =============
 echo "========================================================"
-echo "PARAMETER SWEEP COMPLETED"
+echo "CYCLIC CATEGORICAL PARAMETER SWEEP COMPLETED"
 echo "========================================================"
 echo "Job ID: $SLURM_JOBID"
 echo "End time: $(date)"
@@ -198,12 +199,29 @@ if [ -f "log/gpu_sweep_${SLURM_JOBID}.log" ]; then
     echo "  Average GPU utilization: ${avg_util}%"
     echo "  Peak memory usage: ${max_memory} MiB"
     
-    # Expected improvement with MPS
+    # Expected improvement with MPS and cyclic sampling
     if (( $(echo "$avg_util > 40" | bc -l) )); then
-        echo "  ✓ Good GPU utilization with MPS!"
+        echo "  ✓ Good GPU utilization with MPS and cyclic sampling!"
     else
         echo "  ⚠ GPU utilization lower than expected - check trial settings"
     fi
 fi
+
+# Categorical combination analysis
+echo ""
+echo "Cyclic Categorical Sampling Summary:"
+echo "  Total categorical combinations explored: 4"
+echo "  Expected trials per combination: ~$((N_TRIALS/4))"
+echo "  Combinations:"
+echo "    1. he + angle"
+echo "    2. he + identity" 
+echo "    3. xavier_uniform + angle"
+echo "    4. xavier_uniform + identity"
+echo ""
+echo "Next Steps:"
+echo "  1. Review results in neural_networks/output/$SWEEP_ID/"
+echo "  2. Check if each categorical combo got balanced exploration"
+echo "  3. Analyze which combinations perform best"
+echo "  4. Consider follow-up focused sweeps on promising combinations"
 
 exit $SWEEP_EXIT_CODE
