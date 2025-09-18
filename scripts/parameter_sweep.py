@@ -78,14 +78,23 @@ class CyclicCategoricalSampler(SweepParameterSampler):
         print(f"Trial {trial.number}: Using categorical combo {combo_idx}: {dict(zip(self.combo_param_names, current_combo))}")
         
         sampled_params = {}
+        derived_params = {}
         
         # Fix the cycled categorical parameters
         for param_name, value in zip(self.combo_param_names, current_combo):
             sampled_params[param_name] = value
         
-        # Sample all other parameters normally (including non-cycled categoricals)
+        # Sample all non-derived parameters first
         for param_path, param_config in self.parameters.items():
             if param_path not in sampled_params:  # Skip already fixed categoricals
+                
+                param_type = param_config.get('type')
+                
+                if param_type == 'derived':
+                    # Store derived parameters for later calculation
+                    derived_params[param_path] = param_config
+                    continue
+                
                 # Check conditions first
                 if not self._evaluate_parameter_condition(param_config, sampled_params):
                     sampled_params[param_path] = None
@@ -95,10 +104,44 @@ class CyclicCategoricalSampler(SweepParameterSampler):
                     trial, param_path, param_config, sampled_params
                 )
         
+        # Now compute derived parameters
+        for param_path, param_config in derived_params.items():
+            sampled_params[param_path] = self._compute_derived_parameter(
+                param_path, param_config, sampled_params
+            )
+        
         # Track this trial for the current combo
         self.combo_trial_counts[combo_idx] += 1
         
         return {k: v for k, v in sampled_params.items() if v is not None}
+    
+    def _compute_derived_parameter(self, param_path: str, param_config: Dict[str, Any], 
+                                  current_params: Dict[str, Any]) -> Any:
+        """Compute a derived parameter using its formula."""
+        
+        formula = param_config.get('formula')
+        if not formula:
+            raise ValueError(f"Derived parameter '{param_path}' missing formula")
+        
+        try:
+            # Simple formula evaluation - replace parameter references
+            # This handles formulas like "training.lr / 10"
+            eval_formula = formula
+            
+            # Replace parameter references with their values
+            for other_param, value in current_params.items():
+                if value is not None and other_param in eval_formula:
+                    eval_formula = eval_formula.replace(other_param, str(value))
+            
+            # Evaluate the formula safely
+            result = eval(eval_formula, {"__builtins__": {}})
+            
+            print(f"  Derived {param_path}: {formula} = {result}")
+            return result
+            
+        except Exception as e:
+            raise ValueError(f"Could not compute derived parameter '{param_path}' with formula '{formula}': {e}")
+    
     
     def _select_categorical_combination(self, trial_number: int) -> int:
         """
@@ -130,7 +173,6 @@ class CyclicCategoricalSampler(SweepParameterSampler):
         if not condition:
             return True
         return self._evaluate_condition(condition, current_params)
-
 class ParameterSweep:
     """
     Main parameter sweep orchestrator using Optuna.
