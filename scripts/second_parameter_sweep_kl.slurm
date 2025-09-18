@@ -82,8 +82,8 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # ============= PARAMETER SWEEP CONFIGURATION =============
 # MODIFY THESE PARAMETERS AS NEEDED
-SWEEP_CONFIG="configs/sweeps/first_sweep_kl.yaml"
-SWEEP_ID="first_sweep_20250911_204833" # hardcode date
+SWEEP_CONFIG="configs/sweeps/second_sweep_kl.yaml"
+SWEEP_ID="second_parameter_sweep_kl" # hardcode date
 N_TRIALS="100"
 SAMPLER_TYPE="explorative"  # Options: explorative, balanced, exploitative
 

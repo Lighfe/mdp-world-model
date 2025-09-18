@@ -7,7 +7,7 @@ sweep:
   n_trials: 30
 
 # Base configuration to start from
-base_config: "configs/base.yaml"
+base_config: "base.yaml"
 
 # Parameters to optimize (reduced from 14 to 7 key parameters)
 parameters:

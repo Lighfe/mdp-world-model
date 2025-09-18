@@ -243,7 +243,7 @@ class SweepParameterSampler:
     
     def get_base_config_path(self) -> str:
         """Get base configuration file path."""
-        return self.sweep_config.get('base_config', 'configs/base.yaml')
+        return self.sweep_config.get('base_config', 'scripts/configs/base.yaml')
     
     def get_fixed_params(self) -> Dict[str, Any]:
         """Get fixed parameters for this sweep."""
@@ -256,7 +256,7 @@ def test_parameter_sampler():
     print("Testing parameter sampler with actual sweep config...")
     
     # Check if first_sweep.yaml exists
-    sweep_config_path = "configs/sweeps/first_sweep.yaml"
+    sweep_config_path = "scripts/configs/sweeps/first_sweep.yaml"
     if not Path(sweep_config_path).exists():
         print(f"Error: {sweep_config_path} not found!")
         print("Please create this file using the 'Sweep Configuration Example' artifact")

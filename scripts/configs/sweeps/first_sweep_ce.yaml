@@ -7,7 +7,7 @@ sweep:
   n_trials: 100
   
 # Base configuration to start from
-base_config: "configs/base.yaml"
+base_config: "base.yaml"
 
 # Fixed parameters for this sweep (optional)
 fixed_params:

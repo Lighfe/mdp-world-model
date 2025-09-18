@@ -15,6 +15,9 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+import itertools
+from collections import defaultdict
+import yaml
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -23,6 +26,110 @@ sys.path.insert(0, str(project_root))
 from scripts.parameter_sampler import SweepParameterSampler
 from scripts.config_generator import create_trial_config
 
+class CyclicCategoricalSampler(SweepParameterSampler):
+    """
+    Ensures each categorical combination gets equal optimization attention.
+    Cycles through categorical combinations while using TPE for continuous parameters.
+    """
+    
+    def __init__(self, sweep_config_path: str, min_trials_per_combo: int = 10):
+        super().__init__(sweep_config_path)
+        self.min_trials_per_combo = min_trials_per_combo
+        
+        # Identify categorical parameters that should be cycled
+        self.cycle_categoricals = {}
+        self.other_categoricals = {}
+        
+        # Read which parameters should be cycled from config
+        cycle_params = self.sweep_config.get('cycle_categoricals', [])
+        
+        for param_path, param_config in self.parameters.items():
+            if param_config.get('type') == 'categorical':
+                if param_path in cycle_params:
+                    self.cycle_categoricals[param_path] = param_config['choices']
+                else:
+                    self.other_categoricals[param_path] = param_config['choices']
+        
+        # Generate all combinations of cycled categoricals
+        if self.cycle_categoricals:
+            param_names = list(self.cycle_categoricals.keys())
+            param_choices = [self.cycle_categoricals[name] for name in param_names]
+            self.categorical_combos = list(itertools.product(*param_choices))
+            self.combo_param_names = param_names
+        else:
+            self.categorical_combos = [()]
+            self.combo_param_names = []
+        
+        print(f"Cycling through {len(self.categorical_combos)} categorical combinations:")
+        for i, combo in enumerate(self.categorical_combos):
+            combo_dict = dict(zip(self.combo_param_names, combo))
+            print(f"  Combo {i}: {combo_dict}")
+        
+        # Track trials per combination
+        self.combo_trial_counts = defaultdict(int)
+        
+    def sample_trial_params(self, trial: optuna.Trial) -> Dict[str, Any]:
+        """Sample parameters with cyclic categorical selection."""
+        
+        # Determine which categorical combination to use
+        combo_idx = self._select_categorical_combination(trial.number)
+        current_combo = self.categorical_combos[combo_idx]
+        
+        print(f"Trial {trial.number}: Using categorical combo {combo_idx}: {dict(zip(self.combo_param_names, current_combo))}")
+        
+        sampled_params = {}
+        
+        # Fix the cycled categorical parameters
+        for param_name, value in zip(self.combo_param_names, current_combo):
+            sampled_params[param_name] = value
+        
+        # Sample all other parameters normally (including non-cycled categoricals)
+        for param_path, param_config in self.parameters.items():
+            if param_path not in sampled_params:  # Skip already fixed categoricals
+                # Check conditions first
+                if not self._evaluate_parameter_condition(param_config, sampled_params):
+                    sampled_params[param_path] = None
+                    continue
+                
+                sampled_params[param_path] = self._sample_parameter(
+                    trial, param_path, param_config, sampled_params
+                )
+        
+        # Track this trial for the current combo
+        self.combo_trial_counts[combo_idx] += 1
+        
+        return {k: v for k, v in sampled_params.items() if v is not None}
+    
+    def _select_categorical_combination(self, trial_number: int) -> int:
+        """
+        Select which categorical combination to use for this trial.
+        
+        Strategy: 
+        - Phase 1 (Strictly Balanced): Ensure exactly min_trials_per_combo for each
+        - Phase 2 (Flexibly Balanced): Continue cycling but could adapt based on performance
+        """
+        n_combos = len(self.categorical_combos)
+        strict_phase_trials = self.min_trials_per_combo * n_combos
+        
+        if trial_number < strict_phase_trials:
+            # PHASE 1: Strictly balanced - exact round-robin
+            combo_idx = trial_number % n_combos
+            print(f"  [STRICT PHASE] Trial {trial_number}/{strict_phase_trials-1}")
+            return combo_idx
+        else:
+            # PHASE 2: Flexibly balanced - still cycle but could be enhanced
+            # For now: continue round-robin (could add performance-based weighting later)
+            combo_idx = trial_number % n_combos
+            print(f"  [FLEXIBLE PHASE] Trial {trial_number}")
+            return combo_idx
+    
+    def _evaluate_parameter_condition(self, param_config: Dict[str, Any], 
+                                     current_params: Dict[str, Any]) -> bool:
+        """Check if parameter should be sampled based on conditions."""
+        condition = param_config.get('condition')
+        if not condition:
+            return True
+        return self._evaluate_condition(condition, current_params)
 
 class ParameterSweep:
     """
@@ -43,7 +150,18 @@ class ParameterSweep:
             sampler_type: TPE sampler type ('explorative', 'balanced', 'exploitative')
         """
         self.sweep_config_path = sweep_config_path
-        self.sampler = SweepParameterSampler(sweep_config_path)
+    
+        # Check if this sweep uses cyclic categoricals
+        with open(sweep_config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        if 'cycle_categoricals' in config:
+            print("Using Cyclic Categorical Sampler")
+            min_trials = config.get('min_trials_per_combo', 10)
+            self.sampler = CyclicCategoricalSampler(sweep_config_path, min_trials)
+        else:
+            print("Using Standard Parameter Sampler")
+            self.sampler = SweepParameterSampler(sweep_config_path)
         
         # Get sweep info early
         self.sweep_info = self.sampler.get_sweep_info()
@@ -89,44 +207,32 @@ class ParameterSweep:
         print(f"TPE sampler configured: {type(self.tpe_sampler).__name__}")
     
     def _create_tpe_sampler(self, sampler_type: str) -> optuna.samplers.TPESampler:
-            """
-            Create TPE sampler based on exploration/exploitation strategy.
-            
-            Args:
-                sampler_type: 'explorative', 'balanced', or 'exploitative'
-                
-            Returns:
-                Configured TPESampler
-            """
-            if sampler_type == 'explorative':
-                # MORE EXPLORATIVE: Good for unknown parameter spaces
-                return optuna.samplers.TPESampler(
-                    n_startup_trials=75,
-                    gamma=lambda n: max(1, int(0.35 * n)),  # Top 35% considered "good" (less selective)
-                    multivariate=True,                      # Model parameter interactions (critical!)
-                    group=True,                             # Handle conditional parameters properly
-                    seed=42                                 # Reproducible results
-                )
-            
-            elif sampler_type == 'exploitative':
-                # MORE EXPLOITATIVE: Good when you have prior knowledge
-                return optuna.samplers.TPESampler(
-                n_startup_trials=100,
-                    gamma=lambda n: max(1, int(0.15 * n)),  # Top 15% considered "good" (very selective)
-                    multivariate=True,                      # Model parameter interactions
-                    group=True,                             # Handle conditional parameters properly
-                    seed=42
-                )
-            
-            else:  # 'balanced' (default)
-                # BALANCED: Recommended for most cases
-                return optuna.samplers.TPESampler(
-                    n_startup_trials=100,
-                    gamma=lambda n: max(1, int(0.25 * n)),  # Top 25% considered "good" (standard)
-                    multivariate=True,                      # Model parameter interactions
-                    group=True,                             # Handle conditional parameters properly
-                    seed=42
-                )
+        """Create TPE sampler - now works with cyclic categorical sampler."""
+        # TPE will handle continuous parameters within each categorical combination
+        if sampler_type == 'explorative':
+            return optuna.samplers.TPESampler(
+                n_startup_trials=20,  # Reduced since we're cycling categoricals
+                gamma=lambda n: max(1, int(0.35 * n)),
+                multivariate=True,
+                group=True,
+                seed=42
+            )
+        elif sampler_type == 'exploitative':
+            return optuna.samplers.TPESampler(
+                n_startup_trials=15,
+                gamma=lambda n: max(1, int(0.15 * n)),
+                multivariate=True,
+                group=True,
+                seed=42
+            )
+        else:  # 'balanced'
+            return optuna.samplers.TPESampler(
+                n_startup_trials=20,
+                gamma=lambda n: max(1, int(0.25 * n)),
+                multivariate=True,
+                group=True,
+                seed=42
+            )
     
     def objective(self, trial: optuna.Trial) -> float:
         """
