@@ -7,7 +7,7 @@ sweep:
   n_trials: 100
   
 # Base configuration to start from
-base_config: "base.yaml"
+base_config: "scripts/configs/base.yaml"
 
 # NEW: Specify which categoricals should be cycled through
 # These will be sampled in round-robin fashion to ensure equal exploration
