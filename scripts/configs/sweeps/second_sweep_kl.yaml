@@ -80,7 +80,7 @@ parameters:
     formula: "training.lr / 10"
     
   # The two tunable ratio parameters
-  loss.value_loss:
+  loss.value_loss_weight:
     type: "float" 
     min: 0.1
     max: 5.0
