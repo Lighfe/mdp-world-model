@@ -21,7 +21,7 @@ import yaml
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from scripts.parameter_sampler import SweepParameterSampler, CyclicCategoricalSampler
+from scripts.parameter_sampler import SweepParameterSampler, CyclicCategoricalSampler, GridBayesianSampler
 from scripts.config_generator import create_trial_config
 
 class ParameterSweep:
@@ -30,25 +30,21 @@ class ParameterSweep:
     """
     
     def __init__(self, sweep_config_path: str, sweep_id: Optional[str] = None, 
-                 study_name: Optional[str] = None, storage: Optional[str] = None,
-                 sampler_type: str = 'balanced'):
-        """
-        Initialize parameter sweep.
+                study_name: Optional[str] = None, storage: Optional[str] = None,
+                sampler_type: str = 'balanced'):
+        """Initialize parameter sweep with grid+Bayesian support."""
         
-        Args:
-            sweep_config_path: Path to sweep configuration file
-            sweep_id: Custom sweep identifier (default: datetime-based)
-            study_name: Optuna study name (default: from sweep config)
-            storage: Optuna storage URL (default: SQLite in sweep folder)
-            sampler_type: TPE sampler type ('explorative', 'balanced', 'exploitative')
-        """
         self.sweep_config_path = sweep_config_path
-    
-        # Check if this sweep uses cyclic categoricals
+        
+        # Check which sampling strategy to use
         with open(sweep_config_path, 'r') as f:
             config = yaml.safe_load(f)
         
-        if 'cycle_categoricals' in config:
+        if 'grid_categoricals' in config:
+            print("Using Grid + Bayesian Optimization")
+            trials_per_combo = config.get('trials_per_combo', 25)
+            self.sampler = GridBayesianSampler(sweep_config_path, trials_per_combo)
+        elif 'cycle_categoricals' in config:
             print("Using Cyclic Categorical Sampler")
             min_trials = config.get('min_trials_per_combo', 10)
             self.sampler = CyclicCategoricalSampler(sweep_config_path, min_trials)

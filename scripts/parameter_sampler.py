@@ -417,6 +417,121 @@ class CyclicCategoricalSampler(SweepParameterSampler):
             return True
         return self._evaluate_condition(condition, current_params)
 
+class GridBayesianSampler(SweepParameterSampler):
+    """
+    Grid search over categorical combinations + Bayesian optimization for continuous parameters.
+    
+    Creates separate Optuna studies for each categorical combination, allowing TPE to learn
+    optimal continuous parameters within each categorical setting.
+    """
+    
+    def __init__(self, sweep_config_path: str, trials_per_combo: int = 25):
+        super().__init__(sweep_config_path)
+        self.trials_per_combo = trials_per_combo
+        
+        # Identify categorical parameters to grid
+        self.grid_categoricals = {}
+        self.continuous_params = {}
+        
+        # Read which parameters should be gridded from config
+        grid_params = self.sweep_config.get('grid_categoricals', [])
+        
+        for param_path, param_config in self.parameters.items():
+            param_type = param_config.get('type')
+            
+            if param_type == 'categorical' and param_path in grid_params:
+                self.grid_categoricals[param_path] = param_config['choices']
+            elif param_type in ['float', 'int', 'derived']:
+                self.continuous_params[param_path] = param_config
+        
+        # Generate all categorical combinations
+        if self.grid_categoricals:
+            param_names = list(self.grid_categoricals.keys())
+            param_choices = [self.grid_categoricals[name] for name in param_names]
+            self.categorical_combos = list(itertools.product(*param_choices))
+            self.combo_param_names = param_names
+        else:
+            self.categorical_combos = [()]
+            self.combo_param_names = []
+        
+        print(f"Grid + Bayesian Optimization Setup:")
+        print(f"  Categorical combinations: {len(self.categorical_combos)}")
+        print(f"  Continuous parameters: {len(self.continuous_params)}")
+        print(f"  Trials per combination: {trials_per_combo}")
+        print(f"  Total trials: {len(self.categorical_combos) * trials_per_combo}")
+        
+        for i, combo in enumerate(self.categorical_combos):
+            combo_dict = dict(zip(self.combo_param_names, combo))
+            print(f"    Combo {i}: {combo_dict}")
+        
+        # Track which combo we're currently optimizing
+        self.current_combo_idx = 0
+        self.combo_trial_count = 0
+        
+    def determine_categorical_combination(self, trial_number: int) -> int:
+        """Determine which categorical combination to use based on trial number."""
+        combo_idx = trial_number // self.trials_per_combo
+        combo_idx = combo_idx % len(self.categorical_combos)  # Cycle if more trials than planned
+        return combo_idx
+    
+    def sample_trial_params(self, trial: optuna.Trial) -> Dict[str, Any]:
+        """Sample parameters using grid + Bayesian approach."""
+        
+        # Determine categorical combination for this trial
+        combo_idx = self.determine_categorical_combination(trial.number)
+        current_combo = self.categorical_combos[combo_idx]
+        trial_in_combo = trial.number % self.trials_per_combo
+        
+        combo_dict = dict(zip(self.combo_param_names, current_combo))
+        print(f"Trial {trial.number}: Combo {combo_idx} (trial {trial_in_combo + 1}/{self.trials_per_combo}): {combo_dict}")
+        
+        sampled_params = {}
+        derived_params = {}
+        
+        # Set fixed categorical parameters
+        for param_name, value in zip(self.combo_param_names, current_combo):
+            sampled_params[param_name] = value
+            # Store as user attribute for analysis
+            trial.set_user_attr(param_name, value)
+            trial.set_user_attr("combo_idx", combo_idx)
+        
+        # Sample continuous parameters using TPE (this is where the magic happens!)
+        for param_path, param_config in self.parameters.items():
+            if param_path in self.combo_param_names:  # Skip fixed categoricals
+                continue
+                
+            param_type = param_config.get('type')
+            
+            if param_type == 'derived':
+                derived_params[param_path] = param_config
+                continue
+            
+            # Check conditions
+            if not self._evaluate_parameter_condition(param_config, sampled_params):
+                sampled_params[param_path] = None
+                continue
+            
+            # This goes through normal TPE optimization!
+            sampled_params[param_path] = self._sample_single_parameter(
+                trial, param_path, param_config, sampled_params
+            )
+        
+        # Compute derived parameters
+        for param_path, param_config in derived_params.items():
+            sampled_params[param_path] = self._compute_derived_parameter(
+                param_path, param_config, sampled_params
+            )
+        
+        return {k: v for k, v in sampled_params.items() if v is not None}
+    
+    def _evaluate_parameter_condition(self, param_config: Dict[str, Any], 
+                                     current_params: Dict[str, Any]) -> bool:
+        """Check if parameter should be sampled based on conditions."""
+        condition = param_config.get('condition')
+        if not condition:
+            return True
+        return self._evaluate_condition(condition, current_params)
+
 def test_parameter_sampler():
     """Test the parameter sampler with the actual sweep config."""
     
