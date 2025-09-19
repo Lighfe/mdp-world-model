@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.patheffects as pe
+import matplotlib.ticker as mticker
 import os
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplcol
@@ -88,7 +89,7 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 
 
-def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True, pdfready = True):
+def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True, pdfready = True, only_transition_loss = False):
 
 
     # Make plots ready for the thesis
@@ -479,7 +480,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
         def create_pdf_colorbar(colormap, norm, label=r"$\mathrm{H}(s)$"):
 
             """Creates a matplotlib colorbar using the given colormap and normalization."""
-            fig, ax = plt.subplots(figsize=(0.33, 2), dpi = 400)  # Adjust figure size for the colorbar
+            fig, ax = plt.subplots(figsize=(0.2, 2), dpi = 400)  # Adjust figure size for the colorbar
             sm = plt.cm.ScalarMappable(cmap=colormap, norm=norm)
             sm.set_array([])  # Needed for the colorbar to work
             cbar = plt.colorbar(sm, cax=ax, orientation="vertical")
@@ -563,17 +564,18 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 handles_orig.append(h1)
                 labels_orig.append(label)
 
-                # --- Delta values
-                deltas = compute_deltas(y_vals)
-                x_deltas = x_vals[1:]
-                h2, = ax_delta.plot(
-                    x_deltas, deltas,
-                    color=color, linewidth=0.8, linestyle="-",
-                    alpha=alpha, label=r"$\Delta$ " + label
-                )
+                if not (only_transition_loss and loss_type == 'Loss Function Value'): # skip delta for loss function value if specified
+                    # --- Delta values
+                    deltas = compute_deltas(y_vals)
+                    x_deltas = x_vals[1:]
+                    h2, = ax_delta.plot(
+                        x_deltas, deltas,
+                        color=color, linewidth=0.8, linestyle="-",
+                        alpha=alpha, label=r"$\Delta$ " + label
+                    )
 
-                handles_delta.append(h2)
-                labels_delta.append(r"$\Delta$ " + label)
+                    handles_delta.append(h2)
+                    labels_delta.append(r"$\Delta$ " + label)
 
 
             # --- Find step where Total Transition Loss first reaches zero
@@ -596,10 +598,10 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
                     # Get vertical midpoint of y-axis
                     y_min, y_max = ax.get_ylim()
-                    y_anker = (y_min + y_max) / 3
+                    y_anker = y_min + (2* (abs(y_min) + y_max) / 3)
                     # Annotate in the left plot
                     ax.text(
-                        x_zero - 20, y_anker,   # slightly below top
+                        x_zero - 40, y_anker,   # slightly below top
                         r"$L_{\mathrm{tr}}(S) \approx 0$",
                         color="darkred", fontsize=7,
                         rotation=0, ha="right", va="top",
@@ -622,17 +624,18 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 x_deltas = x_vals[1:]  # because deltas are between steps
                 ax_delta.plot(x_deltas, deltas, label=fr"$\Delta$ {loss_type}")
             '''
-
-            # Use symlog for delta axis
-            ax_delta.set_yscale("symlog", linthresh=1e-2)
-
-
+            if not only_transition_loss:
+                # Use symlog for delta axis
+                ax_delta.set_yscale("symlog", linthresh=1e-5)
+                ax_delta.yaxis.set_major_locator(mticker.SymmetricalLogLocator(linthresh=1e-5, base=10.0))
+            
+            # adjust spacing between plots
+            plt.subplots_adjust(wspace=0.6)
             # Labels, legend, and styling
             ax.set_xlabel("Step", fontsize=9)
             ax.set_ylabel("Global Loss", fontsize=9)
             ax_delta.set_xlabel("Step", fontsize=9)
             ax_delta.set_ylabel(r"$\Delta$ Global Loss", fontsize=9)
-            #leg = ax.legend(fontsize=8, ncol=len(history), loc='upper center', bbox_to_anchor=(0.5, -0.45), frameon=True, facecolor='white', edgecolor='gray', framealpha=0.8  )
             '''
             leg = fig.legend(
                         fontsize=8,
@@ -650,7 +653,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                 labels_orig + labels_delta,
                 fontsize=8, ncol=1,
                 loc="center left",
-                bbox_to_anchor=(1.02, 0.6),
+                bbox_to_anchor=(1, 0.6),
                 frameon=True,
                 facecolor='white',
                 edgecolor='gray',
@@ -683,7 +686,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             ax_delta.spines['left'].set_position(('data', 0))
             #ax.spines['bottomt'].set_position(('data', bounds[1][0]))
 
-            fig.tight_layout()
+            fig.tight_layout()  # make room for legend
             return fig
         
         loss_fig = create_loss_function_plot_matplotlib()
@@ -832,6 +835,11 @@ def create_plot_and_save_patchwork(db_name,
         fig.savefig(path_id + "/StartEntropy.png")
     
     patchwork.run()
-    plot_interactive_patchwork(patchwork, controls, solver, title_interactive, save_to_path=path_to_save, save_steps = gif_steps, show_interactive=show_interactive)
+
+    if loss_function_strg == 'TransitionEntropyLoss':
+        only_transition_loss = True
+    else:
+        only_transition_loss = False
+    plot_interactive_patchwork(patchwork, controls, solver, title_interactive, save_to_path=path_to_save, save_steps = gif_steps, show_interactive=show_interactive, only_transition_loss=only_transition_loss)
 
 
