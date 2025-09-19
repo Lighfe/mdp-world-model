@@ -83,9 +83,9 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # ============= PARAMETER SWEEP CONFIGURATION =============
 # MODIFY THESE PARAMETERS AS NEEDED
 SWEEP_CONFIG="scripts/configs/sweeps/third_sweep_js.yaml"
-SWEEP_ID="grid_js_$(date +%Y%m%d_%H%M%S)" # Auto-generate with timestamp
+SWEEP_ID="third_sweep_js"
 N_TRIALS="100"
-SAMPLER_TYPE="balanced"  # Options: explorative, balanced, exploitative
+SAMPLER_TYPE="explorative"  # Options: explorative, balanced, exploitative
 
 echo "========================================================"
 echo "Grid + Bayesian Optimization Parameter Sweep Configuration:"
