@@ -1,8 +1,7 @@
-# scripts/configs/sweeps/grid_bayesian_kl.yaml
 # Grid search over encoder_init_method + Bayesian optimization for continuous parameters
 
 sweep:
-  name: "third_sweep_js" # NOTE: I named this wrong here
+  name: "third_sweep_mse"
   description: "Grid encoder init methods + Bayesian continuous optimization for JS divergence"
   n_trials: 100
   
@@ -25,8 +24,8 @@ fixed_params:
   model.use_gumbel: true
   model.use_target_encoder: true
   model.value_method: "angle"
-  loss.state_loss_type: "cross_entropy"
-  training.epochs: 75 # might be a bit too short for cross_entropy
+  loss.state_loss_type: "mse"
+  training.epochs: 75
 
 # Parameters to optimize
 parameters:
@@ -45,12 +44,12 @@ parameters:
   model.ema_decay:
     type: "float"
     min: 0.7
-    max: 0.95
+    max: 0.996
     
   model.initial_temp: # narrowed slightly
     type: "float"
     min: 1.25
-    max: 4.5
+    max: 4.0
     
   model.min_temp:
     type: "float"
@@ -73,20 +72,18 @@ parameters:
     type: "derived"
     formula: "training.lr / 10"
     
-  # Loss function parameters for JS divergence
   loss.state_loss_weight:
     type: "derived"
     formula: "1.0"
     
-  loss.value_loss:
-    type: "float" 
-    min: 0.25
-    max: 4.0
+  loss.value_loss: # narrowed a lot, mse state loss is extreme small
+    min: 0.2
+    max: 2.0
     
   loss.entropy_weight:
     type: "float"
     min: 0.1
-    max: 0.8
+    max: 0.5
 
 # Multi-run settings
 multi_run:
