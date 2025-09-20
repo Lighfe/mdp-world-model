@@ -9,6 +9,9 @@ venv/
 .env/
 .venv/
 
+# Latex
+/latex/*
+
 # Data and results (often too large for GitHub)
 *.csv
 *.h5
