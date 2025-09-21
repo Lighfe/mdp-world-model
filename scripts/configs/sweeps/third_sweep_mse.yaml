@@ -77,6 +77,7 @@ parameters:
     formula: "1.0"
     
   loss.value_loss: # narrowed a lot, mse state loss is extreme small
+    type: "float"
     min: 0.2
     max: 2.0
     

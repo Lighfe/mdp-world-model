@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=kl_grid_sweep
+#SBATCH --job-name=mse_grid_sweep
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=18:00:00
@@ -8,11 +8,11 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
 #SBATCH --mem=24G
-#SBATCH --output=log/kl_grid_sweep_%j.out
-#SBATCH --error=log/kl_grid_sweep_%j.err
+#SBATCH --output=log/mse_grid_sweep_%j.out
+#SBATCH --error=log/mse_grid_sweep_%j.err
 
 echo "========================================================"
-echo "GRID + BAYESIAN PARAMETER SWEEP - KL DIVERGENCE"
+echo "GRID + BAYESIAN PARAMETER SWEEP - MEAN SQUARED ERROR"
 echo "Job started at $(date)"
 echo "Running on $(hostname)"
 echo "SLURM_JOBID: $SLURM_JOBID"
@@ -82,8 +82,8 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # ============= PARAMETER SWEEP CONFIGURATION =============
 # MODIFY THESE PARAMETERS AS NEEDED
-SWEEP_CONFIG="scripts/configs/sweeps/third_sweep_kl.yaml"
-SWEEP_ID="third_sweep_kl"
+SWEEP_CONFIG="scripts/configs/sweeps/third_sweep_mse.yaml"
+SWEEP_ID="third_sweep_mse"
 N_TRIALS="100"
 SAMPLER_TYPE="explorative"  # Options: explorative, balanced, exploitative
 
@@ -94,7 +94,7 @@ echo "  Sweep ID: $SWEEP_ID"
 echo "  Number of trials: $N_TRIALS"
 echo "  Sampler type: $SAMPLER_TYPE (with grid + Bayesian optimization)"
 echo "  Working directory: $(pwd)"
-echo "  Loss function: KL Divergence"
+echo "  Loss function: Mean Squared Error"
 echo "  Value method: angle (fixed)"
 echo "  Encoder methods: 2 (he vs xavier_uniform)"
 echo "  Trials per encoder: 50"
@@ -217,7 +217,7 @@ echo "Grid + Bayesian Optimization Summary:"
 echo "  Encoder initialization methods explored: 2"
 echo "  Trials per encoder method: 50"
 echo "  Fixed parameters:"
-echo "    - Loss function: KL Divergence"
+echo "    - Loss function: Mean Squared Error"
 echo "    - Value method: angle"
 echo "    - Learning rate range: 1e-4 to 1e-3"
 echo "    - Num states: [4, 6, 8] (step: 2)"
@@ -233,6 +233,6 @@ echo "  4. Consider focused follow-up sweeps on the winning combination"
 echo ""
 echo "Analysis Commands:"
 echo "  # Load and analyze Optuna study:"
-echo "  python -c \"import optuna; study = optuna.load_study(study_name='third_sweep_kl', storage='sqlite:///neural_networks/output/$SWEEP_ID/optuna_study.db'); print('Best trial:', study.best_trial)\""
+echo "  python -c \"import optuna; study = optuna.load_study(study_name='third_sweep_mse', storage='sqlite:///neural_networks/output/$SWEEP_ID/optuna_study.db'); print('Best trial:', study.best_trial)\""
 
 exit $SWEEP_EXIT_CODE
