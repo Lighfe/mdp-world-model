@@ -1,0 +1,84 @@
+# Bayesian optimization for continuous parameters - MSE loss with he initialization only
+
+sweep:
+  name: "third_sweep_mse_corr"
+  description: "Bayesian continuous optimization for MSE divergence with he initialization"
+  n_trials: 100
+  
+# Base configuration to start from
+base_config: "scripts/configs/base.yaml"
+
+# Fixed parameters for this sweep
+fixed_params:
+  data.val_size: 1000
+  data.test_size: 1000
+  loss.use_entropy_reg: true
+  model.use_gumbel: true
+  model.use_target_encoder: true
+  model.value_method: "angle"
+  loss.state_loss_type: "mse"
+  model.encoder_init_method: "he"  # Fixed to he initialization only
+  training.epochs: 75
+
+# Parameters to optimize
+parameters:
+  # CONTINUOUS PARAMETERS - TPE will optimize these
+  model.num_states:
+    type: int
+    min: 4
+    max: 8
+    step: 2
+    
+  model.ema_decay:
+    type: "float"
+    min: 0.7
+    max: 0.996
+    
+  model.initial_temp:
+    type: "float"
+    min: 1.25
+    max: 4.0
+    
+  model.min_temp:
+    type: "float"
+    min: 0.1
+    max: 0.5
+    
+  training.lr:
+    type: "float"
+    min: 1.0e-4
+    max: 1.0e-3
+    log: true
+    
+  training.weight_decay:
+    type: "float"
+    min: 0.0
+    max: 0.03
+    
+  # Derived parameters
+  training.min_lr:
+    type: "derived"
+    formula: "training.lr / 10"
+    
+  loss.state_loss_weight:
+    type: "derived"
+    formula: "1.0"
+    
+  loss.value_loss:
+    type: "float"
+    min: 0.2
+    max: 2.0
+    
+  loss.entropy_weight:
+    type: "float"
+    min: 0.1
+    max: 0.5
+
+# Multi-run settings
+multi_run:
+  seeds: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  db_paths: 
+    - "datasets/results/multi_saddle_5.db"
+    - "datasets/results/multi_saddle_7.db"
+    - "datasets/results/multi_saddle_9.db"
+  max_parallel: 15
