@@ -1,6 +1,6 @@
 # scripts/configs/sweeps/fourth_sweep_mse.yaml
 sweep:
-  name: "third_sweep_mse_corr"
+  name: "fourth_sweep_mse"
   description: "Bayesian continuous optimization for MSE divergence with he initialization"
   n_trials: 75
   
