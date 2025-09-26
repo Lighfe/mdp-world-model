@@ -84,8 +84,8 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # MODIFY THESE PARAMETERS AS NEEDED
 SWEEP_CONFIG="scripts/configs/sweeps/fourth_sweep_ce.yaml"
 SWEEP_ID="fourth_sweep_ce"
-N_TRIALS="75"
-SAMPLER_TYPE="balanced"  # Options: explorative, balanced, exploitative
+N_TRIALS="50" # 50 more trials
+SAMPLER_TYPE="exploitative"  # Options: explorative, balanced, exploitative
 
 echo "========================================================"
 echo "Bayesian Optimization Parameter Sweep Configuration:"
