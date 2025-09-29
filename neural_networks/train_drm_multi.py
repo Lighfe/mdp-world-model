@@ -336,8 +336,11 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     print(f"Total runs: {len(seeds) * len(db_paths)}")
     print(f"Max parallel processes: {max_parallel}")
     print("="*60)
+
+    # Set up output directory structure
+    config_output_dir = setup_output_structure(output_dir, config_id, config_path)    
     
-    # Step 1: Generate individual run configs
+    # Generate individual run configs
     override_params = {
         "meta.seed": seeds,
         "meta.db_path": db_paths,
@@ -351,8 +354,6 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
         output_configs_dir=str(config_output_dir / "configs")
     )
     
-    # Step 2: Set up output directory structure
-    config_output_dir = setup_output_structure(output_dir, config_id, config_path)
     
     # PIPE FIX: Create log directory for subprocess outputs
     log_dir = config_output_dir / "logs"
