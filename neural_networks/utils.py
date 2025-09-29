@@ -946,16 +946,16 @@ def create_run_name(override_values, db_path_key="meta.db_path"):
     return f"seed_{seed}_{db_name}"
 
 def generate_config_combinations(base_config_path, config_id, override_params, 
-                                output_configs_dir=None):
+                                output_configs_dir):
     """
-    Generate configuration files for all parameter combinations (more general version).
+    Generate configuration files for all parameter combinations.
     
     Args:
         base_config_path: Path to base YAML config
-        config_id: Identifier for this config set
+        config_id: Identifier for this config set (used in run naming)
         override_params: Dict mapping parameter paths to lists of values
                         e.g., {"meta.seed": [11, 12], "meta.db_path": ["data1.db", "data2.db"]}
-        output_configs_dir: Optional custom output directory for configs
+        output_configs_dir: Directory where config files will be saved
     
     Returns:
         List of tuples: (config_path, run_name, override_values_dict)
@@ -963,14 +963,8 @@ def generate_config_combinations(base_config_path, config_id, override_params,
     # Load base config
     base_config = load_config(base_config_path)
     
-    # Create configs directory (relative to project root if not specified)
-    if output_configs_dir is None:
-        # Assume we're being called from neural_networks/ or project root
-        project_root = Path(__file__).resolve().parent.parent
-        configs_dir = project_root / "configs" / config_id
-    else:
-        configs_dir = Path(output_configs_dir) / config_id
-        
+    # Create output directory
+    configs_dir = Path(output_configs_dir)
     configs_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate all combinations using itertools.product

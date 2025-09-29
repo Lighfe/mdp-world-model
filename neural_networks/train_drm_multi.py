@@ -347,7 +347,8 @@ def multi_train_drm_subprocess(config_path, output_dir, config_id, seeds, db_pat
     run_configs = generate_config_combinations(
         base_config_path=config_path,
         config_id=config_id,
-        override_params=override_params
+        override_params=override_params,
+        output_configs_dir=str(config_output_dir / "configs")
     )
     
     # Step 2: Set up output directory structure

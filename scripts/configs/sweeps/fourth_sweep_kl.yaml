@@ -2,7 +2,7 @@
 sweep:
   name: "fourth_sweep_kl"
   description: "Bayesian continuous optimization for KL divergence"
-  n_trials: 75
+  n_trials: 100
   
 # Base configuration to start from
 base_config: "scripts/configs/base.yaml"
