@@ -89,7 +89,7 @@ def generate_random_grayscale_cmap(num_categories, seed=42):
 
 
 
-def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True, pdfready = True, only_transition_loss = False):
+def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resolution = 30, save_to_path = None, save_steps = 10, show_interactive = True, pdfready = True, only_transition_loss = False, conditional_measure =False):
 
 
     # Make plots ready for the thesis
@@ -355,6 +355,10 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                                 width=600, height=600, tools=['hover'],
                                 xticks=x_axis_tick_labels,  # Custom x-axis tick labels
                                 yticks=y_axis_tick_labels,   # Custom y-axis tick labels
+                                xlabel = "x₁",
+                                ylabel = "x₂",
+                                fontsize={'xlabel': labelfontsize, 'ylabel': labelfontsize,
+                                            'xticks': tickfontsize, 'yticks': tickfontsize},
                                 toolbar = 'above',
                                 line_color= "#4C4C4C",  # keeps cell borders unless overridden
                                 line_width = 0.5,
@@ -449,7 +453,7 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                         start = normalize_vor(vertices[i])
                         end = normalize_vor(vertices[(i + 1) % len(vertices)])
                         patch_borders.append((start[0], start[1], end[0], end[1]))  # (x1, y1, x2, y2)
-            p_borders = hv.Segments(patch_borders).opts(color='white', line_width=1) 
+            p_borders = hv.Segments(patch_borders).opts(color='white', line_width=1.5) 
 
             layers = [hv_polys * p_borders] + [streamplots[control] for control in selected_controls if control in streamplots] + [nullclines[control] for control in selected_nullcline_controls if control in nullclines]
 
@@ -538,13 +542,13 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
                     color = color_cycle[1]
                     base_ls = (0, (1, 1))
                     lw = 3
-                    label = r"$L(S)$"
+                    label = r"$L(S)$" if not conditional_measure else r"$L^{\neq}(S)$"
                     alpha = 0.7
                 elif loss_type == 'Total Transition Loss':
                     color = color_cycle[0]
                     base_ls = "-"
                     lw = 1.5
-                    label = r"$L_{\mathrm{tr}}(S)$"
+                    label = r"$L_{\mathrm{tr}}(S)$" if not conditional_measure else r"$L_{\mathrm{tr}}^{\neq}(S)$"
                     alpha = 0.9
                 elif loss_type == 'Total Size Loss':
                     color = color_cycle[2]
@@ -598,11 +602,12 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
 
                     # Get vertical midpoint of y-axis
                     y_min, y_max = ax.get_ylim()
-                    y_anker = y_min + (2* (abs(y_min) + y_max) / 3)
+                    y_anker = y_min + (12* (abs(y_min) + y_max) / 13)
                     # Annotate in the left plot
+                    zerotrlabel = r"$L_{\mathrm{tr}}(S) \approx 0$" if not conditional_measure else r"$L_{\mathrm{tr}}^{\neq}(S) \approx 0$"
                     ax.text(
                         x_zero - 40, y_anker,   # slightly below top
-                        r"$L_{\mathrm{tr}}(S) \approx 0$",
+                        zerotrlabel,
                         color="darkred", fontsize=7,
                         rotation=0, ha="right", va="top",
                         bbox=dict(facecolor="none", edgecolor="none", pad=0.5)  # transparent bg
@@ -689,9 +694,16 @@ def plot_interactive_patchwork(patchwork, controls, solver, title = "", vf_resol
             fig.tight_layout()  # make room for legend
             return fig
         
+
+        # Label colorbar
+        if conditional_measure == False:
+            entropy_label = r"$\mathrm{H}(s)$"
+        else:
+            entropy_label = r"$\mathrm{H}^{\neq}(s)$"
+
         loss_fig = create_loss_function_plot_matplotlib()
         loss_fig.savefig(save_to_path + "/loss_function.pdf", bbox_inches="tight")
-        color_fig = create_pdf_colorbar(entropy_cmap, entropy_norm)
+        color_fig = create_pdf_colorbar(entropy_cmap, entropy_norm, label=entropy_label)
         color_fig.savefig(save_to_path + "/colorbar.pdf", bbox_inches="tight")
     
 
@@ -840,6 +852,10 @@ def create_plot_and_save_patchwork(db_name,
         only_transition_loss = True
     else:
         only_transition_loss = False
-    plot_interactive_patchwork(patchwork, controls, solver, title_interactive, save_to_path=path_to_save, save_steps = gif_steps, show_interactive=show_interactive, only_transition_loss=only_transition_loss)
+
+    conditional = False
+    if entropy_measure == 'conditional_shannon_entropy':
+        conditional = True
+    plot_interactive_patchwork(patchwork, controls, solver, title_interactive, save_to_path=path_to_save, save_steps = gif_steps, show_interactive=show_interactive, only_transition_loss=only_transition_loss, conditional_measure=conditional)
 
 
