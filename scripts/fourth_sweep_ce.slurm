@@ -2,7 +2,7 @@
 #SBATCH --job-name=ce_sweep
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -84,8 +84,8 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # MODIFY THESE PARAMETERS AS NEEDED
 SWEEP_CONFIG="scripts/configs/sweeps/fourth_sweep_ce.yaml"
 SWEEP_ID="fourth_sweep_ce"
-N_TRIALS="100"
-SAMPLER_TYPE="balanced"  # Options: explorative, balanced, exploitative
+N_TRIALS="50"
+SAMPLER_TYPE="exploitative"  # Options: explorative, balanced, exploitative
 
 echo "========================================================"
 echo "Bayesian Optimization Parameter Sweep Configuration:"
