@@ -551,14 +551,15 @@ class VoronoiGrid(Grid):
         if len(coord) != self.dimension:
             raise ValueError("Coordinate dimensionality does not match space intervals.")
         
+        orig_coord = copy.deepcopy(coord)
         if not in_transformed_space:
             coord = self.transform(coord)
-
+        
         bounds = self.tf_bounds #search always in transformed space to avoid errors with np.inf
                     
         for dim in range(self.dimension):
             if (coord[dim] < bounds[dim][0]) or (coord[dim] > bounds[dim][1]):
-                raise ValueError(f"Coordinate {coord} is out of bounds.")
+                raise ValueError(f"Coordinate {coord} is out of bounds, orginal coord before trafo was {orig_coord}.")
 
         return self.kdtree.query(coord)[1]
     
