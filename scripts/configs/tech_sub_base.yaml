@@ -1,17 +1,18 @@
-# configs/base.yaml
+# configs/tech_sub_base.yaml
+# Base configuration for tech substitution experiments
 # Complete default configuration - single source of truth
 # Every parameter used in training must be defined here
 
 # Run metadata
 meta:
-  db_path: "datasets/results/multi_saddle_8.db"
+  db_path: "datasets/results/tech_sim.db"
   seed: 42
-  output_dir: "neural_networks/output/test_subprocess"
-  run_id: "test_batch"
+  output_dir: "tech_substitution_results"
+  run_id: "tech_sub_base"
 
 # Data parameters
 data:
-  system_type: "saddle_system"
+  system_type: "tech_substitution"
   val_size: 1000
   test_size: 1000
 
@@ -36,7 +37,7 @@ model:
 
 # Training parameters
 training:
-  epochs: 75
+  epochs: 100
   batch_size: 128
   checkpoint_every: 25
   
