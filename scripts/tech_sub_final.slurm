@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=tech_sub_final
+#SBATCH --job-name=param_sweep
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
 #SBATCH --time=3:00:00
@@ -50,9 +50,18 @@ mkdir -p log
 module load anaconda
 source activate mdp-world-model
 
+# CRITICAL: Fix PATH to ensure correct Python is used
+export PATH="$CONDA_PREFIX/bin:$PATH"
+
+# Verify environment
+echo "Python executable: $(which python)"
+echo "Conda environment: $CONDA_DEFAULT_ENV"
+
 # Set standard environment
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
+export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # H100-specific optimizations (adjust if using different GPU)
 export CUDA_LAUNCH_BLOCKING=0
@@ -60,6 +69,16 @@ export TORCH_CUDA_ARCH_LIST="9.0"
 export TORCH_USE_CUDA_DSA=1
 export TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+
+# Create MPS directories with proper permissions
+MPS_LOG_DIR="log/mps_${SLURM_JOBID}"
+MPS_PIPE_DIR="log/mps_pipes_${SLURM_JOBID}"
+mkdir -p "$MPS_LOG_DIR" "$MPS_PIPE_DIR"
+
+# Set MPS environment variables BEFORE starting daemon
+export CUDA_VISIBLE_DEVICES=0
+export CUDA_MPS_PIPE_DIRECTORY="$MPS_PIPE_DIR"
+export CUDA_MPS_LOG_DIRECTORY="$MPS_LOG_DIR"
 
 # Start MPS daemon for better GPU sharing
 echo "Starting NVIDIA MPS for better GPU sharing..."
@@ -82,7 +101,7 @@ if [ ! -f "$METADATA_FILE" ]; then
 fi
 
 # Get number of configs
-NUM_CONFIGS=$(python3 -c "import json; print(json.load(open('$METADATA_FILE'))['num_configs'])")
+NUM_CONFIGS=$("$CONDA_PREFIX/bin/python" -c "import json; print(json.load(open('$METADATA_FILE'))['num_configs'])")
 
 echo "Found $NUM_CONFIGS configurations to run"
 echo "Running with $SLURM_NTASKS parallel tasks"
@@ -121,16 +140,16 @@ echo "[Task $TASK_ID] Assigned configs $START_CONFIG to $END_CONFIG"
 for CONFIG_NUM in $(seq $START_CONFIG $END_CONFIG); do
     # Get config file path from metadata (arrays are 0-indexed in JSON)
     CONFIG_INDEX=$(( CONFIG_NUM - 1 ))
-    CONFIG_FILE=$(python3 -c "import json; print(json.load(open('$METADATA_FILE'))['config_files'][$CONFIG_INDEX])")
-    RUN_NAME=$(python3 -c "import json; print(json.load(open('$METADATA_FILE'))['run_names'][$CONFIG_INDEX])")
+    CONFIG_FILE=$("$CONDA_PREFIX/bin/python" -c "import json; print(json.load(open('$METADATA_FILE'))['config_files'][$CONFIG_INDEX])")
+    RUN_NAME=$("$CONDA_PREFIX/bin/python" -c "import json; print(json.load(open('$METADATA_FILE'))['run_names'][$CONFIG_INDEX])")
     
     echo "[Task $TASK_ID] Starting config $CONFIG_NUM/$NUM_CONFIGS: $RUN_NAME"
     echo "[Task $TASK_ID] Config file: $CONFIG_FILE"
     
     START_TIME=$(date +%s)
     
-    # Run training
-    python neural_networks/train_drm.py "$CONFIG_FILE" 2>&1 | sed "s/^/[Task $TASK_ID] /"
+    # Run training with explicit conda python
+    "$CONDA_PREFIX/bin/python" neural_networks/train_drm.py "$CONFIG_FILE" 2>&1 | sed "s/^/[Task $TASK_ID] /"
     
     EXIT_CODE=${PIPESTATUS[0]}
     END_TIME=$(date +%s)
@@ -185,21 +204,38 @@ echo ""
 echo "Summary for Experiment: $EXPERIMENT_NAME"
 echo "================================================"
 
-# Count completed runs
+# Check for output in multiple possible locations
 RUNS_DIR="${OUTPUT_BASE}/${EXPERIMENT_NAME}/runs"
+EXPERIMENT_DIR="${OUTPUT_BASE}/${EXPERIMENT_NAME}"
+
 if [ -d "$RUNS_DIR" ]; then
-    COMPLETED_RUNS=$(find "$RUNS_DIR" -name "*.pt" -o -name "final_model.pt" | wc -l)
-    echo "Completed runs with saved models: $COMPLETED_RUNS"
+    # Count completed runs by looking for model files
+    COMPLETED_RUNS=$(find "$RUNS_DIR" -type f -name "*.pt" 2>/dev/null | wc -l)
+    NUM_RUN_DIRS=$(find "$RUNS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+    
+    echo "Run directories found: $NUM_RUN_DIRS"
+    echo "Model files (.pt) found: $COMPLETED_RUNS"
     echo "Expected runs: $NUM_CONFIGS"
     
-    if [ $COMPLETED_RUNS -eq $NUM_CONFIGS ]; then
-        echo "Status: ✓ All runs completed successfully"
+    if [ $NUM_RUN_DIRS -eq $NUM_CONFIGS ]; then
+        echo "Status: ✓ All run directories created"
     else
-        echo "Status: ⚠ Some runs may have failed"
-        echo "Check individual task logs for details"
+        echo "Status: ⚠ Only $NUM_RUN_DIRS/$NUM_CONFIGS run directories found"
     fi
+elif [ -d "$EXPERIMENT_DIR" ]; then
+    echo "Experiment directory exists: $EXPERIMENT_DIR"
+    echo "But runs subdirectory not found: $RUNS_DIR"
+    echo ""
+    echo "This could mean:"
+    echo "  - Training hasn't started yet"
+    echo "  - Training failed early"
+    echo "  - Output directory structure is different than expected"
+    echo ""
+    echo "Check task logs for details: log/sweep_task_${SLURM_JOBID}_*.out"
 else
-    echo "Warning: Runs directory not found: $RUNS_DIR"
+    echo "Experiment directory not found: $EXPERIMENT_DIR"
+    echo "Training may have failed to start."
+    echo "Check main log: log/sweep_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.out"
 fi
 
 echo "================================================"

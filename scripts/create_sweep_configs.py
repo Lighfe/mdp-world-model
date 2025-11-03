@@ -140,7 +140,15 @@ def generate_sweep_configs(base_config_path, experiment_name, parameter_grid,
     # Create output directory structure
     experiment_dir = Path(output_base_dir) / experiment_name
     configs_dir = experiment_dir / "configs"
+    runs_dir = experiment_dir / "runs"
+    
     configs_dir.mkdir(parents=True, exist_ok=True)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Created directory structure:")
+    print(f"  Experiment: {experiment_dir}")
+    print(f"  Configs: {configs_dir}")
+    print(f"  Runs: {runs_dir}")
     
     # Generate all combinations
     param_names = list(parameter_grid.keys())
