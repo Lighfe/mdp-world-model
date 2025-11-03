@@ -14,7 +14,7 @@ from itertools import product
 import yaml
 
 # Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from neural_networks.utils import load_config, set_nested_dict_value

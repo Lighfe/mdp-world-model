@@ -1,22 +1,45 @@
 #!/bin/bash
-#SBATCH --job-name=tech_sub
+#SBATCH --job-name=tech_sub_final
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=4:00:00
+#SBATCH --time=3:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=10
-#SBATCH --ntasks-per-node=10
+#SBATCH --ntasks=10           # Number of parallel tasks (adjust based on your needs)
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem=34G
-#SBATCH --output=log/tech_sub_%j.out
-#SBATCH --error=log/tech_sub_%j.err
+#SBATCH --mem=32G
+#SBATCH --output=log/sweep_%A_%a.out
+#SBATCH --error=log/sweep_%A_%a.err
+
+# ============================================================================
+# PARAMETER SWEEP SLURM TEMPLATE
+# 
+# This script runs multiple training jobs in parallel using configs generated
+# by create_sweep_configs.py
+#
+# Usage:
+#   1. Generate configs: python create_sweep_configs.py --experiment <name> ...
+#   2. Edit EXPERIMENT_NAME below to match your experiment
+#   3. Adjust --ntasks based on desired parallelism
+#   4. Submit: sbatch run_param_sweep.slurm
+# ============================================================================
+
+# ============================================================================
+# CONFIGURATION - EDIT THESE
+# ============================================================================
+EXPERIMENT_NAME="tech_sub_vlw_sweep"  # Must match the experiment name used in create_sweep_configs.py
+OUTPUT_BASE="neural_networks/output"
+
+# ============================================================================
+# DO NOT EDIT BELOW THIS LINE (unless you know what you're doing)
+# ============================================================================
 
 echo "========================================================"
-echo "TECH SUBSTITUTION EXPERIMENTS"
+echo "PARAMETER SWEEP: $EXPERIMENT_NAME"
 echo "Job started at $(date)"
 echo "Running on $(hostname)"
 echo "SLURM_JOBID: $SLURM_JOBID"
+echo "SLURM_NTASKS: $SLURM_NTASKS"
 echo "GPU Info: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 echo "========================================================"
 
@@ -31,166 +54,154 @@ source activate mdp-world-model
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=true
 
-# H100 optimizations
+# H100-specific optimizations (adjust if using different GPU)
 export CUDA_LAUNCH_BLOCKING=0
 export TORCH_CUDA_ARCH_LIST="9.0"
 export TORCH_USE_CUDA_DSA=1
 export TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-echo "Starting NVIDIA MPS..."
+# Start MPS daemon for better GPU sharing
+echo "Starting NVIDIA MPS for better GPU sharing..."
 nvidia-cuda-mps-control -d
 sleep 2
 
-# Configuration
-BASE_CONFIG="scripts/configs/tech_sub_base.yaml"
-OUTPUT_DIR="tech_substitution_results"
-CONFIG_ID="tech_sub_configs"
+if nvidia-smi | grep -q "MPS"; then
+    echo "✓ MPS daemon started successfully"
+else
+    echo "⚠ MPS may not be running, continuing anyway"
+fi
 
-echo ""
-echo "Experiment Configuration:"
-echo "  Base config: $BASE_CONFIG"
-echo "  Output dir: $OUTPUT_DIR"
-echo "  Seeds: 101-110"
-echo "  Value loss weights: 0.5, 1.0, 2.0, 3.0, 4.0"
-echo "  Total runs: 50"
-echo ""
+# Read metadata
+METADATA_FILE="${OUTPUT_BASE}/${EXPERIMENT_NAME}/sweep_metadata.json"
 
-# Verify base config exists
-if [ ! -f "$BASE_CONFIG" ]; then
-    echo "ERROR: Base config not found: $BASE_CONFIG"
+if [ ! -f "$METADATA_FILE" ]; then
+    echo "ERROR: Metadata file not found: $METADATA_FILE"
+    echo "Did you run create_sweep_configs.py first?"
     exit 1
 fi
 
-# Generate all config files using the existing utility function
-echo "Generating config files..."
-python3 << EOFPYTHON
-import sys
-from pathlib import Path
+# Get number of configs
+NUM_CONFIGS=$(python3 -c "import json; print(json.load(open('$METADATA_FILE'))['num_configs'])")
 
-# Add project root to path
-PROJECT_ROOT = Path.cwd()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from neural_networks.utils import generate_config_combinations
-
-# Define parameter grid
-override_params = {
-    "meta.seed": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
-    "loss.value_loss_weight": [0.5, 1.0, 2.0, 3.0, 4.0]
-}
-
-# Generate configs
-configs = generate_config_combinations(
-    base_config_path="${BASE_CONFIG}",
-    config_id="${CONFIG_ID}",
-    override_params=override_params,
-    output_configs_dir="${OUTPUT_DIR}"
-)
-
-print(f"Successfully generated {len(configs)} config files")
-EOFPYTHON
-
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to generate config files"
-    exit 1
-fi
-
-echo "Config generation complete!"
-echo ""
+echo "Found $NUM_CONFIGS configurations to run"
+echo "Running with $SLURM_NTASKS parallel tasks"
 
 # Start GPU monitoring
-nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu \
-    --format=csv --loop=10 > "log/gpu_tech_sub_${SLURM_JOBID}.log" &
+nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv --loop=10 > "log/gpu_${SLURM_JOBID}.log" &
 GPU_MONITOR_PID=$!
 
-# Create training script for parallel execution
-TRAINING_SCRIPT="run_tech_sub_${SLURM_JOBID}.sh"
+# Create training script
+TRAINING_SCRIPT="sweep_${SLURM_JOBID}.sh"
 cat > "$TRAINING_SCRIPT" << 'EOFSCRIPT'
 #!/bin/bash
 
-# Get task ID (0-9) which maps to seed (101-110)
+# Get task ID (0 to SLURM_NTASKS-1)
 TASK_ID=$SLURM_PROCID
-SEED=$((TASK_ID + 101))
 
 export PYTHONUNBUFFERED=1
 
-echo "[Task $TASK_ID] Starting Seed $SEED at $(date)"
+# Read metadata
+METADATA_FILE="${OUTPUT_BASE}/${EXPERIMENT_NAME}/sweep_metadata.json"
 
-CONFIG_DIR="tech_substitution_results/tech_sub_configs"
+# Calculate which configs this task should run
+# Distribute configs evenly across tasks
+CONFIGS_PER_TASK=$(( (NUM_CONFIGS + SLURM_NTASKS - 1) / SLURM_NTASKS ))
+START_CONFIG=$(( TASK_ID * CONFIGS_PER_TASK + 1 ))
+END_CONFIG=$(( START_CONFIG + CONFIGS_PER_TASK - 1 ))
 
-# Find all config files for this seed
-# The generate_config_combinations creates files like: config_seed101_vlw0.5.yaml
-CONFIGS=($(ls ${CONFIG_DIR}/config_*seed${SEED}_*.yaml 2>/dev/null | sort))
-
-if [ ${#CONFIGS[@]} -eq 0 ]; then
-    echo "[Task $TASK_ID] ERROR: No config files found for seed $SEED in $CONFIG_DIR"
-    exit 1
+# Don't exceed total number of configs
+if [ $END_CONFIG -gt $NUM_CONFIGS ]; then
+    END_CONFIG=$NUM_CONFIGS
 fi
 
-echo "[Task $TASK_ID] Found ${#CONFIGS[@]} configs for seed $SEED"
+echo "[Task $TASK_ID] Assigned configs $START_CONFIG to $END_CONFIG"
 
-task_completed=0
-task_failed=0
-
-# Run each config
-for CONFIG_FILE in "${CONFIGS[@]}"; do
-    CONFIG_NAME=$(basename "$CONFIG_FILE" .yaml)
+# Run assigned configs sequentially
+for CONFIG_NUM in $(seq $START_CONFIG $END_CONFIG); do
+    # Get config file path from metadata (arrays are 0-indexed in JSON)
+    CONFIG_INDEX=$(( CONFIG_NUM - 1 ))
+    CONFIG_FILE=$(python3 -c "import json; print(json.load(open('$METADATA_FILE'))['config_files'][$CONFIG_INDEX])")
+    RUN_NAME=$(python3 -c "import json; print(json.load(open('$METADATA_FILE'))['run_names'][$CONFIG_INDEX])")
     
-    echo "[Task $TASK_ID] ----------------------------------------"
-    echo "[Task $TASK_ID] Starting: $CONFIG_NAME"
-    echo "[Task $TASK_ID] Config: $CONFIG_FILE"
-    echo "[Task $TASK_ID] Time: $(date)"
+    echo "[Task $TASK_ID] Starting config $CONFIG_NUM/$NUM_CONFIGS: $RUN_NAME"
+    echo "[Task $TASK_ID] Config file: $CONFIG_FILE"
+    
+    START_TIME=$(date +%s)
     
     # Run training
-    python -u neural_networks/train_drm.py "$CONFIG_FILE" 2>&1
+    python neural_networks/train_drm.py "$CONFIG_FILE" 2>&1 | sed "s/^/[Task $TASK_ID] /"
     
-    EXIT_CODE=$?
+    EXIT_CODE=${PIPESTATUS[0]}
+    END_TIME=$(date +%s)
+    DURATION=$((END_TIME - START_TIME))
+    
     if [ $EXIT_CODE -eq 0 ]; then
-        echo "[Task $TASK_ID] ✓ SUCCESS: $CONFIG_NAME"
-        task_completed=$((task_completed + 1))
+        echo "[Task $TASK_ID] ✓ Config $CONFIG_NUM completed in ${DURATION}s"
     else
-        echo "[Task $TASK_ID] ✗ FAILED: $CONFIG_NAME (exit: $EXIT_CODE)"
-        task_failed=$((task_failed + 1))
+        echo "[Task $TASK_ID] ✗ Config $CONFIG_NUM failed with exit code $EXIT_CODE"
     fi
 done
 
-echo ""
-echo "[Task $TASK_ID] ========================================"
-echo "[Task $TASK_ID] Task Summary for Seed $SEED"
-echo "[Task $TASK_ID] Completed: $task_completed/${#CONFIGS[@]}"
-echo "[Task $TASK_ID] Failed: $task_failed/${#CONFIGS[@]}"
-echo "[Task $TASK_ID] Finished at $(date)"
-echo "[Task $TASK_ID] ========================================"
+echo "[Task $TASK_ID] All assigned configs completed"
 EOFSCRIPT
 
 chmod +x "$TRAINING_SCRIPT"
 
-echo "========================================================"
-echo "Launching 10 parallel tasks..."
-echo "========================================================"
+# Export variables for training script
+export EXPERIMENT_NAME
+export OUTPUT_BASE
+export NUM_CONFIGS
 
-# Launch parallel training
-srun --ntasks=$SLURM_NTASKS \
-     --ntasks-per-node=$SLURM_NTASKS \
-     --output="log/tech_sub_task_%j_%t.out" \
-     --error="log/tech_sub_task_%j_%t.err" \
-     --unbuffered \
-     ./"$TRAINING_SCRIPT"
+# Run parallel training
+echo "Launching $SLURM_NTASKS parallel tasks..."
+srun --output=log/sweep_task_${SLURM_JOBID}_%t.out \
+     --error=log/sweep_task_${SLURM_JOBID}_%t.err \
+     bash "$TRAINING_SCRIPT"
 
 SRUN_EXIT_CODE=$?
 
-# Cleanup
+# Clean up
 rm -f "$TRAINING_SCRIPT"
+
+# Stop GPU monitoring
 kill $GPU_MONITOR_PID 2>/dev/null
+
+# Stop MPS daemon
+echo "Stopping NVIDIA MPS..."
 echo quit | nvidia-cuda-mps-control
 
+echo "========================================================"
+echo "Parameter sweep completed at $(date)"
+echo "Experiment: $EXPERIMENT_NAME"
+echo "srun exit code: $SRUN_EXIT_CODE"
+echo "Results saved to: ${OUTPUT_BASE}/${EXPERIMENT_NAME}/runs/"
+echo "GPU usage log: log/gpu_${SLURM_JOBID}.log"
+echo "Task logs: log/sweep_task_${SLURM_JOBID}_*.out"
+echo "========================================================"
+
+# Print summary
 echo ""
-echo "========================================================"
-echo "Job completed at $(date)"
-echo "Exit code: $SRUN_EXIT_CODE"
-echo "Results saved to: $OUTPUT_DIR"
-echo "========================================================"
+echo "Summary for Experiment: $EXPERIMENT_NAME"
+echo "================================================"
+
+# Count completed runs
+RUNS_DIR="${OUTPUT_BASE}/${EXPERIMENT_NAME}/runs"
+if [ -d "$RUNS_DIR" ]; then
+    COMPLETED_RUNS=$(find "$RUNS_DIR" -name "*.pt" -o -name "final_model.pt" | wc -l)
+    echo "Completed runs with saved models: $COMPLETED_RUNS"
+    echo "Expected runs: $NUM_CONFIGS"
+    
+    if [ $COMPLETED_RUNS -eq $NUM_CONFIGS ]; then
+        echo "Status: ✓ All runs completed successfully"
+    else
+        echo "Status: ⚠ Some runs may have failed"
+        echo "Check individual task logs for details"
+    fi
+else
+    echo "Warning: Runs directory not found: $RUNS_DIR"
+fi
+
+echo "================================================"
 
 exit $SRUN_EXIT_CODE
