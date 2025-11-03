@@ -176,7 +176,15 @@ def generate_sweep_configs(base_config_path, experiment_name, parameter_grid,
         with open(config_path, 'w') as f:
             yaml.dump(config_copy, f, default_flow_style=False, indent=2)
         
-        config_files.append(str(config_path.relative_to(Path.cwd())))
+        # Store path as-is (already relative or make it relative if absolute)
+        if config_path.is_absolute():
+            try:
+                config_files.append(str(config_path.relative_to(Path.cwd())))
+            except ValueError:
+                config_files.append(str(config_path))
+        else:
+            config_files.append(str(config_path))
+        
         run_names.append(run_name)
         config_num += 1
     
