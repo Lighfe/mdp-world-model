@@ -1,0 +1,71 @@
+# configs/tech_sub_base.yaml
+# Base configuration for tech substitution experiments
+# Complete default configuration - single source of truth
+# Every parameter used in training must be defined here
+
+# Run metadata
+meta:
+  db_path: "datasets/results/tech_sim.db"
+  seed: 42
+  output_dir: "tech_substitution_results"
+  run_id: "tech_sub_base"
+
+# Data parameters
+data:
+  system_type: "tech_substitution"
+  val_size: 1000
+  test_size: 1000
+
+# Model architecture
+model:
+  num_states: 4
+  hidden_dim: 32
+  predictor_type: "bilinear"  # choices: standard, control_gate, bilinear
+  value_method: null  # null = use system default
+  
+  # Target encoder settings
+  use_target_encoder: true
+  ema_decay: 0.9
+  
+  # Gumbel softmax settings
+  use_gumbel: true
+  initial_temp: 5.0
+  min_temp: 0.5
+  
+  # Weight initialization
+  encoder_init_method: "xavier_uniform"  # choices: xavier_uniform, xavier_normal, he, chaos, chaos2
+
+# Training parameters
+training:
+  epochs: 100
+  batch_size: 64
+  checkpoint_every: 25
+  
+  # Optimizer settings
+  optimizer_type: "adamw"  # choices: adam, adamw
+  lr: 1.0e-5
+  weight_decay: 0.00  # only used with adamw
+  
+  # Learning rate scheduling
+  scheduler_type: "cosine"  # choices: cosine, warm_restarts, fixed
+  min_lr: 1.0e-6
+  use_warmup: true
+  warmup_epochs: 10
+  restart_period: 20  # for warm_restarts
+  restart_mult: 1     # for warm_restarts
+
+# Loss function configuration
+loss:
+  # Main loss weights
+  state_loss_weight: 0.5
+  value_loss_weight: 2.0
+  
+  # Loss types
+  state_loss_type: "kl_div"  # choices: kl_div, cross_entropy, mse, js_div
+  value_loss_type: null      # null = use system default
+  
+  # Entropy regularization
+  use_entropy_reg: true
+  entropy_weight: 3.0
+  use_entropy_decay: true
+  entropy_decay_proportion: 0.2
