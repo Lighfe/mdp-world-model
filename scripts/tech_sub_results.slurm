@@ -1,37 +1,27 @@
 #!/bin/bash
-#SBATCH --job-name=param_sweep
+#SBATCH --job-name=tech_sub_results
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=3:00:00
+#SBATCH --time=2:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=10           # Number of parallel tasks (adjust based on your needs)
+#SBATCH --ntasks=10           # 10 parallel tasks (each runs 3 configs)
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --output=log/sweep_%A_%a.out
-#SBATCH --error=log/sweep_%A_%a.err
+#SBATCH --output=log/tech_sub_results_%j.out
+#SBATCH --error=log/tech_sub_results_%j.err
 
 # ============================================================================
-# PARAMETER SWEEP SLURM TEMPLATE
+# PARAMETER SWEEP: tech_sub_results
 # 
-# This script runs multiple training jobs in parallel using configs generated
-# by create_sweep_configs.py
-#
-# Usage:
-#   1. Generate configs: python create_sweep_configs.py --experiment <name> ...
-#   2. Edit EXPERIMENT_NAME below to match your experiment
-#   3. Adjust --ntasks based on desired parallelism
-#   4. Submit: sbatch run_param_sweep.slurm
+# Experiment: value_loss_weight × seed × learning_rate grid
+# Total configs: 30 (5 × 3 × 2)
+# Parallelization: 10 tasks, each running 3 configs sequentially
 # ============================================================================
 
-# ============================================================================
-# CONFIGURATION - EDIT THESE
-# ============================================================================
-EXPERIMENT_NAME="tech_sub_vlw_sweep"  # Must match the experiment name used in create_sweep_configs.py
+EXPERIMENT_NAME="tech_sub_results"
 OUTPUT_BASE="neural_networks/output"
 
-# ============================================================================
-# DO NOT EDIT BELOW THIS LINE (unless you know what you're doing)
 # ============================================================================
 
 echo "========================================================"
@@ -174,8 +164,8 @@ export NUM_CONFIGS
 
 # Run parallel training
 echo "Launching $SLURM_NTASKS parallel tasks..."
-srun --output=log/sweep_task_${SLURM_JOBID}_%t.out \
-     --error=log/sweep_task_${SLURM_JOBID}_%t.err \
+srun --output=log/tech_sub_results_task_${SLURM_JOBID}_%t.out \
+     --error=log/tech_sub_results_task_${SLURM_JOBID}_%t.err \
      bash "$TRAINING_SCRIPT"
 
 SRUN_EXIT_CODE=$?
@@ -196,7 +186,7 @@ echo "Experiment: $EXPERIMENT_NAME"
 echo "srun exit code: $SRUN_EXIT_CODE"
 echo "Results saved to: ${OUTPUT_BASE}/${EXPERIMENT_NAME}/runs/"
 echo "GPU usage log: log/gpu_${SLURM_JOBID}.log"
-echo "Task logs: log/sweep_task_${SLURM_JOBID}_*.out"
+echo "Task logs: log/tech_sub_results_task_${SLURM_JOBID}_*.out"
 echo "========================================================"
 
 # Print summary
@@ -231,11 +221,11 @@ elif [ -d "$EXPERIMENT_DIR" ]; then
     echo "  - Training failed early"
     echo "  - Output directory structure is different than expected"
     echo ""
-    echo "Check task logs for details: log/sweep_task_${SLURM_JOBID}_*.out"
+    echo "Check task logs for details: log/tech_sub_results_task_${SLURM_JOBID}_*.out"
 else
     echo "Experiment directory not found: $EXPERIMENT_DIR"
     echo "Training may have failed to start."
-    echo "Check main log: log/sweep_${SLURM_JOBID}_${SLURM_ARRAY_TASK_ID}.out"
+    echo "Check main log: log/tech_sub_results_${SLURM_JOBID}.out"
 fi
 
 echo "================================================"

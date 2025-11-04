@@ -7,7 +7,7 @@
 meta:
   db_path: "datasets/results/tech_sim.db"
   seed: 42
-  output_dir: "tech_substitution_results"
+  output_dir: "neural_networks/output/tech_sub_results"
   run_id: "tech_sub_base"
 
 # Data parameters
@@ -21,7 +21,7 @@ model:
   num_states: 4
   hidden_dim: 32
   predictor_type: "standard"  # choices: standard, control_gate, bilinear
-  value_method: null  # null = use system default
+  value_method: "market_share"  # null = use system default
   
   # Target encoder settings
   use_target_encoder: true
@@ -37,7 +37,7 @@ model:
 
 # Training parameters
 training:
-  epochs: 100
+  epochs: 75
   batch_size: 128
   checkpoint_every: 25
   

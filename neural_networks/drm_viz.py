@@ -237,13 +237,13 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
        # Set ticks and labels based on coordinate system
        if use_x_space:
            # Direct x-space plotting: use actual coordinate values
-           num_ticks = 6
+           num_ticks = 5
            ax.set_xticks(np.linspace(plot_bounds[0][0], plot_bounds[0][1], num_ticks))
            ax.set_yticks(np.linspace(plot_bounds[1][0], plot_bounds[1][1], num_ticks))
        else:
            # Z-space plotting with x-space labels: transform tick values
-           ax.set_xticks(np.linspace(0, 1, 6))
-           ax.set_yticks(np.linspace(0, 1, 6))
+           ax.set_xticks(np.linspace(0, 1, 5))
+           ax.set_yticks(np.linspace(0, 1, 5))
            
            # Create custom tick formatter functions for x-space labels
            def format_x1_ticks(z_val, pos):
