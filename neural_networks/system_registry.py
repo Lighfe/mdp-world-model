@@ -1,5 +1,6 @@
 from enum import Enum
 import torch
+import numpy as np
 from data_generation.simulations.grid import tangent_transformation, logistic_transformation, identity_transformation
 
 class SystemType(Enum):
@@ -37,7 +38,7 @@ SYSTEM_CONFIGS = {
             'identity': lambda values: values[:, 1]  / values[:, 0] # similar to angle / market share sorting
         },
         'visualization_bounds': {
-            'x_space': [(0, 1e6), (0, 1e6)],  # Could be [(0, np.inf), (0, np.inf)] 
+            'x_space': [(0, np.inf), (0, np.inf)],  # Could be [(0, np.inf), (0, np.inf)] 
             'description': 'Large range to capture tangent transformation behavior'
         }
     },

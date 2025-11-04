@@ -7,8 +7,8 @@
 meta:
   db_path: "datasets/results/tech_sim.db"
   seed: 42
-  output_dir: "tech_substitution_results"
-  run_id: "tech_sub_base"
+  output_dir: "neural_networks/output/tech_sub_old"
+  run_id: "tech_sub_old"
 
 # Data parameters
 data:
@@ -19,9 +19,9 @@ data:
 # Model architecture
 model:
   num_states: 4
-  hidden_dim: 32
+  hidden_dim: 64
   predictor_type: "bilinear"  # choices: standard, control_gate, bilinear
-  value_method: null  # null = use system default
+  value_method: "market_share"  # null = use system default
   
   # Target encoder settings
   use_target_encoder: true
@@ -43,12 +43,12 @@ training:
   
   # Optimizer settings
   optimizer_type: "adamw"  # choices: adam, adamw
-  lr: 1.0e-5
+  lr: 5.0e-5
   weight_decay: 0.00  # only used with adamw
   
   # Learning rate scheduling
-  scheduler_type: "cosine"  # choices: cosine, warm_restarts, fixed
-  min_lr: 1.0e-6
+  scheduler_type: "fixed"  # choices: cosine, warm_restarts, fixed
+  min_lr: 1.0e-5
   use_warmup: true
   warmup_epochs: 10
   restart_period: 20  # for warm_restarts

@@ -273,7 +273,7 @@ def train_drm_model(config_path, multi_run=False):
     }
     
     # State metrics collection (only if not multi_run)
-    collect_every_n_epochs = 2
+    collect_every_n_epochs = 1
     collect_initial = True
     visualization_frames = []
     prev_dominant_states = None
@@ -500,7 +500,7 @@ def train_drm_model(config_path, multi_run=False):
             })
         
         # Visualizations at specific epochs (only if not multi_run)
-        if not multi_run and (epoch == 10 or epoch == 50):
+        if not multi_run and (epoch == 5 or epoch == 25):
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
             visualize_state_space(
                 model=model,
