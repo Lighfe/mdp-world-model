@@ -7,7 +7,7 @@
 meta:
   db_path: "datasets/results/tech_sim.db"
   seed: 42
-  output_dir: "neural_networks/output/tech_sub_old"
+  output_dir: "neural_networks/output/tech_sub_old2"
   run_id: "tech_sub_old"
 
 # Data parameters
