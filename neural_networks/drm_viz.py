@@ -155,7 +155,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
    # Unpack the transformation functions
    forward_transforms, inverse_transforms, _ = zip(*transformations)
    
-   if bounds is None:
+   if bounds is None or system_type=="tech_substitution": # TBD
        # Original behavior: plot in z-space (0,1) with x-space tick labels
        plot_bounds = [(0, 1), (0, 1)]
        use_x_space = False
