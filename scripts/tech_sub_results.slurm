@@ -1,25 +1,25 @@
 #!/bin/bash
-#SBATCH --job-name=tech_sub_results
+#SBATCH --job-name=tech_sub_temp
 #SBATCH --partition=gpu
 #SBATCH --qos=gpushort
-#SBATCH --time=2:00:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=10           # 10 parallel tasks (each runs 3 configs)
+#SBATCH --ntasks=12           # 12 parallel tasks (one per config)
 #SBATCH --cpus-per-task=1
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --output=log/tech_sub_results_%j.out
-#SBATCH --error=log/tech_sub_results_%j.err
+#SBATCH --output=log/tech_sub_temp_%j.out
+#SBATCH --error=log/tech_sub_temp_%j.err
 
 # ============================================================================
-# PARAMETER SWEEP: tech_sub_results
+# PARAMETER SWEEP: tech_sub_temp
 # 
-# Experiment: value_loss_weight × seed × learning_rate grid
-# Total configs: 30 (5 × 3 × 2)
-# Parallelization: 10 tasks, each running 3 configs sequentially
+# Experiment: seed × initial_temp × ema_decay grid
+# Total configs: 12 (3 × 2 × 2)
+# Parallelization: 12 tasks, each running 1 config
 # ============================================================================
 
-EXPERIMENT_NAME="tech_sub_results"
+EXPERIMENT_NAME="tech_sub_temp"
 OUTPUT_BASE="neural_networks/output"
 
 # ============================================================================
@@ -164,8 +164,8 @@ export NUM_CONFIGS
 
 # Run parallel training
 echo "Launching $SLURM_NTASKS parallel tasks..."
-srun --output=log/tech_sub_results_task_${SLURM_JOBID}_%t.out \
-     --error=log/tech_sub_results_task_${SLURM_JOBID}_%t.err \
+srun --output=log/tech_sub_temp_task_${SLURM_JOBID}_%t.out \
+     --error=log/tech_sub_temp_task_${SLURM_JOBID}_%t.err \
      bash "$TRAINING_SCRIPT"
 
 SRUN_EXIT_CODE=$?
@@ -186,7 +186,7 @@ echo "Experiment: $EXPERIMENT_NAME"
 echo "srun exit code: $SRUN_EXIT_CODE"
 echo "Results saved to: ${OUTPUT_BASE}/${EXPERIMENT_NAME}/runs/"
 echo "GPU usage log: log/gpu_${SLURM_JOBID}.log"
-echo "Task logs: log/tech_sub_results_task_${SLURM_JOBID}_*.out"
+echo "Task logs: log/tech_sub_temp_task_${SLURM_JOBID}_*.out"
 echo "========================================================"
 
 # Print summary
@@ -221,11 +221,11 @@ elif [ -d "$EXPERIMENT_DIR" ]; then
     echo "  - Training failed early"
     echo "  - Output directory structure is different than expected"
     echo ""
-    echo "Check task logs for details: log/tech_sub_results_task_${SLURM_JOBID}_*.out"
+    echo "Check task logs for details: log/tech_sub_temp_task_${SLURM_JOBID}_*.out"
 else
     echo "Experiment directory not found: $EXPERIMENT_DIR"
     echo "Training may have failed to start."
-    echo "Check main log: log/tech_sub_results_${SLURM_JOBID}.out"
+    echo "Check main log: log/tech_sub_temp_${SLURM_JOBID}.out"
 fi
 
 echo "================================================"
