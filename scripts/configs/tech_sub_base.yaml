@@ -43,12 +43,12 @@ training:
   
   # Optimizer settings
   optimizer_type: "adamw"  # choices: adam, adamw
-  lr: 3.3e-4
+  lr: 1e-4
   weight_decay: 0.017  # only used with adamw
   
   # Learning rate scheduling
   scheduler_type: "cosine"  # choices: cosine, warm_restarts, fixed
-  min_lr: 3.3e-5
+  min_lr: 1e-5
   use_warmup: true
   warmup_epochs: 10
   restart_period: 20  # for warm_restarts
@@ -58,7 +58,7 @@ training:
 loss:
   # Main loss weights
   state_loss_weight: 1.0
-  value_loss_weight: 0.55
+  value_loss_weight: 2.5
   
   # Loss types
   state_loss_type: "kl_div"  # choices: kl_div, cross_entropy, mse, js_div

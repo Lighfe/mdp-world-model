@@ -475,7 +475,7 @@ def extract_and_calculate_metrics(model, device, num_states, system_type,
     model.eval()
     with torch.no_grad():
         obs_tensor = torch.FloatTensor(grid_points).to(device)
-        state_probs = model.get_state_probs(obs_tensor, training=False, soft=True)
+        state_probs = model.get_state_probs(obs_tensor, training=False, soft=False)
         state_probs = state_probs.cpu().numpy()
     
     # Calculate metrics immediately
