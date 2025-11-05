@@ -43,12 +43,12 @@ training:
   
   # Optimizer settings
   optimizer_type: "adamw"  # choices: adam, adamw
-  lr: 1e-4
+  lr: 1.0e-4
   weight_decay: 0.017  # only used with adamw
   
   # Learning rate scheduling
   scheduler_type: "cosine"  # choices: cosine, warm_restarts, fixed
-  min_lr: 1e-5
+  min_lr: 1.0e-5
   use_warmup: true
   warmup_epochs: 10
   restart_period: 20  # for warm_restarts

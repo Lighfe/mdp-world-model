@@ -66,6 +66,46 @@ def parse_parameter_spec(param_spec):
     
     return param_path, converted_values
 
+def convert_string_numbers_in_dict(d):
+    """
+    Recursively convert string representations of numbers to actual numbers in a dictionary.
+    Handles scientific notation like '3.3e-4'.
+    
+    Args:
+        d: Dictionary to process
+        
+    Returns:
+        Dictionary with converted values
+    """
+    if not isinstance(d, dict):
+        return d
+    
+    result = {}
+    for key, value in d.items():
+        if isinstance(value, dict):
+            # Recursively process nested dicts
+            result[key] = convert_string_numbers_in_dict(value)
+        elif isinstance(value, str):
+            # Try to convert string to number
+            try:
+                # Try int first
+                if '.' not in value and 'e' not in value.lower():
+                    result[key] = int(value)
+                else:
+                    # Try float (handles scientific notation)
+                    result[key] = float(value)
+            except (ValueError, AttributeError):
+                # Keep as string if conversion fails
+                result[key] = value
+        elif isinstance(value, list):
+            # Process lists recursively
+            result[key] = [convert_string_numbers_in_dict(item) if isinstance(item, dict) else item for item in value]
+        else:
+            # Keep other types as-is
+            result[key] = value
+    
+    return result
+
 def create_smart_run_name(override_values, experiment_name):
     """
     Create intelligent run name based on swept parameters.
@@ -136,6 +176,9 @@ def generate_sweep_configs(base_config_path, experiment_name, parameter_grid,
     """
     # Load base config
     base_config = load_config(base_config_path)
+    
+    # Convert any string numbers in base config to proper types
+    base_config = convert_string_numbers_in_dict(base_config)
     
     # Create output directory structure
     experiment_dir = Path(output_base_dir) / experiment_name
