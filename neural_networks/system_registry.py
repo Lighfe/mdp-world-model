@@ -38,8 +38,8 @@ SYSTEM_CONFIGS = {
             'identity': lambda values: values[:, 1]  / values[:, 0] # similar to angle / market share sorting
         },
         'visualization_bounds': {
-            'x_space': [(0, 50), (0, 50)],  # TBD could be [(0, np.inf), (0, np.inf)] 
-            'description': 'Large range to capture tangent transformation behavior'
+            'x_space': [(0, 40), (0, 40)],  # TBD could be [(0, np.inf), (0, np.inf)] 
+            'description': 'Large range to capture range where main data was sampled'
         }
     },
     'saddle_system': {
