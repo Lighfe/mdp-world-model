@@ -25,7 +25,7 @@ model:
   
   # Target encoder settings
   use_target_encoder: true
-  ema_decay: 0.66
+  ema_decay: 0.9
   
   # Gumbel softmax settings
   use_gumbel: true
