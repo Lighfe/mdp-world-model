@@ -47,6 +47,14 @@ def parse_parameter_spec(param_spec):
     # Try to convert to appropriate types
     converted_values = []
     for v in values:
+        # Try boolean
+        if v.lower() == 'true':
+            converted_values.append(True)
+            continue
+        elif v.lower() == 'false':
+            converted_values.append(False)
+            continue
+        
         # Try int
         try:
             converted_values.append(int(v))
