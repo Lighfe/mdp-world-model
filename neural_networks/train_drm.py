@@ -306,7 +306,7 @@ def train_drm_model(config_path, multi_run=False):
         visualization_frames.append(data_frame_path)
         prev_dominant_states = dominant_states
 
-        state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
+        state_vis_path = os.path.join(output_dir, f"states_initial_{run_id}.png")
         visualize_state_space(
             model=model,
             output_path=state_vis_path,
