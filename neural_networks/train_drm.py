@@ -305,6 +305,20 @@ def train_drm_model(config_path, multi_run=False):
         )
         visualization_frames.append(data_frame_path)
         prev_dominant_states = dominant_states
+
+        state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
+        visualize_state_space(
+            model=model,
+            output_path=state_vis_path,
+            transformations=[transformation, transformation],
+            device=device,
+            num_points=1000,
+            num_states=num_states,
+            system_type=system_type,
+            points=points_config['points'] if points_config else None,
+            angles_degrees=points_config['angles_degrees'] if points_config else None,
+            bounds=bounds
+        )
     
     # TRAINING LOOP
     for epoch in range(epochs):
@@ -500,7 +514,7 @@ def train_drm_model(config_path, multi_run=False):
             })
         
         # Visualizations at specific epochs (only if not multi_run)
-        if not multi_run and (epoch == 5 or epoch == 25):
+        if not multi_run and (epoch == 2 or epoch==5 or epoch == 10 or epoch == 20 or epoch == 50):
             state_vis_path = os.path.join(output_dir, f"states_after{epoch}_{run_id}.png")
             visualize_state_space(
                 model=model,

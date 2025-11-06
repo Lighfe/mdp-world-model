@@ -117,13 +117,14 @@ def convert_string_numbers_in_dict(d):
 def create_smart_run_name(override_values, experiment_name):
     """
     Create intelligent run name based on swept parameters.
+    Seed always comes at the end for easier identification.
     
     Args:
         override_values: Dictionary of parameter overrides
         experiment_name: Base experiment name
         
     Returns:
-        String run name with abbreviated parameters
+        String run name with abbreviated parameters (seed at end)
     """
     # Common abbreviations for parameters
     abbrev_map = {
@@ -131,18 +132,32 @@ def create_smart_run_name(override_values, experiment_name):
         'meta.db_path': 'db',
         'loss.value_loss_weight': 'vlw',
         'loss.state_loss_weight': 'slw',
+        'loss.use_entropy_reg': 'ent',
         'training.lr': 'lr',
         'training.epochs': 'ep',
         'model.hidden_dim': 'hd',
         'model.num_states': 'ns',
+        'model.value_method': 'vm',
+        'model.use_gumbel': 'gum',
+        'model.encoder_init_method': 'enc',
+        'model.initial_temp': 'temp',
+        'model.ema_decay': 'ema',
         'training.batch_size': 'bs',
         'training.weight_decay': 'wd',
     }
     
     parts = [experiment_name]
+    seed_part = None
     
-    # Sort for consistent ordering
-    for param_path in sorted(override_values.keys()):
+    # Sort parameters, but handle seed separately
+    sorted_params = sorted(override_values.keys())
+    
+    for param_path in sorted_params:
+        # Skip seed - we'll add it at the end
+        if param_path == 'meta.seed':
+            seed_part = ('s', override_values[param_path])
+            continue
+            
         value = override_values[param_path]
         
         # Get abbreviation or use last part of path
@@ -155,6 +170,9 @@ def create_smart_run_name(override_values, experiment_name):
         if param_path == 'meta.db_path':
             # Extract dataset number from path like "datasets/tech_sub_1.db"
             value_str = Path(str(value)).stem.split('_')[-1]
+        elif isinstance(value, bool):
+            # Format booleans as T/F
+            value_str = 'T' if value else 'F'
         elif isinstance(value, float):
             # Format floats nicely
             if value < 0.01:
@@ -165,6 +183,11 @@ def create_smart_run_name(override_values, experiment_name):
             value_str = str(value)
         
         parts.append(f"{abbrev}{value_str}")
+    
+    # Add seed at the end
+    if seed_part:
+        abbrev, value = seed_part
+        parts.append(f"{abbrev}{value}")
     
     return "_".join(parts)
 
