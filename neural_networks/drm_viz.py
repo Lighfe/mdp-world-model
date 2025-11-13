@@ -266,8 +266,8 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
             steigung = 0.125
             x_line = np.array([0, 40])
             y_line = steigung * x_line
-            axes.plot(x_line, x_line, color='#D81B60', linestyle='--', linewidth=0.6) # diagonal basin boundary
-            axes.plot(x_line, y_line, color='#D81B60', linestyle='--', linewidth=0.6) # lower basin boundary
+            ax.plot(x_line, x_line, color='#D81B60', linestyle='--', linewidth=0.6) # diagonal basin boundary
+            ax.plot(x_line, y_line, color='#D81B60', linestyle='--', linewidth=0.6) # lower basin boundary
 
        # Overlay points and angles if provided
        if points_plot is not None and angles_degrees is not None:
