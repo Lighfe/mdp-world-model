@@ -262,11 +262,18 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
            ax.xaxis.set_major_formatter(FuncFormatter(format_x1_ticks))
            ax.yaxis.set_major_formatter(FuncFormatter(format_x2_ticks))
        
+       if system_type=="tech_substitution":
+            steigung = 0.125
+            x_line = np.array([0, 40])
+            y_line = steigung * x_line
+            axes.plot(x_line, x_line, color='#D81B60', linestyle='--', linewidth=0.6) # diagonal basin boundary
+            axes.plot(x_line, y_line, color='#D81B60', linestyle='--', linewidth=0.6) # lower basin boundary
+
        # Overlay points and angles if provided
        if points_plot is not None and angles_degrees is not None:
            for i, (point_plot, angle_deg) in enumerate(zip(points_plot, angles_degrees)):
                # Draw white point
-               ax.plot(point_plot[0], point_plot[1], 'wx', markersize=6, markeredgecolor='black', markeredgewidth=0.5)
+               ax.plot(point_plot[0], point_plot[1], 'x', color='#D81B60', markersize=6, markeredgecolor='black', markeredgewidth=0.6)
                
                # Draw angle line from edge to edge
                angle_rad = np.radians(angle_deg)
@@ -292,7 +299,7 @@ def visualize_state_space(model, output_path=None, transformations=None, device=
                y_start = py + t_min * sin_a
                y_end = py + t_max * sin_a
 
-               ax.plot([x_start, x_end], [y_start, y_end], 'w--', linewidth=0.5)
+               ax.plot([x_start, x_end], [y_start, y_end], color='#D81B60', linestyle='--', linewidth=0.6)
        
        # Set title
        ax.set_title(f'State {state + 1}', fontsize=14, fontweight='bold')
