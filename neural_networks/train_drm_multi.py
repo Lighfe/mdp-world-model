@@ -30,6 +30,7 @@ from neural_networks.drm_viz import (
     plot_softmax_rank_aggregated,
     plot_state_metrics_aggregated,
     plot_test_metrics_summary,
+    plot_probing_aggregated,
 )
 
 
@@ -68,7 +69,10 @@ def _aggregate_curve_data(all_curves):
 
 
 def _aggregate_epoch_dict_data(all_epoch_dicts):
-    """Aggregate epoch-based dict data (like softmax_rank_metrics, state_metrics)."""
+    """Aggregate epoch-based dict data (like softmax_rank_metrics, state_metrics).
+    
+    PRESERVES EPOCH NUMBERS for proper x-axis plotting.
+    """
     if not all_epoch_dicts or not any(all_epoch_dicts):
         return {}
 
@@ -78,10 +82,15 @@ def _aggregate_epoch_dict_data(all_epoch_dicts):
         for epoch_dict in epoch_list:
             all_keys.update(epoch_dict.keys())
 
-    # Remove 'epoch' key as it's just indexing
+    # Keep 'epoch' key separate for x-axis
     metric_keys = [key for key in all_keys if key != "epoch"]
 
     aggregated_metrics = {}
+    
+    # Assumes all runs have the same epoch checkpoints
+    if all_epoch_dicts and all_epoch_dicts[0]:
+        epochs = [epoch_dict.get("epoch") for epoch_dict in all_epoch_dicts[0]]
+        aggregated_metrics["epochs"] = epochs
 
     for key in metric_keys:
         # Collect values for this metric across all runs and epochs
@@ -137,6 +146,7 @@ def aggregate_results(config_output_dir):
         "test_metrics": {},
         "softmax_rank_metrics": {},
         "state_metrics": {},
+        "probing_metrics": {},
     }
 
     # 1. Aggregate training curves (lists per epoch)
@@ -183,6 +193,12 @@ def aggregate_results(config_output_dir):
             [hist.get("state_metrics", []) for hist in histories]
         )
 
+    # 5. Aggregate probing metrics (lists of dicts per epoch)
+    if "intermediate_probing" in histories[0] and histories[0]["intermediate_probing"]:
+        aggregated["probing_metrics"] = _aggregate_epoch_dict_data(
+            [hist.get("intermediate_probing", []) for hist in histories]
+        )
+
     # Save aggregated results
     output_path = config_output_dir / "aggregated_results.json"
     with open(output_path, "w") as f:
@@ -208,6 +224,11 @@ def aggregate_results(config_output_dir):
     # 4. Test metrics summary
     test_summary_path = config_output_dir / "test_metrics_summary.png"
     plot_test_metrics_summary(aggregated, test_summary_path)
+
+    # 5. Probing evolution (if available)
+    if aggregated.get("probing_metrics"):
+        probing_path = config_output_dir / "probing_aggregated.png"
+        plot_probing_aggregated(aggregated, probing_path)
 
     print("All visualizations created successfully!")
 

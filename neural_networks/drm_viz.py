@@ -1429,6 +1429,59 @@ def plot_softmax_rank_evolution(history, save_path):
     print(f"Saved softmax rank evolution plot to {save_path}")
 
 
+def plot_probing_evolution(history, save_path):
+    """
+    Plot evolution of layer probing discrete accuracy over training.
+    Uses Paul Tol's muted color scheme for colorblind accessibility.
+    
+    Args:
+        history: Training history containing intermediate_probing metrics
+        save_path: Path to save the plot
+    """
+    
+    if "intermediate_probing" not in history or not history["intermediate_probing"]:
+        print("No intermediate probing metrics found in history")
+        return
+    
+    # Paul Tol's muted color scheme
+    tol_blue = "#332288"
+    
+    probing_list = history["intermediate_probing"]
+    epochs = [p["epoch"] for p in probing_list]
+    accuracies = [p["discrete_accuracy"] for p in probing_list]
+    
+    # Create figure with single plot
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+    
+    # Plot discrete accuracy evolution
+    ax.plot(
+        epochs,
+        accuracies,
+        "o-",
+        label="Discrete Accuracy (Validation)",
+        linewidth=2,
+        markersize=6,
+        color=tol_blue,
+    )
+    
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Discrete Accuracy", fontsize=12)
+    ax.set_title("Layer Probing: Discrete Accuracy Evolution", fontsize=14)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim([0, 1])  # Accuracy is between 0 and 1
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    
+    print(f"Saved probing evolution plot to: {save_path}")
+
+
+
+### Aggregation functions
+############################################################################
+
 def plot_training_curves_aggregated(aggregated_data, save_path):
     """
     Plot aggregated training curves with soft std visualization for train curves only.
@@ -1811,6 +1864,75 @@ def plot_test_metrics_summary(aggregated_data, save_path):
     plt.close()
     print(f"Saved test metrics summary plot to {save_path}")
 
+def plot_probing_aggregated(aggregated_data, save_path):
+    """
+    Plot aggregated probing evolution with std bands.
+    Uses Paul Tol's muted color scheme for colorblind accessibility.
+    
+    Args:
+        aggregated_data: Aggregated results containing probing_metrics
+        save_path: Path to save the plot
+    """
+    
+    # Paul Tol's muted color scheme
+    tol_blue = "#332288"
+    
+    probing_metrics = aggregated_data.get("probing_metrics", {})
+    if not probing_metrics:
+        print("No probing metrics found for aggregation plot")
+        return
+    
+    # Extract epochs array (actual epoch numbers like 5, 10, 15, ...)
+    epochs = probing_metrics.get("epochs", [])
+    if not epochs:
+        print("No epoch information found in probing metrics")
+        return
+    
+    # Extract accuracy data
+    accuracy_data = probing_metrics.get("discrete_accuracy")
+    if not accuracy_data:
+        print("No discrete_accuracy data found in probing metrics")
+        return
+    
+    mean_values = np.array(accuracy_data["mean"])
+    std_values = np.array(accuracy_data["std"])
+    
+    # Create figure
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+    
+    # Plot mean with std bands
+    ax.plot(
+        epochs,
+        mean_values,
+        "o-",
+        label=f"Discrete Accuracy (n={accuracy_data['count']})",
+        linewidth=2,
+        markersize=6,
+        color=tol_blue,
+    )
+    
+    # Add std band
+    ax.fill_between(
+        epochs,
+        mean_values - std_values,
+        mean_values + std_values,
+        color=tol_blue,
+        alpha=0.2,
+        label="±1 std",
+    )
+    
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Discrete Accuracy", fontsize=12)
+    ax.set_title("Layer Probing: Aggregated Discrete Accuracy Evolution", fontsize=14)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim([0, 1])  # Accuracy is between 0 and 1
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    
+    print(f"Saved probing aggregated plot to: {save_path}")
 
 ### NOTE: NO LONGER IN USE
 

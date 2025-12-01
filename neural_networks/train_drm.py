@@ -65,6 +65,7 @@ from neural_networks.drm_viz import (
     create_png_from_frame_data,
     create_gif_from_data_frames,
     plot_softmax_rank_evolution,
+    plot_probing_evolution,
 )
 
 from neural_networks.utils import *
@@ -588,8 +589,8 @@ def train_drm_model(config_path, multi_run=False):
                 f"  Batch Entropy: {val_batch_entropy:.4f}, Individual Entropy: {val_individual_entropy:.4f}"
             )
 
-        # INTERMEDIATE LAYER PROBING - every 10 epochs
-        if (epoch + 1) % 10 == 0 and system_type == "saddle_system":
+        # INTERMEDIATE LAYER PROBING - every 5 epochs
+        if ((epoch + 1) % 5 == 0 or epoch == 0) and system_type == "saddle_system":
             if not multi_run:
                 print(f"\n--- Intermediate Layer Probing at Epoch {epoch+1} ---")
             intermediate_results = run_layer_probing(
@@ -915,6 +916,24 @@ def train_drm_model(config_path, multi_run=False):
             )
             print(f"Hidden ||A₃||_F: {final_metrics['hidden_frobenius_norm']:.3f}")
             print(f"Logit ||M₄||_F: {final_metrics['logit_frobenius_norm']:.3f}")
+            print("=" * 60)
+
+    # LAYER PROBING POST-PROCESSING AND PLOTTING:
+    if "intermediate_probing" in history and history["intermediate_probing"]:
+        if not multi_run:
+            # Create probing evolution plot
+            probing_plot_path = os.path.join(
+                output_dir, f"probing_evolution_{run_id}.png"
+            )
+            plot_probing_evolution(history, probing_plot_path)
+
+            # Print final summary
+            final_probing = history["intermediate_probing"][-1]
+            print("\n" + "=" * 60)
+            print("LAYER PROBING SUMMARY")
+            print("=" * 60)
+            print(f"Final discrete accuracy: {final_probing['discrete_accuracy']:.4f}")
+            print(f"Final epoch tracked: {final_probing['epoch']}")
             print("=" * 60)
 
     # Save state assignments (for batch aggregation)
