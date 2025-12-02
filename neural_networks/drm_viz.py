@@ -1919,7 +1919,7 @@ def plot_probing_aggregated(aggregated_data, save_path):
     
     ax.set_xlabel("Epoch", fontsize=12)
     ax.set_ylabel("Discrete Accuracy", fontsize=12)
-    ax.legend(fontsize=10)
+    #ax.legend(fontsize=10)
     ax.grid(True, alpha=0.2)
     ax.set_ylim([0, 1])  # Accuracy is between 0 and 1
     
