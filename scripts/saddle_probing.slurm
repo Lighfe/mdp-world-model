@@ -90,7 +90,7 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # Configuration
 CONFIG_FILE="scripts/configs/saddle_test.yaml"
-CONFIG_ID="saddle_probing_fail"
+CONFIG_ID="saddle_probing_v0"
 SEEDS="141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156"
 DB_PATHS="datasets/results/multi_saddle_3.db,datasets/results/multi_saddle_8.db"
 MAX_PARALLEL=16
