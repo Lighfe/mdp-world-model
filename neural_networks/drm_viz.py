@@ -1748,29 +1748,27 @@ def plot_state_metrics_aggregated(aggregated_data, save_path):
                 mean_values + std_values,
                 color=color,
                 alpha=0.1,
-            )  # Lower alpha for softer appearance
+            )
 
     # Plot 1: Sharpness metrics
     ax = axes[0]
-    plot_metric_with_std(ax, "sharpness_mean", "Mean Sharpness", tol_muted[1])
+    plot_metric_with_std(ax, "sharpness_mean", None, tol_muted[1])
 
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Entropy (Sharpness)")
-    ax.set_title("State Assignment Sharpness")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    #ax.legend()
+    ax.grid(True, alpha=0.2)
 
     # Plot 2: Stability metrics
     ax = axes[1]
     plot_metric_with_std(
-        ax, "dominant_stability", "Dominant State Stability", tol_muted[1]
+        ax, "dominant_stability", None, tol_muted[1]
     )
 
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("Stability (%)")
-    ax.set_title("State Assignment Stability")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    ax.set_ylabel("State Assignment Stability (%)")
+    #ax.legend()
+    ax.grid(True, alpha=0.2)
     ax.set_ylim(0, 100)  # Stability is in percentage
 
     plt.tight_layout()
@@ -1905,7 +1903,6 @@ def plot_probing_aggregated(aggregated_data, save_path):
         epochs,
         mean_values,
         "o-",
-        label=f"Discrete Accuracy (n={accuracy_data['count']})",
         linewidth=2,
         markersize=6,
         color=tol_blue,
@@ -1917,15 +1914,13 @@ def plot_probing_aggregated(aggregated_data, save_path):
         mean_values - std_values,
         mean_values + std_values,
         color=tol_blue,
-        alpha=0.2,
-        label="±1 std",
+        alpha=0.1,
     )
     
     ax.set_xlabel("Epoch", fontsize=12)
     ax.set_ylabel("Discrete Accuracy", fontsize=12)
-    ax.set_title("Layer Probing: Aggregated Discrete Accuracy Evolution", fontsize=14)
     ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.2)
     ax.set_ylim([0, 1])  # Accuracy is between 0 and 1
     
     plt.tight_layout()
