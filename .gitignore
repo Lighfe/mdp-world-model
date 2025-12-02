@@ -19,6 +19,9 @@ venv/
 datasets/results/*
 !datasets/results/.gitkeep
 
+# Config files
+/scripts/configs/ablation_study*
+
 # Model checkpoints and visualizations
 /neural_networks/output/*
 
