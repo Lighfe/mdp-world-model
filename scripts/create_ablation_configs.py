@@ -114,7 +114,7 @@ def generate_ablation_configs(base_config_path, output_dir):
         
         modifications = {
             "meta.db_path": db_path,
-            "meta.output_dir": f"neural_networks/output/ablation_baseline_ds{ds_id}",
+            "meta.output_dir": f"neural_networks/ablation_study/ablation_baseline_ds{ds_id}",
         }
         
         config = create_config_variant(base_config, modifications)
@@ -143,7 +143,7 @@ def generate_ablation_configs(base_config_path, output_dir):
             
             modifications = {
                 "meta.db_path": db_path,
-                "meta.output_dir": f"neural_networks/output/ablation_vlw{vlw}_ds{ds_id}",
+                "meta.output_dir": f"neural_networks/output/ablation_study/ablation_vlw{vlw}_ds{ds_id}",
                 "loss.value_loss_weight": vlw,
             }
             
@@ -174,7 +174,7 @@ def generate_ablation_configs(base_config_path, output_dir):
             
             modifications = {
                 "meta.db_path": db_path,
-                "meta.output_dir": f"neural_networks/output/ablation_entropy{ew}_ds{ds_id}",
+                "meta.output_dir": f"neural_networks/output/ablation_study/ablation_entropy{ew}_ds{ds_id}",
                 "loss.entropy_weight": ew,
             }
             
@@ -206,7 +206,7 @@ def generate_ablation_configs(base_config_path, output_dir):
             
             modifications = {
                 "meta.db_path": db_path,
-                "meta.output_dir": f"neural_networks/output/ablation_gumbel_{gumbel_str}_ds{ds_id}",
+                "meta.output_dir": f"neural_networks/output/ablation_study/ablation_gumbel_{gumbel_str}_ds{ds_id}",
                 "model.use_gumbel": gumbel,
             }
             
@@ -237,7 +237,7 @@ def generate_ablation_configs(base_config_path, output_dir):
             
             modifications = {
                 "meta.db_path": db_path,
-                "meta.output_dir": f"neural_networks/output/ablation_temp{temp}_ds{ds_id}",
+                "meta.output_dir": f"neural_networks/output/ablation_study/ablation_temp{temp}_ds{ds_id}",
                 "model.initial_temp": temp,
             }
             
