@@ -134,7 +134,7 @@ echo "========================================================"
 echo "Starting training at $(date)"
 echo "========================================================"
 
-python train_drm_multi.py "$CONFIG_FILE" \
+python neural_networks/train_drm_multi.py "$CONFIG_FILE" \
     --config-id "$CONFIG_ID" \
     --seeds "$SEEDS" \
     --db-paths "$DB_PATHS" \
