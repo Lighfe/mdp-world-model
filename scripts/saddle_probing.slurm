@@ -4,9 +4,9 @@
 #SBATCH --qos=gpushort
 #SBATCH --time=02:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
+#SBATCH --mem=24G
 #SBATCH --output=log/probing_test_%j.out
 #SBATCH --error=log/probing_test_%j.err
 
@@ -89,7 +89,7 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # ============= END THREAD CONTROL =============
 
 # Configuration
-CONFIG_FILE="scripts/configs/base.yaml"
+CONFIG_FILE="scripts/configs/saddle_test.yaml"
 CONFIG_ID="saddle_probing"
 SEEDS="141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156"
 DB_PATHS="datasets/results/multi_saddle_3.db,datasets/results/multi_saddle_8.db"
