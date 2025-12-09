@@ -615,7 +615,7 @@ def visualize_final_state_assignments(
                     label=f"State {state + 1}",
                     zorder=2
                 )
-        ax.legend(lox="upper-right")
+        ax.legend(loc="upper-right")
     
     elif visualization_style == 'regions':
         # Region coloring - use the grid we already generated
