@@ -56,7 +56,6 @@ from neural_networks.drm_viz import (
     visualize_transition_matrices,
     visualize_model_architecture,
     plot_training_curves,
-    analyze_mdp_from_model,
     visualize_mdp,
     create_state_viz_from_data,
     analyze_state_assignment_evolution,
@@ -1039,6 +1038,48 @@ def train_drm_model(config_path, multi_run=False):
         visualize_transition_matrices(
             transition_matrices, control_values, transitions_vis_path
         )
+
+
+        # MDP Visualization
+        mdp_vis_path = os.path.join(output_dir, f"mdp_visualization_{run_id}.png")
+        
+        # Determine value format based on system type
+        if system_type == "saddle_system":
+            value_format = 'angle'
+            title = f'Learned MDP - Saddle System (Run {run_id})'
+        elif system_type == "tech_substitution":
+            value_format = 'float'
+            title = f'Learned MDP - Tech Substitution (Run {run_id})'
+        elif system_type == "social_tipping":
+            value_format = 'float'
+            title = f'Learned MDP - Social Tipping (Run {run_id})'
+        else:
+            value_format = 'float'
+            title = f'Learned MDP (Run {run_id})'
+        
+        # Determine number of actions based on system type and control_dim
+        if system_type == "saddle_system":
+            num_actions = control_dim  # Categorical actions
+        elif system_type == "social_tipping":
+            # Social tipping has 4 continuous controls, but we'll visualize as 2 representative actions
+            num_actions = 2
+        else:
+            num_actions = 2  # Default for continuous control systems
+        
+        try:
+            visualize_mdp(
+                model=model,
+                output_path=mdp_vis_path,
+                device=device,
+                num_actions=num_actions,
+                value_format=value_format,
+                #title=title,
+                threshold=0.02,
+            )
+            if verbose:
+                print(f"Created MDP visualization: {mdp_vis_path}")
+        except Exception as e:
+            print(f"Warning: Failed to create MDP visualization: {e}")
 
     # Calculate training time
     if not multi_run:
