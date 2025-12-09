@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+from matplotlib.patches import Patch
+from matplotlib.colors import ListedColormap
 import math
 import pandas as pd
 
@@ -31,7 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # NOTE: absolute imports from project root
 # Import application-specific modules
-from neural_networks.drm_dataset import create_data_loaders
+from neural_networks.drm_dataset import create_data_loaders, get_saddle_configuration
 from neural_networks.drm_loss import StableDRMLoss
 from neural_networks.drm import (
     DiscreteRepresentationsModel,
@@ -43,7 +45,7 @@ from data_generation.models.tech_substitution import (
     TechSubNumericalSolver,
 )
 
-from neural_networks.system_registry import get_transformation, SystemType
+from neural_networks.system_registry import get_transformation, SystemType, get_visualization_bounds
 from data_generation.simulations.grid import tangent_transformation
 
 """ 
@@ -400,6 +402,502 @@ def visualize_state_space(
     plt.close(fig)
     return fig, axes
 
+def visualize_final_state_assignments(
+    model,
+    output_path,
+    system_type,
+    device='cpu',
+    num_points=1000,
+    num_states=None,
+    visualization_style='scatter',
+    point_size=10,
+    jitter_scale=0.3,
+    points=None,
+    angles_degrees=None,
+    bounds=None,
+):
+    """
+    Visualize final state assignments by generating a grid of points.
+    
+    This function is designed to be called from the training loop.
+    It generates a grid (num_points x num_points) and evaluates
+    the model to get state assignments.
+    
+    For scatter plots, jitter is applied to make points look more natural.
+    For region plots, a regular grid is used for smooth boundaries.
+    
+    Recommended settings:
+    - Scatter: num_points=100 (10k points), jitter_scale=0.3, point_size=10
+    - Regions: num_points=1000 (1M points), no jitter applied
+    
+    Args:
+        model: Trained DRM model
+        output_path: Path to save the visualization
+        system_type: 'saddle_system' or 'tech_substitution' (string or enum)
+        device: Device to run model on
+        num_points: Number of points per dimension (creates num_points^2 total points)
+        num_states: Number of discrete states (inferred from model if None)
+        visualization_style: 'scatter' (plot points) or 'regions' (color regions)
+        point_size: Size of scatter points (only used if style='scatter')
+        jitter_scale: Amount of jitter for scatter plots (fraction of cell size, 0=no jitter)
+        points: Saddle points for plotting (list of [x, y] coordinates)
+        angles_degrees: Angles for saddle separatrices (list of degrees)
+        bounds: Plotting bounds [(x1_min, x1_max), (x2_min, x2_max)]
+    """
+    
+    # Paul Tol's muted color scheme (colorblind accessible)
+    tol_muted = ["#332288", "#DDCC77", "#117733", "#88CCEE"]
+    magenta = "#D81B60"
+    
+    # Convert system_type string to SystemType enum if needed
+    if isinstance(system_type, str):
+        system_type_enum = SystemType(system_type)
+    else:
+        system_type_enum = system_type
+    
+    # Get visualization bounds from system registry if not provided
+    if bounds is None:
+        bounds = get_visualization_bounds(system_type_enum)
+    
+    print(f"Generating grid with {num_points}x{num_points} = {num_points**2} points")
+    print(f"Using bounds: {bounds}")
+    
+    # Generate grid of points in x-space
+    x1_values = np.linspace(bounds[0][0], bounds[0][1], num_points)
+    x2_values = np.linspace(bounds[1][0], bounds[1][1], num_points)
+    x1_grid, x2_grid = np.meshgrid(x1_values, x2_values)
+    x1_flat, x2_flat = x1_grid.flatten(), x2_grid.flatten()
+    
+    # Apply jitter for scatter plots to make them look more natural
+    if visualization_style == 'scatter' and jitter_scale > 0:
+        # Calculate cell sizes
+        cell_size_x1 = (bounds[0][1] - bounds[0][0]) / num_points
+        cell_size_x2 = (bounds[1][1] - bounds[1][0]) / num_points
+        
+        # Add random jitter (uniform within fraction of cell size)
+        jitter_x1 = np.random.uniform(-jitter_scale * cell_size_x1 / 2, 
+                                       jitter_scale * cell_size_x1 / 2, 
+                                       size=x1_flat.shape)
+        jitter_x2 = np.random.uniform(-jitter_scale * cell_size_x2 / 2, 
+                                       jitter_scale * cell_size_x2 / 2, 
+                                       size=x2_flat.shape)
+        
+        x1_flat = x1_flat + jitter_x1
+        x2_flat = x2_flat + jitter_x2
+        
+        # Clip to bounds
+        x1_flat = np.clip(x1_flat, bounds[0][0], bounds[0][1])
+        x2_flat = np.clip(x2_flat, bounds[1][0], bounds[1][1])
+        
+        print(f"Applied jitter with scale {jitter_scale}")
+    
+    # Create input tensor
+    grid_points = np.column_stack((x1_flat, x2_flat))
+    x_test = torch.tensor(grid_points, dtype=torch.float32).to(device)
+    
+    # Get state assignments from model
+    model.to(device)
+    model.eval()
+    with torch.no_grad():
+        state_probs = model.get_state_probs(x_test, training=False, soft=False)
+        states = state_probs.argmax(dim=1).cpu().numpy()
+    
+    # Infer number of states if not provided
+    if num_states is None:
+        num_states = state_probs.shape[1]
+    
+    print(f"Number of states: {num_states}")
+    print(f"State distribution: {np.bincount(states)}")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Plot reference geometry based on system type
+    system_type_str = system_type_enum.value if isinstance(system_type_enum, SystemType) else system_type_enum
+    
+    if system_type_str == "tech_substitution":
+        # Plot nullclines for tech substitution
+        steigung = 0.125
+        x_line = np.array([bounds[0][0], bounds[0][1]])
+        y_line = steigung * x_line
+        ax.plot(
+            x_line, x_line, 
+            color=magenta, 
+            linestyle="--", 
+            linewidth=1.5,
+            label="Basin boundaries",
+            zorder=1
+        )
+        ax.plot(
+            x_line, y_line, 
+            color=magenta, 
+            linestyle="--", 
+            linewidth=1.5,
+            zorder=1
+        )
+        
+    elif system_type_str == "saddle_system":
+        if points is not None and angles_degrees is not None:
+            # Plot separatrices (lines through saddle points at given angles)
+            for i, (point, angle_deg) in enumerate(zip(points, angles_degrees)):
+                # Plot saddle point
+                ax.plot(
+                    point[0], point[1], 
+                    'x', 
+                    color='white', 
+                    markersize=8, 
+                    markeredgewidth=2.0, 
+                    zorder=10
+                )
+                ax.plot(
+                    point[0], point[1], 
+                    'x', 
+                    color=magenta, 
+                    markersize=8, 
+                    markeredgewidth=1.2, 
+                    zorder=11
+                )
+                
+                # Draw angle line from edge to edge
+                angle_rad = np.radians(angle_deg)
+                px, py = point[0], point[1]
+                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+                
+                # Find intersection with plot boundaries
+                t_values = []
+                # Left/right boundaries
+                if abs(cos_a) > 1e-10:
+                    t_values.extend([
+                        (bounds[0][0] - px) / cos_a,
+                        (bounds[0][1] - px) / cos_a,
+                    ])
+                # Top/bottom boundaries
+                if abs(sin_a) > 1e-10:
+                    t_values.extend([
+                        (bounds[1][0] - py) / sin_a,
+                        (bounds[1][1] - py) / sin_a,
+                    ])
+                
+                # Find valid intersections within bounds
+                valid_intersections = []
+                for t in t_values:
+                    x_int = px + t * cos_a
+                    y_int = py + t * sin_a
+                    if (bounds[0][0] <= x_int <= bounds[0][1] and 
+                        bounds[1][0] <= y_int <= bounds[1][1]):
+                        valid_intersections.append((x_int, y_int))
+                
+                # Draw line between the two intersection points
+                if len(valid_intersections) >= 2:
+                    x_coords = [valid_intersections[0][0], valid_intersections[1][0]]
+                    y_coords = [valid_intersections[0][1], valid_intersections[1][1]]
+                    label = "Separatrices" if i == 0 else None
+                    ax.plot(
+                        x_coords, y_coords,
+                        color=magenta,
+                        linestyle="--",
+                        linewidth=1.5,
+                        label=label,
+                        zorder=1
+                    )
+    
+    # Visualize state assignments
+    if visualization_style == 'scatter':
+        # Scatter plot - each observation as a colored point
+        for state in range(num_states):
+            mask = states == state
+            if np.sum(mask) > 0:
+                ax.scatter(
+                    grid_points[mask, 0],
+                    grid_points[mask, 1],
+                    c=tol_muted[state % len(tol_muted)],
+                    s=point_size,
+                    alpha=0.8,
+                    label=f"State {state + 1}",
+                    zorder=2
+                )
+    
+    elif visualization_style == 'regions':
+        # Region coloring - use the grid we already generated
+        # Reshape states to match the grid
+        grid_states = states.reshape(num_points, num_points)
+        
+        # Create custom colormap from tol_muted colors
+        colors_used = [tol_muted[i % len(tol_muted)] for i in range(num_states)]
+        cmap = ListedColormap(colors_used)
+        
+        # Plot colored regions
+        im = ax.imshow(
+            grid_states,
+            extent=[bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]],
+            origin='lower',
+            cmap=cmap,
+            alpha=0.9,
+            vmin=0,
+            vmax=num_states - 1,
+            zorder=0
+        )
+        
+        # Create legend manually for regions
+        legend_elements = [
+            Patch(facecolor=tol_muted[i % len(tol_muted)], 
+                  label=f"State {i + 1}") 
+            for i in range(num_states)
+        ]
+        ax.legend(handles=legend_elements, loc='best')
+    
+    else:
+        raise ValueError(f"Unknown visualization_style: {visualization_style}")
+    
+    # Set labels and limits
+    ax.set_xlabel('x₁', fontsize=12)
+    ax.set_ylabel('x₂', fontsize=12)
+    ax.set_xlim(bounds[0][0], bounds[0][1])
+    ax.set_ylim(bounds[1][0], bounds[1][1])
+    ax.set_aspect('equal', adjustable='box')
+    
+    # Add legend (only if scatter, regions already have manual legend)
+    if visualization_style == 'scatter':
+        ax.legend(loc='best', framealpha=0.9)
+    
+    # Add title
+    ax.set_title(f'Final State Assignments - {visualization_style.capitalize()} ({system_type_str})', fontsize=14)
+    
+    plt.tight_layout()
+    
+    # Save figure
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved visualization to {output_path}")
+    
+    plt.close()
+
+def visualize_final_state_assignments_from_pkl(
+    pkl_path,
+    output_path,
+    system_type,
+    db_path=None,
+    visualization_style='scatter',
+    point_size=10,
+    grid_resolution=200,
+):
+    """
+    Visualize final state assignments from saved pkl file.
+    
+    Args:
+        pkl_path: Path to state_assignments_{run_id}.pkl file
+        output_path: Path to save the visualization
+        system_type: 'saddle_system' or 'tech_substitution'
+        db_path: Path to database (required for saddle_system to get separatrices)
+        visualization_style: 'scatter' (plot points) or 'regions' (color regions)
+        point_size: Size of scatter points (only used if style='scatter')
+        grid_resolution: Grid resolution for region coloring (only used if style='regions')
+    """
+    
+    # Paul Tol's muted color scheme (colorblind accessible)
+    tol_muted = ["#332288", "#DDCC77", "#117733", "#88CCEE"]
+    magenta = "#D81B60"
+    
+    # Load the pkl file
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    observations = data['observations']  # Shape: (N, 2)
+    states = data['states']  # Shape: (N,)
+    num_states = data['num_states']
+    
+    print(f"Loaded {len(observations)} observations")
+    print(f"Number of states: {num_states}")
+    print(f"State distribution: {np.bincount(states)}")
+    
+    # Get visualization bounds from system registry
+    # Convert system_type string to SystemType enum if needed
+    if isinstance(system_type, str):
+        system_type_enum = SystemType(system_type)
+    else:
+        system_type_enum = system_type
+
+    # Get visualization bounds from system registry
+    bounds = get_visualization_bounds(system_type_enum)
+    print(f"Using bounds: {bounds}")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Plot reference geometry based on system type
+    if system_type == "tech_substitution":
+        # Plot nullclines for tech substitution
+        steigung = 0.125
+        x_line = np.array([bounds[0][0], bounds[0][1]])
+        y_line = steigung * x_line
+        ax.plot(
+            x_line, x_line, 
+            color=magenta, 
+            linestyle="--", 
+            linewidth=1.5,
+            label="Basin boundaries",
+            zorder=1
+        )
+        ax.plot(
+            x_line, y_line, 
+            color=magenta, 
+            linestyle="--", 
+            linewidth=1.5,
+            zorder=1
+        )
+        
+    elif system_type == "saddle_system":
+        if db_path is None:
+            raise ValueError("db_path is required for saddle_system to plot separatrices")
+        
+        # Get saddle configuration
+        saddle_config = get_saddle_configuration(db_path, verbose=True)
+        if saddle_config:
+            points = saddle_config["saddle_points"]
+            angles_degrees = saddle_config["angles_degrees"]
+            
+            # Plot separatrices (lines through saddle points at given angles)
+            for i, (point, angle_deg) in enumerate(zip(points, angles_degrees)):
+                # Plot saddle point
+                ax.plot(
+                    point[0], point[1], 
+                    'x', 
+                    color='white', 
+                    markersize=8, 
+                    markeredgewidth=2.0, 
+                    zorder=10
+                )
+                ax.plot(
+                    point[0], point[1], 
+                    'x', 
+                    color=magenta, 
+                    markersize=8, 
+                    markeredgewidth=1.2, 
+                    zorder=11
+                )
+                
+                # Draw angle line from edge to edge
+                angle_rad = np.radians(angle_deg)
+                px, py = point[0], point[1]
+                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+                
+                # Find intersection with plot boundaries
+                t_values = []
+                # Left/right boundaries
+                if abs(cos_a) > 1e-10:
+                    t_values.extend([
+                        (bounds[0][0] - px) / cos_a,
+                        (bounds[0][1] - px) / cos_a,
+                    ])
+                # Top/bottom boundaries
+                if abs(sin_a) > 1e-10:
+                    t_values.extend([
+                        (bounds[1][0] - py) / sin_a,
+                        (bounds[1][1] - py) / sin_a,
+                    ])
+                
+                # Find valid intersections within bounds
+                valid_intersections = []
+                for t in t_values:
+                    x_int = px + t * cos_a
+                    y_int = py + t * sin_a
+                    if (bounds[0][0] <= x_int <= bounds[0][1] and 
+                        bounds[1][0] <= y_int <= bounds[1][1]):
+                        valid_intersections.append((x_int, y_int))
+                
+                # Draw line between the two intersection points
+                if len(valid_intersections) >= 2:
+                    x_coords = [valid_intersections[0][0], valid_intersections[1][0]]
+                    y_coords = [valid_intersections[0][1], valid_intersections[1][1]]
+                    label = "Basin boundaries" if i == 0 else None
+                    ax.plot(
+                        x_coords, y_coords,
+                        color=magenta,
+                        linestyle="--",
+                        linewidth=1.5,
+                        label=label,
+                        zorder=1
+                    )
+    
+    # Visualize state assignments
+    if visualization_style == 'scatter':
+        # Scatter plot - each observation as a colored point
+        for state in range(num_states):
+            mask = states == state
+            if np.sum(mask) > 0:
+                ax.scatter(
+                    observations[mask, 0],
+                    observations[mask, 1],
+                    c=tol_muted[state % len(tol_muted)],
+                    s=point_size,
+                    alpha=0.8,
+                    label=f"State {state + 1}",
+                    zorder=2
+                )
+    
+    elif visualization_style == 'regions':
+        # Region coloring - create a grid and assign colors based on nearest observation
+        from scipy.spatial import KDTree
+        
+        x1_grid = np.linspace(bounds[0][0], bounds[0][1], grid_resolution)
+        x2_grid = np.linspace(bounds[1][0], bounds[1][1], grid_resolution)
+        X1, X2 = np.meshgrid(x1_grid, x2_grid)
+        grid_points = np.column_stack([X1.ravel(), X2.ravel()])
+        
+        # For each grid point, find nearest observation and assign its state
+        tree = KDTree(observations)
+        _, nearest_indices = tree.query(grid_points)
+        grid_states = states[nearest_indices].reshape(grid_resolution, grid_resolution)
+        
+        # Create custom colormap from tol_muted colors
+        from matplotlib.colors import ListedColormap
+        colors_used = [tol_muted[i % len(tol_muted)] for i in range(num_states)]
+        cmap = ListedColormap(colors_used)
+        
+        # Plot colored regions
+        im = ax.imshow(
+            grid_states,
+            extent=[bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]],
+            origin='lower',
+            cmap=cmap,
+            alpha=0.9,
+            vmin=0,
+            vmax=num_states - 1,
+            zorder=0
+        )
+        
+        # Create legend manually for regions
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor=tol_muted[i % len(tol_muted)], 
+                  label=f"State {i + 1}") 
+            for i in range(num_states)
+        ]
+        ax.legend(handles=legend_elements, loc='best')
+    
+    else:
+        raise ValueError(f"Unknown visualization_style: {visualization_style}")
+    
+    # Set labels and limits
+    ax.set_xlabel('x₁', fontsize=12)
+    ax.set_ylabel('x₂', fontsize=12)
+    ax.set_xlim(bounds[0][0], bounds[0][1])
+    ax.set_ylim(bounds[1][0], bounds[1][1])
+    ax.set_aspect('equal', adjustable='box')
+    
+    # Add legend (only if scatter, regions already have manual legend)
+    if visualization_style == 'scatter':
+        ax.legend(loc='best', framealpha=0.9)
+    
+    # Add title
+    #ax.set_title(f'Final State Assignments ({system_type})', fontsize=14)
+    
+    plt.tight_layout()
+    
+    # Save figure
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved visualization to {output_path}")
+    
+    plt.close()
 
 def create_state_evolution_analysis(all_metrics, output_path, num_states):
     """

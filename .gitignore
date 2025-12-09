@@ -16,6 +16,7 @@ venv/
 *.csv
 *.h5
 *.pkl
+*.png
 datasets/results/*
 !datasets/results/.gitkeep
 

@@ -66,6 +66,7 @@ from neural_networks.drm_viz import (
     create_gif_from_data_frames,
     plot_softmax_rank_evolution,
     plot_probing_evolution,
+    visualize_final_state_assignments,
 )
 
 from neural_networks.utils import *
@@ -967,6 +968,40 @@ def train_drm_model(config_path, multi_run=False):
         num_points=1000,
         num_states=num_states,
         system_type=system_type,
+        points=points_config["points"] if points_config else None,
+        angles_degrees=points_config["angles_degrees"] if points_config else None,
+        bounds=bounds,
+    )
+
+    if True: # not multi_run:
+        # scatter plot visualization (10k jittered points)
+        final_state_scatter_path = os.path.join(output_dir, f"final_state_scatter_{run_id}.png")
+        visualize_final_state_assignments(
+            model=model,
+            output_path=final_state_scatter_path,
+            system_type=system_type,
+            device=device,
+            num_points=100,  # 100x100 = 10k points (good for scatter)
+            num_states=num_states,
+            visualization_style='scatter',
+            point_size=8,  # Visible points since we only have 10k
+            jitter_scale=0.3,  # Add natural-looking jitter
+            points=points_config["points"] if points_config else None,
+            angles_degrees=points_config["angles_degrees"] if points_config else None,
+            bounds=bounds,
+        )
+
+    # region visualization (1M points for smooth boundaries)
+    final_state_regions_path = os.path.join(output_dir, f"final_state_regions_{run_id}.png")
+    visualize_final_state_assignments(
+        model=model,
+        output_path=final_state_regions_path,
+        system_type=system_type,
+        device=device,
+        num_points=1000,  # 1000x1000 = 1M points (smooth regions)
+        num_states=num_states,
+        visualization_style='regions',
+        jitter_scale=0.0,  # No jitter for regions (kept for clarity, but not used)
         points=points_config["points"] if points_config else None,
         angles_degrees=points_config["angles_degrees"] if points_config else None,
         bounds=bounds,
