@@ -591,13 +591,11 @@ def visualize_final_state_assignments(
                 if len(valid_intersections) >= 2:
                     x_coords = [valid_intersections[0][0], valid_intersections[1][0]]
                     y_coords = [valid_intersections[0][1], valid_intersections[1][1]]
-                    label = "Separatrices" if i == 0 else None
                     ax.plot(
                         x_coords, y_coords,
                         color=magenta,
                         linestyle="--",
                         linewidth=1.5,
-                        label=label,
                         zorder=1
                     )
     
@@ -616,6 +614,7 @@ def visualize_final_state_assignments(
                     label=f"State {state + 1}",
                     zorder=2
                 )
+        ax.legend(lox="upper-right")
     
     elif visualization_style == 'regions':
         # Region coloring - use the grid we already generated
@@ -661,7 +660,7 @@ def visualize_final_state_assignments(
         ax.legend(loc='best', framealpha=0.9)
     
     # Add title
-    ax.set_title(f'Final State Assignments - {visualization_style.capitalize()} ({system_type_str})', fontsize=14)
+    #ax.set_title(f'Final State Assignments - {visualization_style.capitalize()} ({system_type_str})', fontsize=14)
     
     plt.tight_layout()
     

@@ -100,15 +100,15 @@ for CONFIG_PATH in "${CONFIG_PATHS[@]}"; do
     
     # Extract config filename
     CONFIG_FILENAME=$(basename "$CONFIG_PATH")
-    NEW_CONFIG_PATH="${NEW_OUTPUT_DIR}/configs/${CONFIG_FILENAME}"
     
-    echo "Creating modified config: $NEW_CONFIG_PATH"
+    echo "Creating modified config..."
     
-    # Modify config using Python
-    python - <<EOF
+    # Modify config using Python (also returns the new run_id)
+    NEW_RUN_ID=$(python - <<EOF
 import yaml
 from pathlib import Path
 import re
+import sys
 
 # Load original config
 with open('$CONFIG_PATH', 'r') as f:
@@ -136,13 +136,17 @@ else:
 # Create new run_id with prefix
 new_run_id = f"{prefix}_{original_run_id}"
 
-# Modify config
-config['meta']['output_dir'] = '$NEW_OUTPUT_DIR'
+# Modify config - output_dir now includes run_id subfolder
+config['meta']['output_dir'] = '$NEW_OUTPUT_DIR/' + new_run_id
 config['meta']['run_id'] = new_run_id
 
+# New config path uses new_run_id in filename
+new_config_filename = f"config_{new_run_id}.yaml"
+new_config_path = Path('$NEW_OUTPUT_DIR') / 'configs' / new_config_filename
+
 # Save modified config
-Path('$NEW_CONFIG_PATH').parent.mkdir(parents=True, exist_ok=True)
-with open('$NEW_CONFIG_PATH', 'w') as f:
+new_config_path.parent.mkdir(parents=True, exist_ok=True)
+with open(new_config_path, 'w') as f:
     yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 print(f"  Original run_id: {original_run_id}")
@@ -150,8 +154,13 @@ print(f"  Prefix extracted: {prefix}")
 print(f"  New run_id: {new_run_id}")
 print(f"  Seed: {config['meta']['seed']}")
 print(f"  Database: {config['meta']['db_path']}")
-print(f"  New output: {config['meta']['output_dir']}")
+print(f"  Config saved as: {new_config_filename}")
+print(f"  Output will be in: {config['meta']['output_dir']}")
+
+# Return the new run_id for use in bash
+sys.stdout.write(new_run_id)
 EOF
+)
     
     if [ $? -ne 0 ]; then
         echo "ERROR: Failed to modify config"
@@ -159,6 +168,9 @@ EOF
         echo ""
         continue
     fi
+    
+    # Build the new config path using the new run_id
+    NEW_CONFIG_PATH="${NEW_OUTPUT_DIR}/configs/config_${NEW_RUN_ID}.yaml"
     
     # Run training
     echo ""
