@@ -165,7 +165,7 @@ EOF
     echo "Starting training..."
     START_TIME=$(date +%s)
     
-    python train_drm.py "$NEW_CONFIG_PATH"
+    python neural_networks/train_drm.py "$NEW_CONFIG_PATH"
     
     EXIT_CODE=$?
     END_TIME=$(date +%s)
