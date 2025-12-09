@@ -149,15 +149,16 @@ new_config_path.parent.mkdir(parents=True, exist_ok=True)
 with open(new_config_path, 'w') as f:
     yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-print(f"  Original run_id: {original_run_id}")
-print(f"  Prefix extracted: {prefix}")
-print(f"  New run_id: {new_run_id}")
-print(f"  Seed: {config['meta']['seed']}")
-print(f"  Database: {config['meta']['db_path']}")
-print(f"  Config saved as: {new_config_filename}")
-print(f"  Output will be in: {config['meta']['output_dir']}")
+# Print to stderr (so it doesn't interfere with stdout capture)
+print(f"  Original run_id: {original_run_id}", file=sys.stderr)
+print(f"  Prefix extracted: {prefix}", file=sys.stderr)
+print(f"  New run_id: {new_run_id}", file=sys.stderr)
+print(f"  Seed: {config['meta']['seed']}", file=sys.stderr)
+print(f"  Database: {config['meta']['db_path']}", file=sys.stderr)
+print(f"  Config saved as: {new_config_filename}", file=sys.stderr)
+print(f"  Output will be in: {config['meta']['output_dir']}", file=sys.stderr)
 
-# Return the new run_id for use in bash
+# Write ONLY the new run_id to stdout (for bash capture)
 sys.stdout.write(new_run_id)
 EOF
 )
