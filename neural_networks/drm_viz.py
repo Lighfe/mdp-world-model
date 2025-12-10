@@ -2043,7 +2043,32 @@ def extract_mdp_transitions_fixed(model, num_actions=2, device='cpu'):
         
         # Get state values
         state_values_tensor = model.compute_values_for_all_states()
-        state_values = state_values_tensor.cpu().numpy().squeeze()
+        state_values = state_values_tensor.cpu().numpy()  # Don't squeeze yet
+        
+        print(f"[DEBUG] Raw state_values shape: {state_values.shape}")
+        print(f"[DEBUG] Raw state_values:\n{state_values}")
+        
+        # Handle different value formats:
+        # - 1D: direct values (e.g., market share)
+        # - 2D: [sin(θ), cos(θ)] representation for angles
+        if state_values.ndim > 1 and state_values.shape[1] == 2:
+            # This is likely angle representation: [sin(θ), cos(θ)]
+            # Reconstruct angle using atan2
+            sin_vals = state_values[:, 0]
+            cos_vals = state_values[:, 1]
+            angles_rad = np.arctan2(sin_vals, cos_vals)
+            # Convert to [0, 2π] range, then to [0, 1] for consistent scaling
+            angles_rad = np.where(angles_rad < 0, angles_rad + 2*np.pi, angles_rad)
+            state_values = angles_rad / (2 * np.pi)  # Normalize to [0, 1]
+            print(f"[DEBUG] Converted 2D [sin, cos] to angles (normalized): {state_values}")
+            print(f"[DEBUG] Angles in degrees: {state_values * 360}")
+        else:
+            # Single value per state or already 1D
+            state_values = state_values.squeeze()
+            if state_values.ndim > 1:
+                # Multi-dimensional but not angle format - take first dimension
+                state_values = state_values[:, 0]
+            print(f"[DEBUG] Using values directly: {state_values}")
     
     return transition_probs, state_values
 
@@ -2202,6 +2227,11 @@ def visualize_mdp_matplotlib(
         
         text_color = get_mdp_text_color(state_colors[state])
         value = formatted_values[state]
+        
+        # Handle case where value might still be an array
+        if isinstance(value, np.ndarray):
+            value = value.item() if value.size == 1 else value[0]
+        
         ax.text(pos[0], pos[1], f'State {state+1}:\n{value:.1f}{value_suffix}',
                ha='center', va='center', fontsize=9, color=text_color,
                weight='bold', zorder=11)
@@ -2221,7 +2251,6 @@ def visualize_mdp_matplotlib(
         plt.close()
     else:
         plt.show()
-
 
 ### Aggregation functions
 ############################################################################
