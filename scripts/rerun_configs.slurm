@@ -22,16 +22,10 @@ echo "========================================================"
 
 # EDIT THIS: List of config paths to re-run
 CONFIG_PATHS=(
-    "neural_networks/output/ablation/ablation_baseline_ds3/configs/config_seed_715_multi_saddle_3.yaml"
+    "neural_networks/output/ablation/ablation_baseline_ds3/configs/config_seed_713_multi_saddle_3.yaml"
     "neural_networks/output/ablation/ablation_baseline_ds8/configs/config_seed_713_multi_saddle_8.yaml"
     "neural_networks/output/ablation/ablation_baseline_ds5/configs/config_seed_713_multi_saddle_5.yaml"
     "neural_networks/output/ablation/ablation_baseline_ds9/configs/config_seed_713_multi_saddle_9.yaml"
-    "neural_networks/output/ablation/ablation_temp10.0_ds8/configs/config_seed_713_multi_saddle_8.yaml"
-    "neural_networks/output/ablation/ablation_temp10.0_ds3/configs/config_seed_715_multi_saddle_3.yaml"
-    "neural_networks/output/ablation/ablation_baseline_ds9/configs/config_seed_714_multi_saddle_9.yaml"
-    "neural_networks/output/ablation/ablation_gumbel_false_ds9/configs/config_seed_714_multi_saddle_9.yaml"
-    "neural_networks/output/ablation/ablation_gumbel_false_ds9/configs/config_seed_715_multi_saddle_9.yaml"
-    "neural_networks/output/ablation/ablation_gumbel_false_ds9/configs/config_seed_717_multi_saddle_9.yaml"
 )
 
 # EDIT THIS: New output directory

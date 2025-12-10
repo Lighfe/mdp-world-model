@@ -615,7 +615,6 @@ def visualize_final_state_assignments(
                     label=f"State {state + 1}",
                     zorder=2
                 )
-        ax.legend(loc="upper right")
     
     elif visualization_style == 'regions':
         # Region coloring - use the grid we already generated
@@ -658,7 +657,7 @@ def visualize_final_state_assignments(
     
     # Add legend (only if scatter, regions already have manual legend)
     if visualization_style == 'scatter':
-        ax.legend(loc='best', framealpha=0.9)
+        ax.legend(loc='upper right', framealpha=0.9)
     
     # Add title
     #ax.set_title(f'Final State Assignments - {visualization_style.capitalize()} ({system_type_str})', fontsize=14)
@@ -1977,21 +1976,15 @@ def plot_probing_evolution(history, save_path):
 
 ### MDP
 
-def get_text_color(hex_color):
-    """Return 'white' for dark colors, 'black' for light colors"""
-    rgb = tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
-    luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255
-    return 'white' if luminance < 0.5 else 'black'
-
-
-def extract_mdp_from_model(model, device='cpu', num_actions=2):
+def extract_mdp_transitions_fixed(model, num_actions=2, device='cpu'):
     """
     Extract MDP transition probabilities and state values from a trained DRM model.
+    Fixed version that handles control dimensions correctly.
     
     Args:
         model: Trained DiscreteRepresentationsModel
+        num_actions: Number of discrete actions
         device: Device to run computations on
-        num_actions: Number of discrete actions (default: 2)
     
     Returns:
         tuple: (transition_probs, state_values)
@@ -2000,6 +1993,18 @@ def extract_mdp_from_model(model, device='cpu', num_actions=2):
     """
     model.eval()
     num_states = model.num_states
+    
+    # Infer control_dim from the model's predictor
+    # For categorical controls (like saddle_system), control_dim = num_actions
+    if hasattr(model.predictor, 'control_encoder'):
+        if isinstance(model.predictor.control_encoder, nn.Sequential):
+            control_dim = model.predictor.control_encoder[0].in_features
+        else:
+            control_dim = model.predictor.control_encoder.in_features
+    else:
+        control_dim = 1
+    
+    print(f"[DEBUG] Model has control_dim={control_dim}, visualizing num_actions={num_actions}")
     
     # Create one-hot encoded states
     states = torch.eye(num_states, device=device)
@@ -2013,9 +2018,22 @@ def extract_mdp_from_model(model, device='cpu', num_actions=2):
             state = states[state_idx:state_idx+1]  # Shape: (1, num_states)
             
             for action_idx in range(num_actions):
-                # Create control input (assuming categorical actions: one-hot)
-                control = torch.zeros(1, 1, device=device)
-                control[0, 0] = action_idx
+                # Create control input with CORRECT dimension
+                # For categorical controls (saddle_system): one-hot encode the action
+                # For continuous controls: use scalar value
+                
+                if control_dim == num_actions:
+                    # Categorical control: one-hot encoding
+                    control = torch.zeros(1, control_dim, device=device)
+                    control[0, action_idx] = 1.0
+                elif control_dim == 1:
+                    # Single continuous control
+                    control = torch.tensor([[float(action_idx)]], device=device)
+                else:
+                    # Multi-dimensional continuous control
+                    # Use normalized action index
+                    control = torch.zeros(1, control_dim, device=device)
+                    control[0, 0] = action_idx / max(1, num_actions - 1)
                 
                 # Get predicted next state probabilities
                 next_state_probs = model.predict_next_state(state, control)
@@ -2030,39 +2048,44 @@ def extract_mdp_from_model(model, device='cpu', num_actions=2):
     return transition_probs, state_values
 
 
-def visualize_mdp(
+def get_mdp_text_color(hex_color):
+    """Return 'white' for dark colors, 'black' for light colors"""
+    rgb = tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
+    luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255
+    return 'white' if luminance < 0.5 else 'black'
+
+
+def visualize_mdp_matplotlib(
     model=None,
     transition_probs=None,
     state_values=None,
     output_path=None,
     device='cpu',
     num_actions=2,
-    value_format='angle',  # 'angle' for degrees, 'float' for raw values
+    value_format='angle',
     title='MDP Visualization',
     threshold=0.02,
 ):
     """
-    Visualize the learned MDP with state transitions and values.
+    Visualize the learned MDP with matplotlib using curved arrows.
+    This is the NEW matplotlib-based visualization (different from old graphviz one).
     
     Args:
-        model: Trained DiscreteRepresentationsModel (if None, must provide transition_probs and state_values)
-        transition_probs: Transition probability matrix of shape (num_states, num_actions, num_states)
-        state_values: State values array of shape (num_states,)
-        output_path: Path to save the visualization (if None, will display)
+        model: Trained DiscreteRepresentationsModel
+        transition_probs: Pre-computed transition probabilities (optional)
+        state_values: Pre-computed state values (optional)
+        output_path: Path to save the visualization
         device: Device for model inference
         num_actions: Number of discrete actions
-        value_format: How to format state values ('angle' for degrees, 'float' for raw)
+        value_format: 'angle' for degrees, 'float' for raw values
         title: Title for the plot
         threshold: Minimum probability to draw an arrow
-    
-    Returns:
-        None (saves or displays plot)
     """
     # Extract MDP from model if not provided
     if transition_probs is None or state_values is None:
         if model is None:
             raise ValueError("Must provide either model or both transition_probs and state_values")
-        transition_probs, state_values = extract_mdp_from_model(model, device, num_actions)
+        transition_probs, state_values = extract_mdp_transitions_fixed(model, num_actions, device)
     
     num_states = len(state_values)
     
@@ -2070,47 +2093,35 @@ def visualize_mdp(
     if num_states != 4:
         raise ValueError(f"Visualization currently only supports 4 states, got {num_states}")
     
-    # Format state values based on value_format
+    # Format state values
     if value_format == 'angle':
-        # Assume values are in [0, 1] or similar, convert to degrees
-        # For saddle system: values are typically sigmoid outputs representing angles
-        formatted_values = state_values * 360  # Convert to degrees
+        formatted_values = state_values * 360
         value_suffix = '°'
     else:
         formatted_values = state_values
         value_suffix = ''
     
-    # Colors for states and actions
+    # Colors
     state_colors = ["#332288", "#DDCC77", "#117733", "#88CCEE"]
-    action_colors = ["#882255", "#44AA99"]  # a0, a1
+    action_colors = ["#882255", "#44AA99"]
     
-    # Layout: 2x2 grid for states
+    # Positions
     state_positions = {
-        0: (0.35, 0.6),   # upper left (State 1)
-        1: (0.65, 0.6),   # upper right (State 2)
-        2: (0.35, 0.4),   # lower left (State 3)
-        3: (0.65, 0.4),   # lower right (State 4)
+        0: (0.35, 0.6), 1: (0.65, 0.6),
+        2: (0.35, 0.4), 3: (0.65, 0.4),
     }
     
-    # Self-loop specifications: (start_angle, end_angle) in radians
+    # Self-loop angles
     angle_offset = 0.2
     self_loop_specs = {
-        0: {  # State 0 (upper left) - top to left
-            0: (np.pi/2 - angle_offset, np.pi + angle_offset),
-            1: (np.pi/2 + angle_offset, np.pi - angle_offset),
-        },
-        1: {  # State 1 (upper right) - top to right
-            0: (np.pi/2 + angle_offset, 0 - angle_offset),
-            1: (np.pi/2 - angle_offset, 0 + angle_offset),
-        },
-        2: {  # State 2 (lower left) - bottom to left
-            0: (- np.pi/2 + angle_offset, np.pi + angle_offset),
-            1: (-np.pi/2 - angle_offset, np.pi - angle_offset),
-        },
-        3: {  # State 3 (lower right) - bottom to right
-            0: (-np.pi/2 - angle_offset, 0 - angle_offset),
-            1: (-np.pi/2 + angle_offset, 0 + angle_offset),
-        }
+        0: {0: (np.pi/2 - angle_offset, np.pi + angle_offset),
+            1: (np.pi/2 + angle_offset, np.pi - angle_offset)},
+        1: {0: (np.pi/2 + angle_offset, -angle_offset),
+            1: (np.pi/2 - angle_offset, angle_offset)},
+        2: {0: (-np.pi/2 + angle_offset, np.pi + angle_offset),
+            1: (-np.pi/2 - angle_offset, np.pi - angle_offset)},
+        3: {0: (-np.pi/2 - angle_offset, -angle_offset),
+            1: (-np.pi/2 + angle_offset, angle_offset)},
     }
     
     # Create figure
@@ -2119,13 +2130,12 @@ def visualize_mdp(
     ax.set_ylim(0.25, 0.75)
     ax.axis('off')
     
-    min_linewidth = 0.5
-    max_linewidth = 12
+    min_linewidth, max_linewidth = 0.5, 12
     state_radius = 0.06
     
-    # Draw arrows for transitions
+    # Draw transitions
     for state in range(num_states):
-        for action in range(num_actions):
+        for action in range(min(num_actions, 2)):  # Only visualize up to 2 actions
             action_color = action_colors[action]
             
             for next_state in range(num_states):
@@ -2134,25 +2144,19 @@ def visualize_mdp(
                 if prob > threshold:
                     state_pos = state_positions[state]
                     next_state_pos = state_positions[next_state]
-                    
-                    # Map probability to linewidth
                     linewidth = min_linewidth + (max_linewidth - min_linewidth) * prob
                     
-                    # Self-transition
                     if state == next_state:
+                        # Self-loop
                         start_angle, end_angle = self_loop_specs[state][action]
-                        
-                        # Calculate start and end points on circle
                         start = (state_pos[0] + state_radius * np.cos(start_angle),
                                 state_pos[1] + state_radius * np.sin(start_angle))
                         end = (state_pos[0] + state_radius * np.cos(end_angle),
                               state_pos[1] + state_radius * np.sin(end_angle))
                         
-                        # Different curvature for different states and actions
-                        if state in [0, 3]:  # State 1 and State 4
-                            curve_rad = 1.2 if action == 0 else 1.4
-                        else:  # State 2 and State 3
-                            curve_rad = -1.2 if action == 0 else -1.4
+                        curve_rad = 1.2 if action == 0 else 1.4
+                        if state in [1, 2]:
+                            curve_rad = -curve_rad
                         
                         arrow = mpatches.FancyArrowPatch(
                             start, end,
@@ -2164,24 +2168,17 @@ def visualize_mdp(
                             mutation_scale=15,
                             zorder=5
                         )
-                        ax.add_patch(arrow)
-                        
                     else:
-                        # Regular transition to different state
+                        # Regular transition
                         dx = next_state_pos[0] - state_pos[0]
                         dy = next_state_pos[1] - state_pos[1]
                         angle_to_next = np.arctan2(dy, dx)
                         
-                        # Start from side of source circle closest to target
                         start = (state_pos[0] + state_radius * np.cos(angle_to_next),
                                 state_pos[1] + state_radius * np.sin(angle_to_next))
+                        end = (next_state_pos[0] - state_radius * np.cos(angle_to_next),
+                              next_state_pos[1] - state_radius * np.sin(angle_to_next))
                         
-                        # End at side of target circle closest to source
-                        angle_from_next = angle_to_next + np.pi
-                        end = (next_state_pos[0] + state_radius * np.cos(angle_from_next),
-                              next_state_pos[1] + state_radius * np.sin(angle_from_next))
-                        
-                        # Different curvature for different actions
                         curve_rad = 0.2 if action == 0 else -0.2
                         
                         arrow = mpatches.FancyArrowPatch(
@@ -2194,39 +2191,37 @@ def visualize_mdp(
                             mutation_scale=15,
                             zorder=5
                         )
-                        ax.add_patch(arrow)
+                    
+                    ax.add_patch(arrow)
     
-    # Draw state circles
+    # Draw states
     for state, pos in state_positions.items():
-        circle = mpatches.Circle(pos, state_radius, color=state_colors[state], 
+        circle = mpatches.Circle(pos, state_radius, color=state_colors[state],
                                 ec='black', linewidth=2, zorder=10)
         ax.add_patch(circle)
         
-        # Add text
-        text_color = get_text_color(state_colors[state])
+        text_color = get_mdp_text_color(state_colors[state])
         value = formatted_values[state]
-        ax.text(pos[0], pos[1], f'State {state+1}:\n{value:.1f}{value_suffix}', 
+        ax.text(pos[0], pos[1], f'State {state+1}:\n{value:.1f}{value_suffix}',
                ha='center', va='center', fontsize=9, color=text_color,
                weight='bold', zorder=11)
     
-    # Add legend
+    # Legend
     legend_elements = [
         mpatches.Patch(color=action_colors[0], label='Action a0'),
         mpatches.Patch(color=action_colors[1], label='Action a1')
     ]
-    ax.legend(handles=legend_elements, loc='upper right', 
-             bbox_to_anchor=(1.0, 1.0), fontsize=10)
-    
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
     #ax.set_title(title, fontsize=14, weight='bold', pad=20)
     
     plt.tight_layout()
-    
     if output_path:
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         print(f"Saved MDP visualization to {output_path}")
         plt.close()
     else:
         plt.show()
+
 
 ### Aggregation functions
 ############################################################################

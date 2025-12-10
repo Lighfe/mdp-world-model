@@ -56,7 +56,7 @@ from neural_networks.drm_viz import (
     visualize_transition_matrices,
     visualize_model_architecture,
     plot_training_curves,
-    visualize_mdp,
+    visualize_mdp_matplotlib,
     create_state_viz_from_data,
     analyze_state_assignment_evolution,
     create_gif_from_frames,
@@ -1067,7 +1067,7 @@ def train_drm_model(config_path, multi_run=False):
             num_actions = 2  # Default for continuous control systems
         
         try:
-            visualize_mdp(
+            visualize_mdp_matplotlib(
                 model=model,
                 output_path=mdp_vis_path,
                 device=device,
