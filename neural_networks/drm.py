@@ -192,22 +192,6 @@ class DiscreteRepresentationsModel(nn.Module):
 
         return prob_x
 
-    def compute_value(self, s_y):
-        """
-        Extract value from state probabilities with appropriate activation.
-
-        Args:
-            s_y: State probabilities (predicted)
-
-        Returns:
-            val: Predicted value with activation applied
-        """
-        # Apply value network
-        val = self.value_net(s_y)
-
-        # Apply activation function
-        return self.value_activation(val)
-
     def update_temperature(
         self, epoch, total_epochs, annealing_proportion=0.8, delay_epochs=5
     ):
@@ -285,15 +269,19 @@ class DiscreteRepresentationsModel(nn.Module):
 
     def compute_value(self, s_y):
         """
-        Extract value from state probabilities.
+        Extract value from state assignments with appropriate activation.
 
         Args:
-            s_y: State probabilities (predicted)
+            s_y: State assignments
 
         Returns:
-            val: Predicted value (e.g., market share)
+            val: Predicted value with activation applied
         """
-        return self.value_net(s_y)
+        # Apply value network
+        val = self.value_net(s_y)
+
+        # Apply activation function
+        return self.value_activation(val)
 
     def compute_values_for_all_states(self):
         """
@@ -308,7 +296,7 @@ class DiscreteRepresentationsModel(nn.Module):
         result = self.compute_value(one_hot_states)
         return result
 
-    # State sorting
+    # State sorting # NOTE: might be deprecated
     def sort_states_by_value(
         self, system_type=None, value_method=None, sorted_indices=None, descending=True
     ):

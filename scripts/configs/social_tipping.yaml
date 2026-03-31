@@ -1,17 +1,16 @@
-# configs/base.yaml
-# Complete default configuration - single source of truth
-# Every parameter used in training must be defined here
+# configs/social_tipping.yaml
+# Configuration for training DRM on social tipping system
 
 # Run metadata
 meta:
-  db_path: "datasets/results/multi_saddle_8.db"
-  seed: 42
-  output_dir: "neural_networks/output/test_aggregate"
-  run_id: "test_aggregate"
+  db_path: "datasets/results/social_tipping_all_actions_tall.db"  # Update with your actual database path
+  seed: 41
+  output_dir: "neural_networks/output/social_tipping"
+  run_id: "social_tipping_s41"
 
 # Data parameters
 data:
-  system_type: "saddle_system"
+  system_type: "social_tipping"
   val_size: 1000
   test_size: 1000
 
@@ -20,16 +19,16 @@ model:
   num_states: 4
   hidden_dim: 32
   predictor_type: "standard"  # choices: standard, control_gate, bilinear
-  value_method: null  # null = use system default
+  value_method: "abs_distance"  # choices: abs_distance, identity (from system_registry)
   
   # Target encoder settings
   use_target_encoder: true
-  ema_decay: 0.9
+  ema_decay: 0.66
   
   # Gumbel softmax settings
   use_gumbel: true
-  initial_temp: 3.0
-  min_temp: 0.5
+  initial_temp: 1.5
+  min_temp: 0.25
   
   # Weight initialization
   encoder_init_method: "he"  # choices: xavier_uniform, xavier_normal, he, chaos, chaos2
@@ -42,12 +41,12 @@ training:
   
   # Optimizer settings
   optimizer_type: "adamw"  # choices: adam, adamw
-  lr: 5.0e-5
-  weight_decay: 0.01  # only used with adamw
+  lr: 3.3e-4
+  weight_decay: 0.017  # only used with adamw
   
   # Learning rate scheduling
   scheduler_type: "cosine"  # choices: cosine, warm_restarts, fixed
-  min_lr: 5.0e-6
+  min_lr: 3.3e-5
   use_warmup: true
   warmup_epochs: 10
   restart_period: 20  # for warm_restarts
@@ -57,14 +56,14 @@ training:
 loss:
   # Main loss weights
   state_loss_weight: 1.0
-  value_loss_weight: 0.3
+  value_loss_weight: 2.0
   
   # Loss types
-  state_loss_type: "cross_entropy"  # choices: kl_div, cross_entropy, mse, js_div
-  value_loss_type: null      # null = use system default
+  state_loss_type: "kl_div"  # choices: kl_div, cross_entropy, mse, js_div
+  value_loss_type: "mse"  # mse for abs_distance value method
   
   # Entropy regularization
   use_entropy_reg: true
-  entropy_weight: 1.0
+  entropy_weight: 0.6
   use_entropy_decay: true
   entropy_decay_proportion: 0.5

@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+
 
 # Add project root to path (scripts/ -> project root)
 project_root = Path(__file__).parent.parent
@@ -67,7 +69,7 @@ def plot_probing_comparison(config_data_dict, output_path):
     tol_muted = [
         "#CC6677",  # Rose
         "#332288",  # Indigo
-        "#DDCC77",  # Sand
+        "#DDCC77",  # Sand        
         "#117733",  # Green
         "#88CCEE",  # Cyan
         "#882255",  # Wine
@@ -77,6 +79,9 @@ def plot_probing_comparison(config_data_dict, output_path):
 
     # Different marker symbols for each config
     markers = ["o", "s", "^", "D", "v", "<", ">", "p"]
+    hatches = ["///", "\\\\\\", "---", "***", "...", "***"]
+
+    legend_handles = []
 
     # Create figure
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -96,26 +101,45 @@ def plot_probing_comparison(config_data_dict, output_path):
             linewidth=2,
             markersize=4,
             color=color,
-            alpha=0.8,
+            alpha=0.9,
         )
 
-        if False:
+        if True:
             # Add std band (same alpha as softmax rank)
             ax.fill_between(
                 data["epochs"],
                 data["mean"] - data["std"],
                 data["mean"] + data["std"],
-                color=color,
-                alpha=0.05,
+                facecolor=color,
+                alpha=0.12,
+                hatch=hatches[i % len(hatches)],
+                edgecolor=color,
+                linewidth=0.8,
             )
+
+            std_patch = Patch(
+                facecolor="white",
+                edgecolor=color,
+                hatch=hatches[i % len(hatches)],
+                linewidth=1.2,
+                label=f"{label} ±1 std"
+            )
+            legend_handles.append(std_patch)
 
     # Styling (match softmax rank plots)
     ax.set_xlabel("Epoch", fontsize=12)
     ax.set_ylabel("State Accuracy", fontsize=12)
     #ax.set_title("Ablation Results", fontsize=14)
-    ax.legend(fontsize=10)
+    # Get line handles from the axes
+    line_handles, line_labels = ax.get_legend_handles_labels()
+
+    # Combine: lines first, then std patches
+    ax.legend(
+        handles=line_handles + legend_handles,
+        fontsize=10
+    )
     ax.grid(True, alpha=0.2)
-    ax.set_ylim([0.25, 1])  # Accuracy is between 0 and 1
+    ax.set_ylim((0.4, 1.0))  # Accuracy is between 0 and 1
 
     # Save
     plt.tight_layout()

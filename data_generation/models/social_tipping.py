@@ -106,7 +106,7 @@ class SocialTipping:
 
         # Extract control parameters with default values
         a = control_params.get('a', self.params['a'])
-        b = control_params.get('b', self.params['cb'])
+        b = control_params.get('b', self.params['b'])
         c = control_params.get('c', self.params['c'])
         d = control_params.get('d', self.params['d'])
         e = control_params.get('e', self.params['e'])

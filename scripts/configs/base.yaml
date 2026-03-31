@@ -6,8 +6,8 @@
 meta:
   db_path: "datasets/results/multi_saddle_8.db"
   seed: 42
-  output_dir: "neural_networks/output/test_subprocess"
-  run_id: "test_batch"
+  output_dir: "neural_networks/output/test"
+  run_id: "test_run"
 
 # Data parameters
 data:
