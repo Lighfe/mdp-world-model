@@ -50,3 +50,8 @@ Thumbs.db
 # Deprecated files
 scripts/archive/*
 scripts/configs/archive/*
+
+# Claude
+CLAUDE.md
+.claude/*
+.agents/*

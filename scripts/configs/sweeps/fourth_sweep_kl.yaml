@@ -1,4 +1,17 @@
 # scripts/configs/sweeps/fourth_sweep_kl.yaml
+#
+# Fourth (final) parameter sweep — KL divergence loss
+#
+# By this stage, categorical parameters had been fixed from earlier sweeps:
+#   - Loss function:      KL divergence (state_loss_type: kl_div)
+#   - Encoder init:       he (model.encoder_init_method)
+#   - Value method:       angle (model.value_method)
+#
+# This sweep uses Bayesian optimization via Optuna's TPE sampler in
+# exploitative mode to fine-tune continuous hyperparameters within
+# already-narrowed ranges (lr, weight_decay, temperature schedule,
+# EMA decay, and loss weights).
+#
 sweep:
   name: "fourth_sweep_kl"
   description: "Bayesian continuous optimization for KL divergence"

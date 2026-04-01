@@ -11,6 +11,18 @@
 #SBATCH --output=log/kl_sweep_%j.out
 #SBATCH --error=log/kl_sweep_%j.err
 
+# Fourth (final) parameter sweep — KL divergence loss
+#
+# By this stage, categorical parameters had been fixed from earlier sweeps:
+#   - Loss function:      KL divergence (state_loss_type: kl_div)
+#   - Encoder init:       he (model.encoder_init_method)
+#   - Value method:       angle (model.value_method)
+#
+# This sweep uses Bayesian optimization via Optuna's TPE sampler in
+# exploitative mode to fine-tune continuous hyperparameters within
+# already-narrowed ranges (lr, weight_decay, temperature schedule,
+# EMA decay, and loss weights).
+
 echo "========================================================"
 echo "BAYESIAN PARAMETER SWEEP - KL DIVERGENCE"
 echo "Job started at $(date)"
@@ -127,7 +139,7 @@ SYSTEM_MONITOR_PID=$!
 echo "Starting Bayesian optimization parameter sweep at $(date)..."
 
 # Change to project directory
-cd /p/projects/ou/rd4/bega/mdp/dralle/mdp-world-model
+cd $SLURM_SUBMIT_DIR
 
 # Run the parameter sweep with Bayesian optimization
 python scripts/parameter_sweep.py "$SWEEP_CONFIG" \

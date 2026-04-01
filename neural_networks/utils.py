@@ -943,17 +943,6 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def set_all_seeds(seed):
-    """Set seeds for reproducibility"""
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    import random
-
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
 
 def safe_json_dump(obj, file_handle, **kwargs):
     """JSON dump that handles numpy/torch types"""
