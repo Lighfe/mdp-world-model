@@ -13,6 +13,7 @@ venv/
 /latex/*
 
 # Data and results (often too large for GitHub)
+*.json
 *.csv
 *.h5
 *.pkl
@@ -45,3 +46,7 @@ data_generation/figs/*
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Deprecated files
+scripts/archive/*
+scripts/configs/archive/*

@@ -955,21 +955,6 @@ def set_all_seeds(seed):
     torch.backends.cudnn.benchmark = False
 
 
-class NumpyEncoder(json.JSONEncoder):
-    """Custom encoder for numpy/torch types"""
-
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, (np.float32, np.float64)):
-            return float(obj)
-        if isinstance(obj, (np.int32, np.int64)):
-            return int(obj)
-        if torch is not None and isinstance(obj, torch.Tensor):
-            return obj.cpu().numpy().tolist()
-        return super().default(obj)
-
-
 def safe_json_dump(obj, file_handle, **kwargs):
     """JSON dump that handles numpy/torch types"""
     return json.dump(obj, file_handle, cls=NumpyEncoder, **kwargs)
