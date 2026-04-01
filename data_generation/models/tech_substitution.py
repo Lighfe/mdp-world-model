@@ -41,7 +41,7 @@ class TechSubNumericalSolver:
         self.ls_method = 'trf'
         self.ftol = 1e-6
         self.xtol = 1e-6
-        self.ivp_method = 'RK4' # not using scipy currently
+        self.ivp_method = 'RK4'
 
     def get_config(self):
         config = {
@@ -80,7 +80,7 @@ class TechSubNumericalSolver:
         # Compute equations for all samples
         eq = np.empty(n_samples * 3)
         eq[0::3] = self.model.gamma1 * y1**self.model.sigma / x1**self.model.alpha - p
-        eq[1::3] = control * y2**self.model.sigma / x2**self.model.alpha - p
+        eq[1::3] = gamma2 * y2**self.model.sigma / x2**self.model.alpha - p
         eq[2::3] = y1 + y2 - (self.model.D0 - self.model.delta * p)
         
         return eq
@@ -133,10 +133,6 @@ class TechSubNumericalSolver:
         y_guess = self.model.D0 / 4
         initial_guess = np.array([y_guess, y_guess, p_guess])
         
-        # Use parallel processing
-        #with Pool() as pool:
-        #    results = pool.map(self.solve_single, range(n_samples))
-
         # CPU paralllization using joblib
         results = Parallel(n_jobs=-1)(
             delayed(self.solve_single)(i, X[i:i+1], control[i], initial_guess)
@@ -147,7 +143,6 @@ class TechSubNumericalSolver:
     
 
     def get_derivative(self, X, control):
-        # NOTE: in this case this is exactly the same as solve_equilibrium, but not necessarily in other models
         """
         Return derivative for a sample of points X
         

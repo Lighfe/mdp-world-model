@@ -1,7 +1,5 @@
 import numpy as np
 
-# delta_t = 0.727
-
 class SocialTipping:
     """
     ODE System for Interacting social tipping elements:social tipping of opinions and behaviours (toy model)
@@ -122,24 +120,25 @@ class SocialTipping:
 
     def odes_vectorized(self, t, Z, control_params):
         """
-        Compute the derivatives of the state variables x and y for a system of ODEs in a vectorized manner.
+        Vectorized computation of derivatives for n samples simultaneously.
+
         Args:
-            t(float): The current time (not used in the computation but required by the ODE solver interface).
-            Z ( 1D np.array): state variables, structured as [x1, x2, ..., xn, y1, y2, ..., yn].
-            control_params(dict) : 
-                A dictionary containing the system parameters. Each entry is a numpy array of length n (number of samples).
-                Expected keys are: 
-                        '?' and '?'  with default values in self.params
+            t (float): Current time (not used — autonomous system, required by solver interface).
+            Z (1D np.array): Flattened state array of shape (2*n,),
+                             structured as [x1, ..., xn, y1, ..., yn].
+            control_params (dict): Parameters for the system. Each value is a numpy array
+                                   of length n. Control params (typically b, c, f, g) must
+                                   be provided; fixed params (a, d, e, h) fall back to
+                                   self.params if absent.
+
         Returns:
-        
-        np.array
-            A 1D numpy array containing the derivatives of the state variables, structured as [dx1/dt, dx2/dt, ..., dxn/dt, dy1/dt, dy2/dt, ..., dyn/dt].
+            np.array: 1D array of shape (2*n,) with derivatives,
+                      structured as [dx1/dt, ..., dxn/dt, dy1/dt, ..., dyn/dt].
         """
 
         x, y = Z[:int(len(Z)/2)], Z[int(len(Z)/2):]  
         n_samples = len(x)
         
-        # Extract control parameters with default values
         # Extract control parameters with default values
         a = control_params.get('a', np.full(n_samples, self.params['a']))
         b = control_params.get('b', np.full(n_samples, self.params['b']))
