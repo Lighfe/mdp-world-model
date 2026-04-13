@@ -71,7 +71,7 @@ from neural_networks.drm_viz import (
 from neural_networks.utils import *
 
 
-def train_drm_model(config_path, multi_run=False):
+def train_drm_model(config_path, multi_run=False, shared_history=None):
     """
     Train DRM model - now with config support and batch mode.
 
@@ -305,6 +305,9 @@ def train_drm_model(config_path, multi_run=False):
         "state_metrics": [],
         "softmax_rank_metrics": [],
     }
+    if shared_history is not None:
+        shared_history.update(history)
+        history = shared_history
 
     # State metrics collection (only if not multi_run)
     collect_every_n_epochs = 1
