@@ -72,10 +72,10 @@ The DRM was also explored qualitatively on the Technology Substitution system an
 Social Tipping system.
 
 ## Repository Structure
+```text
 mdp-world-model/
 ├── data_generation/
-│   ├── models/           # Dynamical system definitions (saddle, tech substitution,
-│   │                     # social tipping, FitzHugh-Nagumo)
+│   ├── models/           # Dynamical system definitions (saddle, tech substitution, social tipping, FitzHugh-Nagumo)
 │   ├── simulations/      # Grid-based sampler and ODE simulator
 │   └── visualization/    # Phase portrait plotting
 ├── datasets/             # SQLite schema, data access, simulation runners
@@ -92,6 +92,7 @@ mdp-world-model/
 ├── configs/          # YAML configs (base, sweeps, ablation)
 ├── parameter_sweep.py   # Bayesian HPO with Optuna + SQLite backend
 └── post_sweep_analysis.py
+```
 
 ## Getting Started
 
