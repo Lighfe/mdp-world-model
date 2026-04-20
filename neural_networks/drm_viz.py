@@ -441,10 +441,10 @@ def visualize_final_state_assignments(
         bounds: Plotting bounds [(x1_min, x1_max), (x2_min, x2_max)]
     """
     
-    # Paul Tol's muted color scheme (colorblind accessible)
-    tol_muted = ["#332288", "#DDCC77", "#117733", "#88CCEE"]
+    # Paul Tol's muted color scheme (colorblind accessible, 8 colors for up to 8 states)
+    tol_muted = ["#332288", "#DDCC77", "#117733", "#88CCEE", "#CC6677", "#44AA99", "#882255","#999933"]
     magenta = "#D81B60"
-    
+
     # Convert system_type string to SystemType enum if needed
     if isinstance(system_type, str):
         system_type_enum = SystemType(system_type)
@@ -687,10 +687,10 @@ def visualize_final_state_assignments_from_pkl(
         grid_resolution: Grid resolution for region coloring (only used if style='regions')
     """
     
-    # Paul Tol's muted color scheme (colorblind accessible)
-    tol_muted = ["#332288", "#DDCC77", "#117733", "#88CCEE"]
+    # Paul Tol's muted color scheme (colorblind accessible, 8 colors for up to 8 states)
+    tol_muted = ["#332288", "#DDCC77", "#117733", "#88CCEE", "#CC6677", "#44AA99", "#882255", "#999933"]
     magenta = "#D81B60"
-    
+
     # Load the pkl file
     with open(pkl_path, 'rb') as f:
         data = pickle.load(f)
