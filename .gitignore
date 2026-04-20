@@ -18,6 +18,7 @@ venv/
 *.h5
 *.pkl
 *.png
+!docs/figures/*
 datasets/results/*
 !datasets/results/.gitkeep
 
