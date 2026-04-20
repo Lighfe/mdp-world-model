@@ -72,8 +72,6 @@ class StableDRMLoss(nn.Module):
         v_true,
         v_pred_for_all_states,
         s_x=None,
-        embed_x=None,
-        embed_y=None,
         epoch=0,
         max_epochs=100,
     ):

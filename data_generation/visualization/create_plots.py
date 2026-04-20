@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
-from scipy.interpolate import RectBivariateSpline
 import sys
 
 import os

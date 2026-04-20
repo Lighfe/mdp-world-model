@@ -10,7 +10,7 @@ import numpy as np
 import copy
 
 from torch.utils.data import Dataset, DataLoader
-from sqlalchemy import create_engine, select, Table, MetaData
+from sqlalchemy import create_engine, select, MetaData
 from sqlalchemy.orm import Session
 
 # Import here to avoid circular imports

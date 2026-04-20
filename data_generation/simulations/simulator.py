@@ -6,7 +6,6 @@ import platform
 import psutil
 import numpy as np
 import pandas as pd
-from data_generation.models import tech_substitution as ts
 from data_generation.simulations.grid import Grid
 from datasets.database import get_engine, init_db, create_results_table
 

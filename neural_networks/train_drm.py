@@ -1,27 +1,12 @@
+from typing import Any
 import os
 import sys
 from pathlib import Path
 import time
-import json
-import yaml
 import shutil
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-from datetime import datetime
-import math
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import psutil
-import copy
 import pickle
-
-import pandas as pd
-import torch.nn.functional as F
-
-from torch.utils.data import WeightedRandomSampler
-from collections import Counter
 
 # Define project root at the module level
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -54,12 +39,8 @@ from neural_networks.drm_viz import (
     visualize_state_space,
     analyze_discrete_state_transitions,
     visualize_transition_matrices,
-    visualize_model_architecture,
     plot_training_curves,
     visualize_mdp_matplotlib,
-    create_state_viz_from_data,
-    analyze_state_assignment_evolution,
-    create_gif_from_frames,
     create_state_evolution_analysis,
     create_png_from_frame_data,
     create_gif_from_data_frames,
@@ -68,18 +49,31 @@ from neural_networks.drm_viz import (
     visualize_final_state_assignments,
 )
 
-from neural_networks.utils import *
+from neural_networks.utils import (
+    set_all_seeds,
+    run_layer_probing,
+    create_optimizer_with_bias_exclusion,
+    create_scheduler,
+    save_state_data_frame,
+    extract_and_calculate_metrics,
+    collect_softmax_rank_metrics,
+    add_global_normalized_singular_values,
+    safe_json_dump,
+    load_and_validate_config,
+)
 
 
-def train_drm_model(config_path, multi_run=False, shared_history=None):
+def train_drm_model(config_path, multi_run=False):
     """
-    Train DRM model - now with config support and batch mode.
+    Train a DRM model from a YAML config file.
 
-    New parameters:
-        config: Configuration dictionary or path to config file
-        dataset_id: Dataset ID for database path formatting
-        multi_run: If True, minimizes outputs for batch processing
+    Args:
+        config_path: Path to YAML config file.
+        multi_run: If True, minimizes output and returns only key metrics
+            for batch processing.
 
+    Returns:
+        (model, history) normally, or (None, minimal_dict) in multi_run mode.
     """
     # Load config
     config = load_and_validate_config(config_path)
@@ -149,7 +143,7 @@ def train_drm_model(config_path, multi_run=False, shared_history=None):
     if value_method is None:
         value_method = system_config["default_value_method"]
 
-    # Value loss type - Legacy code
+    # Value loss type
     if value_loss_type is None:
         value_loss_type = system_config["default_value_loss"][value_method]
         if not multi_run:
@@ -205,7 +199,7 @@ def train_drm_model(config_path, multi_run=False, shared_history=None):
                 "angles_degrees": saddle_config["angles_degrees"],
             }
 
-    # Checkpint config
+    # Checkpoint config
     checkpoint_config = {
         "obs_dim": obs_dim,
         "control_dim": control_dim,
@@ -287,7 +281,7 @@ def train_drm_model(config_path, multi_run=False, shared_history=None):
     )
 
     # Initialize history (keeping all original fields)
-    history = {
+    history: dict[str, Any] = {
         "train_loss": [],
         "train_state_loss": [],
         "train_value_loss": [],
@@ -305,9 +299,6 @@ def train_drm_model(config_path, multi_run=False, shared_history=None):
         "state_metrics": [],
         "softmax_rank_metrics": [],
     }
-    if shared_history is not None:
-        shared_history.update(history)
-        history = shared_history
 
     # State metrics collection (only if not multi_run)
     collect_every_n_epochs = 1
@@ -975,7 +966,7 @@ def train_drm_model(config_path, multi_run=False, shared_history=None):
         bounds=bounds,
     )
 
-    if True: # not multi_run:
+    if not multi_run:
         # scatter plot visualization (10k jittered points)
         final_state_scatter_path = os.path.join(output_dir, f"final_state_scatter_{run_id}.png")
         visualize_final_state_assignments(
@@ -1088,10 +1079,6 @@ def train_drm_model(config_path, multi_run=False, shared_history=None):
     if not multi_run:
         training_time = time.time() - start_time
         print(f"Training completed in {training_time:.2f} seconds")
-
-    # DEBUGGING
-    print(f"[DEBUG] About to return from train_drm_model()")
-    sys.stdout.flush()
 
     if multi_run:
         # Return minimal data:

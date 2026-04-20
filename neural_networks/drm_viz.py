@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap
-import math
 import pandas as pd
 
 import seaborn as sns
@@ -40,10 +39,6 @@ from neural_networks.drm import (
     DiscreteRepresentationsModel,
     BilinearPredictor,
     StandardPredictor,
-)
-from data_generation.models.tech_substitution import (
-    TechnologySubstitution,
-    TechSubNumericalSolver,
 )
 
 from neural_networks.system_registry import get_transformation, SystemType, get_visualization_bounds
@@ -140,7 +135,7 @@ def visualize_state_space(
     model,
     output_path=None,
     transformations=None,
-    device="cpu",
+    device: str | torch.device = "cpu",
     num_points=1000,
     num_states=None,
     soft=False,
@@ -255,12 +250,12 @@ def visualize_state_space(
         # Create the plot (using extent to set coordinate system)
         im = ax.imshow(
             state_prob_grid,
-            extent=[
+            extent=(
                 plot_bounds[0][0],
                 plot_bounds[0][1],
                 plot_bounds[1][0],
                 plot_bounds[1][1],
-            ],
+            ),
             origin="lower",
             cmap="viridis",
             vmin=0,
@@ -407,7 +402,7 @@ def visualize_final_state_assignments(
     model,
     output_path,
     system_type,
-    device='cpu',
+    device: str | torch.device = "cpu",
     num_points=1000,
     num_states=None,
     visualization_style='scatter',
@@ -628,7 +623,7 @@ def visualize_final_state_assignments(
         # Plot colored regions
         im = ax.imshow(
             grid_states,
-            extent=[bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]],
+            extent=(bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]),
             origin='lower',
             cmap=cmap,
             alpha=0.9,
@@ -855,7 +850,7 @@ def visualize_final_state_assignments_from_pkl(
         # Plot colored regions
         im = ax.imshow(
             grid_states,
-            extent=[bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]],
+            extent=(bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]),
             origin='lower',
             cmap=cmap,
             alpha=0.9,
@@ -1038,7 +1033,7 @@ def create_gif_from_data_frames(data_frame_paths, output_path, gif_duration=250)
 
                 # Create visualization from data
                 png_data = create_png_from_frame_data(frame_data)
-                writer.append_data(png_data)
+                writer.append_data(png_data)  # type: ignore[attr-defined]
 
         print(f"Created GIF with {len(data_frame_paths)} frames: {gif_path}")
         return gif_path
@@ -1081,7 +1076,7 @@ def create_png_from_frame_data(frame_data):
         # Create heatmap
         im = ax.imshow(
             state_grid,
-            extent=[bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]],
+            extent=(bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]),
             origin="lower",
             cmap="viridis",
             vmin=0,
@@ -1124,7 +1119,7 @@ def create_png_from_frame_data(frame_data):
 
 
 def analyze_discrete_state_transitions(
-    model, control_values, device="cpu", system_type=None
+    model, control_values, device: str | torch.device = "cpu", system_type=None
 ):
     """
     Analyze state transitions for different control values using discrete state assignments.
@@ -1570,131 +1565,137 @@ def visualize_model_architecture(model, output_path):
             )
 
     # Create encoder cluster
-    with dot.subgraph(name="cluster_encoder") as c:
-        c.attr(label="Encoder", style="filled", color="lightblue", fillcolor="azure")
+    subgraph = dot.subgraph(name="cluster_encoder")
+    if subgraph is not None:
+        with subgraph as c:
+            c.attr(label="Encoder", style="filled", color="lightblue", fillcolor="azure")
 
-        # Add encoder modules
-        for module_id in clusters["encoder"]:
-            if module_id in all_modules:
-                module = all_modules[module_id]
-                c.node(module_id, module["label"], fillcolor=module["color"])
+            # Add encoder modules
+            for module_id in clusters["encoder"]:
+                if module_id in all_modules:
+                    module = all_modules[module_id]
+                    c.node(module_id, module["label"], fillcolor=module["color"])
 
-        # Add connections between encoder modules
-        for src, dests in connections.items():
-            if src in clusters["encoder"]:
-                for dest in dests:
-                    if dest in clusters["encoder"]:
-                        c.edge(src, dest)
+            # Add connections between encoder modules
+            for src, dests in connections.items():
+                if src in clusters["encoder"]:
+                    for dest in dests:
+                        if dest in clusters["encoder"]:
+                            c.edge(src, dest)
 
-        # Connect inputs/outputs
-        c.edge("x_input", clusters["encoder"][0] if clusters["encoder"] else "encoder")
-        c.edge(
-            clusters["encoder"][-1] if clusters["encoder"] else "encoder", "s_x_output"
-        )
+            # Connect inputs/outputs
+            c.edge("x_input", clusters["encoder"][0] if clusters["encoder"] else "encoder")
+            c.edge(
+                clusters["encoder"][-1] if clusters["encoder"] else "encoder", "s_x_output"
+            )
 
-        # Add y path for training (dashed)
-        c.edge(
-            "y_input",
-            clusters["encoder"][0] if clusters["encoder"] else "encoder",
-            style="dashed",
-            label="shared weights",
-        )
-        c.edge(
-            clusters["encoder"][-1] if clusters["encoder"] else "encoder",
-            "s_y_output",
-            style="dashed",
-        )
+            # Add y path for training (dashed)
+            c.edge(
+                "y_input",
+                clusters["encoder"][0] if clusters["encoder"] else "encoder",
+                style="dashed",
+                label="shared weights",
+            )
+            c.edge(
+                clusters["encoder"][-1] if clusters["encoder"] else "encoder",
+                "s_y_output",
+                style="dashed",
+            )
 
     # Create predictor cluster with special handling for different predictor types
-    with dot.subgraph(name="cluster_predictor") as c:
-        predictor_type = model.predictor.__class__.__name__
-        c.attr(
-            label=f"{predictor_type}",
-            style="filled",
-            color="lightgreen",
-            fillcolor="mintcream",
-        )
+    subgraph = dot.subgraph(name="cluster_predictor")
+    if subgraph is not None:
+        with subgraph as c:
+            predictor_type = model.predictor.__class__.__name__
+            c.attr(
+                label=f"{predictor_type}",
+                style="filled",
+                color="lightgreen",
+                fillcolor="mintcream",
+            )
 
-        # Add predictor modules
-        for module_id in clusters["predictor"]:
-            if module_id in all_modules:
-                module = all_modules[module_id]
-                c.node(module_id, module["label"], fillcolor=module["color"])
+            # Add predictor modules
+            for module_id in clusters["predictor"]:
+                if module_id in all_modules:
+                    module = all_modules[module_id]
+                    c.node(module_id, module["label"], fillcolor=module["color"])
 
-        # For BilinearPredictor, create a custom layout
-        if isinstance(model.predictor, BilinearPredictor):
-            # Highlight the interaction module
-            interaction_id = get_module_name("predictor.interaction")
-            if interaction_id in all_modules:
+            # For BilinearPredictor, create a custom layout
+            if isinstance(model.predictor, BilinearPredictor):
+                # Highlight the interaction module
+                interaction_id = get_module_name("predictor.interaction")
+                if interaction_id in all_modules:
+                    c.node(
+                        interaction_id,
+                        all_modules[interaction_id]["label"],
+                        shape="Mrecord",
+                        fillcolor="gold",
+                    )
+
+            # For StandardPredictor, add the concatenation node
+            elif isinstance(model.predictor, StandardPredictor):
+                # Concatenation happens outside any specific module
                 c.node(
-                    interaction_id,
-                    all_modules[interaction_id]["label"],
+                    "concat_node",
+                    "Concatenate\ns_x + encoded c",
                     shape="Mrecord",
                     fillcolor="gold",
                 )
 
-        # For StandardPredictor, add the concatenation node
-        elif isinstance(model.predictor, StandardPredictor):
-            # Concatenation happens outside any specific module
-            c.node(
-                "concat_node",
-                "Concatenate\ns_x + encoded c",
-                shape="Mrecord",
-                fillcolor="gold",
+            # Only add standard connections for the remaining modules
+            # (not for BilinearPredictor or StandardPredictor where we use custom connections)
+            if not isinstance(model.predictor, (BilinearPredictor, StandardPredictor)):
+                # Add connections between predictor modules
+                for src, dests in connections.items():
+                    if src in clusters["predictor"]:
+                        for dest in dests:
+                            if dest in clusters["predictor"]:
+                                c.edge(src, dest)
+
+                # Connect inputs/outputs
+                c.edge(
+                    "s_x_output",
+                    clusters["predictor"][0] if clusters["predictor"] else "predictor",
+                )
+                c.edge(
+                    "c_input",
+                    clusters["predictor"][0] if clusters["predictor"] else "predictor",
+                )
+                c.edge(
+                    clusters["predictor"][-1] if clusters["predictor"] else "predictor",
+                    "s_y_pred_output",
+                )
+
+    # Create value network cluster
+    subgraph = dot.subgraph(name="cluster_value")
+    if subgraph is not None:
+        with subgraph as c:
+            c.attr(
+                label="Value Network", style="filled", color="salmon", fillcolor="seashell"
             )
 
-        # Only add standard connections for the remaining modules
-        # (not for BilinearPredictor or StandardPredictor where we use custom connections)
-        if not isinstance(model.predictor, (BilinearPredictor, StandardPredictor)):
-            # Add connections between predictor modules
+            # Add value network modules
+            for module_id in clusters["value_net"]:
+                if module_id in all_modules:
+                    module = all_modules[module_id]
+                    c.node(module_id, module["label"], fillcolor=module["color"])
+
+            # Add connections between value network modules
             for src, dests in connections.items():
-                if src in clusters["predictor"]:
+                if src in clusters["value_net"]:
                     for dest in dests:
-                        if dest in clusters["predictor"]:
+                        if dest in clusters["value_net"]:
                             c.edge(src, dest)
 
             # Connect inputs/outputs
             c.edge(
-                "s_x_output",
-                clusters["predictor"][0] if clusters["predictor"] else "predictor",
-            )
-            c.edge(
-                "c_input",
-                clusters["predictor"][0] if clusters["predictor"] else "predictor",
-            )
-            c.edge(
-                clusters["predictor"][-1] if clusters["predictor"] else "predictor",
                 "s_y_pred_output",
+                clusters["value_net"][0] if clusters["value_net"] else "value_net",
             )
-
-    # Create value network cluster
-    with dot.subgraph(name="cluster_value") as c:
-        c.attr(
-            label="Value Network", style="filled", color="salmon", fillcolor="seashell"
-        )
-
-        # Add value network modules
-        for module_id in clusters["value_net"]:
-            if module_id in all_modules:
-                module = all_modules[module_id]
-                c.node(module_id, module["label"], fillcolor=module["color"])
-
-        # Add connections between value network modules
-        for src, dests in connections.items():
-            if src in clusters["value_net"]:
-                for dest in dests:
-                    if dest in clusters["value_net"]:
-                        c.edge(src, dest)
-
-        # Connect inputs/outputs
-        c.edge(
-            "s_y_pred_output",
-            clusters["value_net"][0] if clusters["value_net"] else "value_net",
-        )
-        c.edge(
-            clusters["value_net"][-1] if clusters["value_net"] else "value_net",
-            "v_pred_output",
-        )
+            c.edge(
+                clusters["value_net"][-1] if clusters["value_net"] else "value_net",
+                "v_pred_output",
+            )
 
     # Add custom connections for non-sequential flows
     for src, dest, attrs in custom_connections:
@@ -1966,7 +1967,7 @@ def plot_probing_evolution(history, save_path):
     ax.set_title("Layer Probing: Discrete Accuracy Evolution", fontsize=14)
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
-    ax.set_ylim([0, 1])  # Accuracy is between 0 and 1
+    ax.set_ylim(0, 1)  # Accuracy is between 0 and 1
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -1976,7 +1977,7 @@ def plot_probing_evolution(history, save_path):
 
 ### MDP
 
-def extract_mdp_transitions_fixed(model, num_actions=2, device='cpu'):
+def extract_mdp_transitions_fixed(model, num_actions=2, device: str | torch.device = "cpu"):
     """
     Extract MDP transition probabilities and state values from a trained DRM model.
     Fixed version that handles control dimensions correctly.
@@ -2085,7 +2086,7 @@ def visualize_mdp_matplotlib(
     transition_probs=None,
     state_values=None,
     output_path=None,
-    device='cpu',
+    device: str | torch.device = "cpu",
     num_actions=2,
     value_format='angle',
     title='MDP Visualization',
@@ -2694,7 +2695,7 @@ def plot_probing_aggregated(aggregated_data, save_path):
     ax.set_ylabel("Discrete Accuracy", fontsize=12)
     #ax.legend(fontsize=10)
     ax.grid(True, alpha=0.2)
-    ax.set_ylim([0, 1])  # Accuracy is between 0 and 1
+    ax.set_ylim(0, 1)  # Accuracy is between 0 and 1
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -2702,436 +2703,3 @@ def plot_probing_aggregated(aggregated_data, save_path):
     
     print(f"Saved probing aggregated plot to: {save_path}")
 
-### NOTE: DEPRECATED
-
-
-def create_state_viz_from_data(
-    df,
-    output_path=None,
-    epochs=None,
-    epoch_frequency=None,
-    create_gif=False,
-    gif_duration=0.5,
-    figsize=(12, 10),
-):
-    """
-    NOTE: DEPRECATED
-    Create state space visualizations from DataFrame data.
-
-    Args:
-        df: DataFrame with state assignment data (from extract_state_assignment_data)
-        output_path: Base path for saving (without extension)
-        epochs: List of specific epochs to plot, or None for all
-        epoch_frequency: Plot every nth epoch, or None to use epochs parameter
-        create_gif: If True, create animated GIF for multiple epochs
-        gif_duration: Duration per frame in GIF (seconds)
-        figsize: Figure size for plots
-
-    Returns:
-        dict: Dictionary with information about created files
-    """
-
-    # Get available epochs
-    if "epoch" in df.columns:
-        available_epochs = sorted(df["epoch"].unique())
-    else:
-        available_epochs = [None]  # Single epoch case
-
-    # Determine which epochs to plot
-    if epochs is not None:
-        epochs_to_plot = [e for e in epochs if e in available_epochs]
-    elif epoch_frequency is not None:
-        epochs_to_plot = available_epochs[::epoch_frequency]
-    else:
-        epochs_to_plot = available_epochs
-
-    if not epochs_to_plot:
-        raise ValueError("No valid epochs found to plot")
-
-    # Get metadata from DataFrame attributes
-    grid_size = df.attrs.get("grid_size", int(np.sqrt(len(df) // len(epochs_to_plot))))
-    bounds = df.attrs.get("bounds", [(-5, 5), (-5, 5)])
-    num_states = df.attrs.get("num_states", 4)
-
-    created_files = []
-    temp_files = []  # For GIF creation
-    temp_dir = None
-
-    # Create temp directory if creating GIF
-    if create_gif and len(epochs_to_plot) > 1:
-        temp_dir = tempfile.mkdtemp()
-
-    try:
-        for epoch in epochs_to_plot:
-            # Filter data for this epoch
-            if epoch is not None:
-                epoch_df = df[df["epoch"] == epoch].copy()
-                epoch_suffix = f"_epoch_{epoch}"
-            else:
-                epoch_df = df.copy()
-                epoch_suffix = ""
-
-            if len(epoch_df) == 0:
-                continue
-
-            # Determine subplot layout based on number of states
-            if num_states <= 4:
-                nrows, ncols = 2, 2
-            elif num_states <= 6:
-                nrows, ncols = 2, 3
-            elif num_states <= 9:
-                nrows, ncols = 3, 3
-            elif num_states <= 12:
-                nrows, ncols = 3, 4
-            else:
-                nrows, ncols = 4, 4  # Max 4x4 grid, limit to 16 states
-
-            # Adjust figure size based on layout
-            fig_width = ncols * (figsize[0] / 2)
-            fig_height = nrows * (figsize[1] / 2)
-
-            # Create the visualization
-            fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_height))
-            if nrows * ncols == 1:
-                axes = [axes]
-            else:
-                axes = axes.ravel()
-
-            # Get grid coordinates
-            x1_vals = epoch_df["x1"].values.reshape(grid_size, grid_size)
-            x2_vals = epoch_df["x2"].values.reshape(grid_size, grid_size)
-
-            # Plot each state
-            for state_idx in range(min(num_states, nrows * ncols)):
-                ax = axes[state_idx]
-
-                # Get state probabilities and reshape to grid
-                state_col = f"state_{state_idx}_prob"
-                if state_col in epoch_df.columns:
-                    state_probs = epoch_df[state_col].values.reshape(
-                        grid_size, grid_size
-                    )
-                else:
-                    # Fallback: create empty grid
-                    state_probs = np.zeros((grid_size, grid_size))
-
-                # Create heatmap
-                im = ax.imshow(
-                    state_probs,
-                    extent=[bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]],
-                    origin="lower",
-                    cmap="viridis",
-                    vmin=0,
-                    vmax=1,
-                    aspect="auto",
-                    interpolation="bilinear",
-                )
-
-                # Styling
-                ax.set_xlabel("x1")
-                ax.set_ylabel("x2")
-                ax.set_title(f"State {state_idx + 1}")
-                ax.grid(True, alpha=0.3)
-
-                # Add colorbar
-                cbar = plt.colorbar(im, ax=ax)
-                cbar.set_label("State Assignment Strength")
-
-            # Hide unused subplots
-            for idx in range(num_states, len(axes)):
-                axes[idx].set_visible(False)
-
-            # Overall title
-            if epoch is not None:
-                fig.suptitle(f"State Space Visualization - Epoch {epoch}", fontsize=14)
-            else:
-                fig.suptitle("State Space Visualization", fontsize=14)
-
-            plt.tight_layout()
-
-            # Save or store for GIF
-            if create_gif and len(epochs_to_plot) > 1:
-                temp_path = os.path.join(temp_dir, f"state_viz_epoch_{epoch}.png")
-                plt.savefig(temp_path, dpi=150, bbox_inches="tight")
-                temp_files.append(temp_path)
-                plt.close()
-            elif output_path:
-                file_path = f"{output_path}{epoch_suffix}.png"
-                plt.savefig(file_path, dpi=150, bbox_inches="tight")
-                created_files.append(file_path)
-                plt.close()
-            else:
-                plt.show()
-
-        # Create GIF if requested
-        if create_gif and len(temp_files) > 1 and output_path:
-            try:
-                gif_path = f"{output_path}_animation.gif"
-
-                with imageio.get_writer(
-                    gif_path, mode="I", duration=gif_duration
-                ) as writer:
-                    for temp_file in temp_files:
-                        image = imageio.imread(temp_file)
-                        writer.append_data(image)
-
-                created_files.append(gif_path)
-                print(f"Created GIF with {len(temp_files)} frames: {gif_path}")
-
-            except ImportError:
-                print("Warning: imageio not available for GIF creation")
-                print("Individual PNG files saved instead")
-
-                # If GIF creation fails, save individual files instead
-                if output_path:
-                    for i, temp_file in enumerate(temp_files):
-                        final_path = f"{output_path}_frame_{i:03d}.png"
-                        shutil.copy2(temp_file, final_path)
-                        created_files.append(final_path)
-
-    finally:
-        # Clean up temp directory
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-
-    return {
-        "created_files": created_files,
-        "epochs_plotted": epochs_to_plot,
-        "num_files": len(created_files),
-    }
-
-
-def analyze_state_assignment_evolution(df, output_path=None):
-    """
-    NOTE: DEPRECATED!
-    Analyze how state assignments change over training epochs.
-
-    Args:
-        df: DataFrame with state assignment data across epochs
-        output_path: Path to save analysis plot
-
-    Returns:
-        dict: Analysis results
-    """
-
-    # Paul Tol's muted color scheme for colorblind accessibility
-    tol_muted = [
-        "#CC6677",
-        "#332288",
-        "#DDCC77",
-        "#117733",
-        "#88CCEE",
-        "#882255",
-        "#44AA99",
-        "#999933",
-    ]
-
-    if "epoch" not in df.columns:
-        print("No epoch information found in DataFrame")
-        return {}
-
-    epochs = sorted(df["epoch"].unique())
-    num_states = df.attrs.get("num_states", 4)
-
-    # Calculate metrics per epoch
-    metrics = []
-    for i, epoch in enumerate(epochs):
-        epoch_df = df[df["epoch"] == epoch]
-
-        epoch_metrics = {"epoch": epoch}
-
-        # State usage (how often each state is dominant)
-        state_usage = epoch_df["dominant_state"].value_counts(normalize=True)
-        for state_idx in range(num_states):
-            epoch_metrics[f"state_{state_idx}_usage"] = state_usage.get(state_idx, 0.0)
-
-        # Mean probabilities per state
-        for state_idx in range(num_states):
-            state_col = f"state_{state_idx}_prob"
-            if state_col in epoch_df.columns:
-                mean_prob = epoch_df[state_col].mean()
-                epoch_metrics[f"state_{state_idx}_mean"] = mean_prob
-
-        # Sharpness: per-grid-point entropy
-        state_prob_cols = [
-            f"state_{i}_prob"
-            for i in range(num_states)
-            if f"state_{i}_prob" in epoch_df.columns
-        ]
-        if state_prob_cols:
-            state_probs = epoch_df[state_prob_cols].values
-            # Calculate entropy per grid point: -sum(p * log(p)) for each row
-            per_point_entropy = -np.sum(
-                state_probs * np.log(state_probs + 1e-8), axis=1
-            )
-            epoch_metrics["sharpness_mean"] = np.mean(per_point_entropy)
-            epoch_metrics["sharpness_std"] = np.std(per_point_entropy)
-
-        # Stability metrics (require previous epoch)
-        if i > 0:
-            prev_epoch = epochs[i - 1]
-            prev_epoch_df = df[df["epoch"] == prev_epoch]
-
-            # Ensure same ordering
-            epoch_df_sorted = epoch_df.sort_values("grid_idx")
-            prev_epoch_df_sorted = prev_epoch_df.sort_values("grid_idx")
-
-            if len(epoch_df_sorted) == len(prev_epoch_df_sorted):
-                # Dominant state stability: % of points keeping same dominant state
-                current_dominant = epoch_df_sorted["dominant_state"].values
-                prev_dominant = prev_epoch_df_sorted["dominant_state"].values
-                same_dominant = np.mean(current_dominant == prev_dominant) * 100
-                epoch_metrics["dominant_stability"] = same_dominant
-
-                # Probability change stability: average change converted to stability %
-                current_probs = epoch_df_sorted[state_prob_cols].values
-                prev_probs = prev_epoch_df_sorted[state_prob_cols].values
-                avg_prob_change = np.mean(np.abs(current_probs - prev_probs))
-                # Convert to stability percentage (lower change = higher stability)
-                prob_stability = (
-                    1 - min(avg_prob_change * 2, 1.0)
-                ) * 100  # Scale factor 2 to make it more sensitive
-                epoch_metrics["probability_stability"] = prob_stability
-
-        metrics.append(epoch_metrics)
-
-    metrics_df = pd.DataFrame(metrics)
-
-    # Create analysis plots (2x2 layout)
-    if output_path:
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-
-        # 1. State usage over time
-        ax = axes[0, 0]
-        for state_idx in range(num_states):
-            usage_col = f"state_{state_idx}_usage"
-            if usage_col in metrics_df.columns:
-                color = tol_muted[state_idx % len(tol_muted)]
-                ax.plot(
-                    metrics_df["epoch"],
-                    metrics_df[usage_col] * 100,
-                    label=f"State {state_idx + 1}",
-                    marker="o",
-                    markersize=3,
-                    linewidth=1.5,
-                    color=color,
-                )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Dominant State (%)")
-        ax.set_title("Dominant State Assignments Over Training")
-        ax.legend(loc="upper right")
-        ax.grid(True, alpha=0.4)
-
-        # 2. Assignment sharpness over time (with distribution)
-        ax = axes[0, 1]
-        if "sharpness_mean" in metrics_df.columns:
-            epochs_arr = metrics_df["epoch"].values
-            mean_sharpness = metrics_df["sharpness_mean"].values
-            std_sharpness = metrics_df["sharpness_std"].values
-
-            # Plot mean line
-            ax.plot(epochs_arr, mean_sharpness, color="blue", linewidth=2, label="Mean")
-            # Plot standard deviation as shaded area
-            ax.fill_between(
-                epochs_arr,
-                mean_sharpness - std_sharpness,
-                mean_sharpness + std_sharpness,
-                alpha=0.3,
-                color="blue",
-                label="± 1 std",
-            )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Per-Point Entropy (Sharpness)")
-        ax.set_title("Assignment Sharpness Over Training\n(Lower = More Discrete)")
-        ax.legend()
-        ax.grid(True, alpha=0.4)
-
-        # 3. Mean probabilities per state
-        ax = axes[1, 0]
-        for state_idx in range(num_states):
-            mean_col = f"state_{state_idx}_mean"
-            if mean_col in metrics_df.columns:
-                color = tol_muted[state_idx % len(tol_muted)]
-                ax.plot(
-                    metrics_df["epoch"],
-                    metrics_df[mean_col],
-                    label=f"State {state_idx + 1}",
-                    marker="o",
-                    markersize=3,
-                    linewidth=1.5,
-                    color=color,
-                )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Mean Probability")
-        ax.set_title("Average State Assignment Strength")
-        ax.grid(True, alpha=0.4)
-
-        # 4. Stability metrics (both on same scale)
-        ax = axes[1, 1]
-        if "dominant_stability" in metrics_df.columns:
-            # Remove first epoch (no stability data)
-            stability_df = metrics_df.dropna(subset=["dominant_stability"])
-            ax.plot(
-                stability_df["epoch"],
-                stability_df["dominant_stability"],
-                color="#AA4499",
-                marker="o",
-                linewidth=2,
-                label="Dominant State Stability",
-            )  # Purple
-            ax.plot(
-                stability_df["epoch"],
-                stability_df["probability_stability"],
-                color="#DDDDDD",
-                marker="^",
-                linewidth=2,
-                label="Probability Stability",
-            )  # Gray
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Stability (%)")
-        ax.set_title("Assignment Stability Between Epochs")
-        ax.legend()
-        ax.grid(True, alpha=0.4)
-        ax.set_ylim(50, 100)  # Both are percentages
-
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches="tight")
-        plt.close()
-
-    return {
-        "metrics_df": metrics_df,
-        "epochs_analyzed": len(epochs),
-        "num_states": num_states,
-    }
-
-
-def create_gif_from_frames(frame_paths, output_path, gif_duration=250):
-    """
-    Create GIF from saved frame paths.
-
-    Args:
-        frame_paths: list of paths to frame images
-        output_path: path for output GIF (without extension)
-        gif_duration: duration per frame in milliseconds
-
-    Returns:
-        str: path to created GIF
-    """
-    try:
-        import imageio
-
-        gif_path = f"{output_path}_animation.gif"
-
-        with imageio.get_writer(
-            gif_path, mode="I", duration=gif_duration / 1000.0
-        ) as writer:
-            for frame_path in frame_paths:
-                image = imageio.imread(frame_path)
-                writer.append_data(image)
-
-        print(f"Created GIF with {len(frame_paths)} frames: {gif_path}")
-        return gif_path
-
-    except ImportError:
-        print("Warning: imageio not available for GIF creation")
-        return None
