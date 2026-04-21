@@ -4,6 +4,27 @@ __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
+@app.cell(hide_code=True)
+def _():
+    import subprocess
+    import sys
+    import os
+
+    # Molab / cloud: clone the repo and add it to the path.
+    # Locally (run from project root) neural_networks/ and data_generation/ already
+    # exist in the cwd, so nothing happens.
+    if not (os.path.exists("neural_networks") and os.path.exists("data_generation")):
+        if not os.path.exists("mdp-world-model"):
+            subprocess.run(
+                ["git", "clone", "https://github.com/Lighfe/mdp-world-model.git"],
+                check=True,
+            )
+        _root = os.path.abspath("mdp-world-model")
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+    return os, sys
+
+
 @app.cell
 def _():
     import marimo as mo
@@ -12,11 +33,9 @@ def _():
 
 
 @app.cell
-def _():
-    import sys
-    import os
+def _(os, sys):
     import threading
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     import numpy as np
     import matplotlib
     import matplotlib.pyplot as plt
@@ -26,7 +45,7 @@ def _():
     import yaml
     import pandas as pd
 
-    return io, matplotlib, np, os, pd, plt, tempfile, threading, to_rgba, yaml
+    return io, matplotlib, np, pd, plt, tempfile, threading, to_rgba, yaml
 
 
 @app.cell
@@ -35,7 +54,7 @@ def _():
     from data_generation.models.general_ode_solver import GeneralODENumericalSolver
     from data_generation.simulations.grid import Grid, logistic_transformation
     from data_generation.simulations.simulator import Simulator
-    from neural_networks.train_drm import train_drm_model
+    from neural_networks.train_drm_simple import train_drm_simple
     from neural_networks.drm_viz import visualize_final_state_assignments
     from neural_networks.system_registry import SystemType, get_visualization_bounds
 
@@ -47,7 +66,7 @@ def _():
         SystemType,
         get_visualization_bounds,
         logistic_transformation,
-        train_drm_model,
+        train_drm_simple,
         visualize_final_state_assignments,
     )
 
@@ -229,7 +248,7 @@ def _():
     export default { render };
     """
         _css = ""
-        saddle_points = TList([[0.0, 2.0], [2.0, 0.0]]).tag(sync=True)
+        saddle_points = TList([[-2.0, 2.0], [2.0, 0.0]]).tag(sync=True)
         angles_deg = TList([135.0, 0.0]).tag(sync=True)
         x_range = TList([-5.0, 5.0]).tag(sync=True)
         y_range = TList([-5.0, 5.0]).tag(sync=True)
@@ -257,11 +276,11 @@ def _(mo):
         full_width=True,
     )
     lambda1_s = mo.ui.slider(
-        start=0.1, stop=3.0, step=0.1, value=1.0,
+        start=0.5, stop=1.5, step=0.1, value=1.0,
         label="λ₁  unstable exponent (> 0)",
     )
     lambda2_s = mo.ui.slider(
-        start=-3.0, stop=-0.1, step=0.1, value=-1.0,
+        start=-1.5, stop=-0.5, step=0.1, value=-1.0,
         label="λ₂  stable exponent (< 0)",
     )
     return angle0_s, angle1_s, lambda1_s, lambda2_s
@@ -493,6 +512,7 @@ def _(
     lambda2_s,
     logistic_transformation,
     np,
+    os,
     pd,
 ):
     _RESOLUTION = 20   # 20×20 grid
@@ -606,7 +626,7 @@ def _(mo):
         3, 8, step=1, value=4, label="Number of discrete states",
     )
     epochs_s = mo.ui.slider(
-        25, 100, step=25, value=75, label="Epochs",
+        25, 100, step=25, value=50, label="Epochs",
     )
     train_btn = mo.ui.run_button(label="Train DRM")
     return epochs_s, num_states_s, train_btn
@@ -622,10 +642,10 @@ def _(
     tempfile,
     threading,
     train_btn,
-    train_drm_model,
+    train_drm_simple,
     yaml,
 ):
-    training_state = {"history": {}, "model": None, "done": False, "error": None}
+    training_state = {"history": {}, "model": None, "done": False, "error": None, "started": False}
     mo.stop(
         train_btn.value and sim_df is None,
         mo.md("**Generate a dataset first** — click Generate Dataset in the section above."),
@@ -686,7 +706,7 @@ def _(
 
         def _run():
             try:
-                _model, _ = train_drm_model(
+                _model, _ = train_drm_simple(
                     _tmp_path, shared_history=training_state["history"]
                 )
                 training_state["model"] = _model
@@ -695,6 +715,7 @@ def _(
             finally:
                 training_state["done"] = True
 
+        training_state["started"] = True
         threading.Thread(target=_run, daemon=True).start()
     return (training_state,)
 
@@ -735,7 +756,7 @@ def _(
     # ── H: progressive loss curves ───────────────────────────────
     _hist = training_state["history"]
     _train_loss = _hist.get("train_loss", [])
-    _is_running = bool(_hist) and not training_state["done"] and not training_state["error"]
+    _is_running = training_state.get("started", False) and not training_state["done"] and not training_state["error"]
 
     _SPINNER_HTML = (
         '<div style="display:flex;align-items:center;gap:8px;margin-top:2px">'
@@ -897,6 +918,11 @@ def _(
         [mo.md("## State Assignments"), mo.image(_viz_bytes, width=640)],
         gap="0.5rem",
     )
+    return
+
+
+@app.cell
+def _():
     return
 
 
