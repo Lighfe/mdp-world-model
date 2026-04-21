@@ -3,9 +3,7 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-
-@app.cell(hide_code=True)
-def _():
+with app.setup:
     import subprocess
     import sys
     import os
@@ -26,7 +24,6 @@ def _():
         _root = os.path.abspath("mdp-world-model")
         if _root not in sys.path:
             sys.path.insert(0, _root)
-    return os, sys
 
 
 @app.cell
@@ -37,14 +34,16 @@ def _():
 
 
 @app.cell
-def _(os, sys):
+def _():
     import threading
     try:
         sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     except NameError:
         pass
+    import base64
     import numpy as np
     import matplotlib
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.colors import to_rgba
     import io
@@ -52,7 +51,7 @@ def _(os, sys):
     import yaml
     import pandas as pd
 
-    return io, matplotlib, np, pd, plt, tempfile, threading, to_rgba, yaml
+    return base64, io, matplotlib, np, pd, plt, tempfile, threading, to_rgba, yaml
 
 
 @app.cell
@@ -79,42 +78,50 @@ def _():
 
 
 @app.cell(hide_code=True)
-def _(mo, os):
-    _arch_local = "docs/figures/DRM_architecture.jpeg"
-    if not os.path.exists(_arch_local):
-        _arch_local = "mdp-world-model/docs/figures/DRM_architecture.jpeg"
-    _arch_src = (
-        _arch_local
-        if os.path.exists(_arch_local)
-        else "https://raw.githubusercontent.com/Lighfe/mdp-world-model/main/docs/figures/DRM_architecture.jpeg"
+def _(base64, mo, os):
+    _candidates = [
+        "docs/figures/DRM_architecture.jpeg",
+        "mdp-world-model/docs/figures/DRM_architecture.jpeg",
+    ]
+    _arch_bytes = None
+    for _p in _candidates:
+        if os.path.exists(_p):
+            with open(_p, "rb") as _f:
+                _arch_bytes = _f.read()
+            break
+    if _arch_bytes is None:
+        import urllib.request
+        _url = "https://raw.githubusercontent.com/Lighfe/mdp-world-model/main/docs/figures/DRM_architecture.jpeg"
+        with urllib.request.urlopen(_url) as _r:
+            _arch_bytes = _r.read()
+    _arch_img = mo.Html(
+        f'<img src="data:image/jpeg;base64,{base64.b64encode(_arch_bytes).decode()}"'
+        ' style="width:640px;max-width:100%">'
     )
     mo.vstack(
         [
             mo.md(r"""
-# DRM Playground
+    # DRM Playground
 
-This notebook walks through the full **Discrete Representation Model (DRM)** pipeline:
-configure a dynamical system, generate transition data, train the DRM, and visualise
-the learned discrete state partition.
+    This notebook walks through the full **Discrete Representation Model (DRM)** pipeline:
+    configure a dynamical system, generate transition data, train the DRM, and visualise
+    the learned discrete state partition.
 
-## Architecture
+    ## Architecture
 
-The DRM learns a finite discrete MDP from continuous dynamical system transition data
-$(x, c, y)$ — current state, control, next state — with **no state labels required**.
+    The DRM learns a finite discrete MDP from continuous dynamical system transition data
+    $(x, c, y)$ — current state, control, next state — with **no state labels required**.
 
-| Component | Input → Output | Role |
-|---|---|---|
-| **Encoder** (Gumbel-Softmax) | $x \to s_x$ | Encodes observation into discrete state |
-| **Target Encoder** (EMA) | $y \to s_y$ | Stable training target; updated via EMA, not backprop |
-| **Predictor** | $(s_x, c) \to \hat{P}(s_y)$ | Learned MDP transition function |
-| **Value Network** | $s_i \to v_i$ | Prevents state collapse during training |
+    | Component | Input → Output | Role |
+    |---|---|---|
+    | **Encoder** (Gumbel-Softmax) | $x \to s_x$ | Encodes observation into discrete state |
+    | **Target Encoder** (EMA) | $y \to s_y$ | Stable training target; updated via EMA, not backprop |
+    | **Predictor** | $(s_x, c) \to \hat{P}(s_y)$ | Learned MDP transition function |
+    | **Value Network** | $s_i \to v_i$ | Prevents state collapse during training |
 
-$$\mathcal{L} = \mathcal{L}_\text{state}(s_y,\,\hat{P}(s_y)) + w_v\,\mathcal{L}_\text{value}(v_\text{true}, v_\text{pred}) + w_e\,\mathcal{L}_\text{entropy}(s_x)$$
-
-**Key result:** 93–98% state accuracy on 2D toy systems. Gumbel-Softmax is the most
-critical component (+19.8 pp accuracy).
-"""),
-            mo.image(_arch_src, width=640),
+    $$\mathcal{L} = \mathcal{L}_\text{state}(s_y,\,\hat{P}(s_y)) + w_v\,\mathcal{L}_\text{value}(v_\text{true}, v_\text{pred}) + w_e\,\mathcal{L}_\text{entropy}(s_x)$$
+    """),
+            _arch_img,
             mo.md("---\n**Workflow:** Configure saddle system → inspect streamplot → generate dataset → train DRM → view state assignments"),
         ],
         gap="1rem",
@@ -451,6 +458,7 @@ def _(
 def _(
     angle0_s,
     angle1_s,
+    base64,
     drag_widget,
     lambda1_s,
     lambda2_s,
@@ -495,7 +503,7 @@ def _(
                 "**Teal (solid)** — action 0 &nbsp;·&nbsp; **Purple (dotted)** — action 1  \n"
                 "Dashed lines show stable manifolds. Opacity indicates speed of dynamics."
             ),
-            mo.image(streamplot_img, width=600),
+            mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(streamplot_img).decode()}" style="width:600px;max-width:100%">'),
         ],
         gap="0.5rem",
     )
@@ -564,7 +572,6 @@ def _(
     lambda2_s,
     logistic_transformation,
     np,
-    os,
     pd,
 ):
     _RESOLUTION = 20   # 20×20 grid
@@ -611,7 +618,7 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
+def _(base64, db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
     # ── E: generation controls ──────────────────────────────────
     panel_E = mo.vstack(
         [
@@ -662,7 +669,7 @@ def _(db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
         _buf.seek(0)
         _scatter_bytes = _buf.read()
         plt.close(_fig)
-        panel_F = mo.vstack([_summary, mo.image(_scatter_bytes, width=420)], gap="0.8rem")
+        panel_F = mo.vstack([_summary, mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_scatter_bytes).decode()}" style="width:420px;max-width:100%">')], gap="0.8rem")
     else:
         panel_F = mo.vstack(
             [mo.md("_No data yet. Configure parameters and click **Generate Dataset**._")],
@@ -781,6 +788,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
+    base64,
     drm_refresh,
     epochs_s,
     io,
@@ -903,7 +911,8 @@ def _(
         _spinner = mo.Html(_SPINNER_HTML) if _is_running else mo.md("")
 
         panel_H = mo.vstack(
-            [_spinner, _status_md, mo.image(_loss_bytes, width=700)], gap="0.4rem"
+            [_spinner, _status_md, mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_loss_bytes).decode()}" style="width:700px;max-width:100%">')],
+            gap="0.4rem",
         )
     elif _is_running:
         panel_H = mo.vstack([mo.Html(_SPINNER_HTML.replace(
@@ -911,8 +920,11 @@ def _(
             "Training in progress — chart appears after first refresh."
         ))], gap="0")
     else:
+        _err = training_state.get("error")
         panel_H = mo.vstack(
-            [mo.md("_No results yet. Generate a dataset above, then click **Train DRM**._")],
+            [mo.callout(mo.md(f"**Training error:** `{_err}`"), kind="danger")]
+            if _err
+            else [mo.md("_No results yet. Generate a dataset above, then click **Train DRM**._")],
             gap="0",
         )
 
@@ -925,6 +937,7 @@ def _(
     SystemType,
     angle0_s,
     angle1_s,
+    base64,
     drag_widget,
     drm_refresh,
     get_visualization_bounds,
@@ -968,7 +981,7 @@ def _(
         _viz_bytes = _f.read()
     os.unlink(_tmp_png.name)
     mo.vstack(
-        [mo.md("## State Assignments"), mo.image(_viz_bytes, width=640)],
+        [mo.md("## State Assignments"), mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_viz_bytes).decode()}" style="width:640px;max-width:100%">')],
         gap="0.5rem",
     )
     return
