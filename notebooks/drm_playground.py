@@ -13,7 +13,7 @@ with app.setup:
     # exist in the cwd, so nothing happens.
     if not (os.path.exists("neural_networks") and os.path.exists("data_generation")):
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "anywidget>=0.9.0", "--quiet"],
+            [sys.executable, "-m", "pip", "install", "anywidget>=0.9.0", "sqlalchemy", "--quiet"],
             check=True,
         )
         if not os.path.exists("mdp-world-model"):
@@ -698,6 +698,7 @@ def _(
     epochs_s,
     mo,
     num_states_s,
+    os,
     sim_df,
     tempfile,
     threading,
@@ -713,9 +714,9 @@ def _(
     if train_btn.value:
         _config = {
             "meta": {
-                "db_path": db_path_input.value,
+                "db_path": os.path.abspath(db_path_input.value),
                 "seed": 42,
-                "output_dir": "datasets/results/training",
+                "output_dir": os.path.abspath("datasets/results/training"),
                 "run_id": "notebook_run",
             },
             "data": {
