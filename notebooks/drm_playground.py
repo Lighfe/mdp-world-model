@@ -104,18 +104,20 @@ def _(base64, mo, os):
     # DRM Playground
 
     This notebook walks through the full **Discrete Representation Model (DRM)** pipeline:
-    configure a dynamical system, generate transition data, train the DRM, and visualise
-    the learned discrete state partition.
+    - configure a dynamical system (toy saddle system with two controls)
+    - sample data from the system
+    - train the DRM to learn the system's dynamics in a discrete latent space
+    - visualise the resulting discrete states
 
     ## Architecture
 
     The DRM learns a finite discrete MDP from continuous dynamical system transition data
-    $(x, c, y)$ — current state, control, next state — with **no state labels required**.
+    $(x, c, y)$ — current state, control, next state; self-supervised with **no state labels required**.
 
     | Component | Input → Output | Role |
     |---|---|---|
-    | **Encoder** (Gumbel-Softmax) | $x \to s_x$ | Encodes observation into discrete state |
-    | **Target Encoder** (EMA) | $y \to s_y$ | Stable training target; updated via EMA, not backprop |
+    | **Encoder** | $x \to s_x$ | Encodes continuous observation into discrete state |
+    | **Target Encoder** | $y \to s_y$ | Stable training target; updated via EMA |
     | **Predictor** | $(s_x, c) \to \hat{P}(s_y)$ | Learned MDP transition function |
     | **Value Network** | $s_i \to v_i$ | Prevents state collapse during training |
 
@@ -132,9 +134,13 @@ def _(base64, mo, os):
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Saddle System Explorer
+    ## Saddle System
 
-    A 2D dynamical system with **two saddle-node dynamics**, each selectable as a control action.
+    We designed the Saddle System as a simple way to create customizable 2D dynamics with interesting structure (saddle points, stable/unstable manifolds) that are still easy to visualize and understand.
+    The system contains two saddle points, each with a stable manifold that divides space into two halfspaces. Where the two stable manifolds intersect, they
+    partition the observation space into four regions. As this partition appears to be the most straight-
+    forward classification of observations into discrete states, we define these four regions as the ground
+    truth states for this system.
 
     Each saddle is defined by:
     - A **saddle point** $x^* \in \mathbb{R}^2$ (drag the circles below)
@@ -486,9 +492,9 @@ def _(
         [
             mo.md("## Dynamics & Controls"),
             mo.md(
+                "Design your custom dynamics.  \n"
                 "**Drag** the circles to reposition saddle points.  \n"
-                "The stable manifold (dashed) updates instantly; "
-                "the streamplot recomputes on release."
+                "Change the **angles** of the stable manifolds (dashed-lines) and **Lyapunov exponents** with the sliders below."
             ),
             drag_widget,
         ],
@@ -500,6 +506,7 @@ def _(
         [
             mo.md("## Streamplot Visualization"),
             mo.md(
+                "The Streamplots show the dynamics of the system under each control action.  \n"
                 "**Teal (solid)** — action 0 &nbsp;·&nbsp; **Purple (dotted)** — action 1  \n"
                 "Dashed lines show stable manifolds. Opacity indicates speed of dynamics."
             ),
@@ -677,6 +684,25 @@ def _(base64, db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
         )
 
     mo.hstack([panel_E, panel_F], gap="3rem", align="start")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, sim_df):
+    mo.stop(sim_df is None)
+    mo.vstack(
+        [
+            mo.md(
+                "## Dataset Preview\n\n"
+                "The table below shows a random sample of the generated transitions. "
+                "Each row is a single $(x, c, y)$ tuple — current state, control action, next state. "
+                "**No saddle positions, manifold angles, or Lyapunov exponents are stored**: "
+                "the DRM must discover all discrete structure from raw transition data alone."
+            ),
+            mo.ui.table(sim_df.sample(min(20, len(sim_df))).reset_index(drop=True)),
+        ],
+        gap="0.8rem",
+    )
     return
 
 
