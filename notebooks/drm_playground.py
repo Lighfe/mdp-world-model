@@ -14,6 +14,10 @@ def _():
     # Locally (run from project root) neural_networks/ and data_generation/ already
     # exist in the cwd, so nothing happens.
     if not (os.path.exists("neural_networks") and os.path.exists("data_generation")):
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "anywidget>=0.9.0", "--quiet"],
+            check=True,
+        )
         if not os.path.exists("mdp-world-model"):
             subprocess.run(
                 ["git", "clone", "https://github.com/Lighfe/mdp-world-model.git"],
@@ -35,7 +39,10 @@ def _():
 @app.cell
 def _(os, sys):
     import threading
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    try:
+        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    except NameError:
+        pass
     import numpy as np
     import matplotlib
     import matplotlib.pyplot as plt
@@ -71,6 +78,50 @@ def _():
     )
 
 
+@app.cell(hide_code=True)
+def _(mo, os):
+    _arch_local = "docs/figures/DRM_architecture.jpeg"
+    if not os.path.exists(_arch_local):
+        _arch_local = "mdp-world-model/docs/figures/DRM_architecture.jpeg"
+    _arch_src = (
+        _arch_local
+        if os.path.exists(_arch_local)
+        else "https://raw.githubusercontent.com/Lighfe/mdp-world-model/main/docs/figures/DRM_architecture.jpeg"
+    )
+    mo.vstack(
+        [
+            mo.md(r"""
+# DRM Playground
+
+This notebook walks through the full **Discrete Representation Model (DRM)** pipeline:
+configure a dynamical system, generate transition data, train the DRM, and visualise
+the learned discrete state partition.
+
+## Architecture
+
+The DRM learns a finite discrete MDP from continuous dynamical system transition data
+$(x, c, y)$ — current state, control, next state — with **no state labels required**.
+
+| Component | Input → Output | Role |
+|---|---|---|
+| **Encoder** (Gumbel-Softmax) | $x \to s_x$ | Encodes observation into discrete state |
+| **Target Encoder** (EMA) | $y \to s_y$ | Stable training target; updated via EMA, not backprop |
+| **Predictor** | $(s_x, c) \to \hat{P}(s_y)$ | Learned MDP transition function |
+| **Value Network** | $s_i \to v_i$ | Prevents state collapse during training |
+
+$$\mathcal{L} = \mathcal{L}_\text{state}(s_y,\,\hat{P}(s_y)) + w_v\,\mathcal{L}_\text{value}(v_\text{true}, v_\text{pred}) + w_e\,\mathcal{L}_\text{entropy}(s_x)$$
+
+**Key result:** 93–98% state accuracy on 2D toy systems. Gumbel-Softmax is the most
+critical component (+19.8 pp accuracy).
+"""),
+            mo.image(_arch_src, width=640),
+            mo.md("---\n**Workflow:** Configure saddle system → inspect streamplot → generate dataset → train DRM → view state assignments"),
+        ],
+        gap="1rem",
+    )
+    return
+
+
 @app.cell
 def _(mo):
     mo.md(r"""
@@ -96,6 +147,7 @@ def _():
     from traitlets.traitlets import List as TList
 
     class SaddleDragWidget(anywidget.AnyWidget):
+        __version__ = "0.1.0"
         _esm = """
     function render({ model, el }) {
       const W = 520, H = 520, M = 56;
@@ -491,7 +543,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     db_path_input = mo.ui.text(
-        value="datasets/results/saddle_notebook.db", label="Output database"
+        value="saddle_notebook.db", label="Output database"
     )
     generate_btn = mo.ui.run_button(label="Generate Dataset")
     return db_path_input, generate_btn
@@ -550,6 +602,7 @@ def _(
                 )
             )
         sim_db_path = db_path_input.value
+        os.makedirs(os.path.dirname(os.path.abspath(sim_db_path)), exist_ok=True)
         if os.path.exists(sim_db_path):
             os.remove(sim_db_path)
         _sim.store_results_to_sqlite(filename=sim_db_path)
