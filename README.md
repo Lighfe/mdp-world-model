@@ -53,10 +53,10 @@ via linear probing.
 *Left: phase portrait showing two action-dependent flow fields. Right: discrete states
 learned by the DRM — four coherent regions that closely match potential "ground truth" boundaries (dashed lines).*
 
-![Learned MDP](docs/figures/mdp_s713_ds8.png)
+![Learned MDP](docs/figures/saddle_mdp_8.jpeg)
 
-*Examplary visualization of a learned MDP. Nodes are discrete states; edge thickness represents transition probability; node labels show value network predictions per state.
-The two actions (saddles) produce structurally different transition patterns.*
+*Exemplary visualization of a learned MDP. Nodes are discrete states; arrow color represents two different actions (saddles) and arrow thickness represents transition probability; node labels show predicted angular value for each state.
+The learned MDP meaningfully represents the dynamics of the saddle system with attractor states 1 and 4 and unstable states 2 and 3.*
 
 **Ablation study** — contribution of each architectural component:
 
@@ -89,9 +89,9 @@ mdp-world-model/
 ├── notebooks/
 │   └── saddle_explorer.py  # Interactive marimo notebook
 └── scripts/
-├── configs/          # YAML configs (base, sweeps, ablation)
-├── parameter_sweep.py   # Bayesian HPO with Optuna + SQLite backend
-└── post_sweep_analysis.py
+│   ├──configs/          # YAML configs (base, sweeps, ablation)
+│   ├──parameter_sweep.py   # Bayesian HPO with Optuna + SQLite backend
+│   └──post_sweep_analysis.py
 ```
 
 ## Getting Started
