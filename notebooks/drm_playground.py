@@ -695,9 +695,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(
     db_path_input,
-    epochs_s,
     mo,
-    num_states_s,
     os,
     sim_df,
     tempfile,
@@ -706,6 +704,12 @@ def _(
     train_drm_simple,
     yaml,
 ):
+    # num_states_s and epochs_s are intentionally NOT declared as dependencies.
+    # They live in the module's global namespace (exported by the slider cell) and are
+    # read at the moment train_btn fires. Declaring them as dependencies would cause this
+    # cell to re-run — and reset training_state — every time a slider moves, which creates
+    # a network-ordering bug on hosted marimo where the button-click message can arrive
+    # before the slider-change message.
     training_state = {"history": {}, "model": None, "done": False, "error": None, "started": False}
     mo.stop(
         train_btn.value and sim_df is None,
@@ -725,7 +729,7 @@ def _(
                 "test_size": 1000,
             },
             "model": {
-                "num_states": num_states_s.value,
+                "num_states": num_states_s.value,  # type: ignore[name-defined]
                 "hidden_dim": 32,
                 "predictor_type": "standard",
                 "value_method": "angle",
@@ -737,9 +741,9 @@ def _(
                 "encoder_init_method": "he",
             },
             "training": {
-                "epochs": epochs_s.value,
+                "epochs": epochs_s.value,  # type: ignore[name-defined]
                 "batch_size": 128,
-                "checkpoint_every": epochs_s.value,
+                "checkpoint_every": epochs_s.value,  # type: ignore[name-defined]
                 "optimizer_type": "adamw",
                 "lr": 3.3e-4,
                 "weight_decay": 0.017,
@@ -777,6 +781,8 @@ def _(
                 training_state["done"] = True
 
         training_state["started"] = True
+        training_state["num_states"] = num_states_s.value  # type: ignore[name-defined]
+        training_state["epochs"] = epochs_s.value  # type: ignore[name-defined]
         threading.Thread(target=_run, daemon=True).start()
     return (training_state,)
 
@@ -800,13 +806,18 @@ def _(
     training_state,
 ):
     # ── G: training controls ────────────────────────────────────
+    _active = training_state.get("started")
+    _cfg_line = (
+        mo.md(
+            f"**Running:** {training_state['num_states']} states · {training_state['epochs']} epochs"
+        )
+        if _active and "num_states" in training_state
+        else mo.md("Set parameters, then click **Train DRM**.")
+    )
     panel_G = mo.vstack(
         [
             mo.md("---\n## DRM Training"),
-            mo.md(
-                "Configure hyperparameters and click **Train DRM** to train on the dataset "
-                "above. The loss chart updates every ~30 s while training runs."
-            ),
+            _cfg_line,
             num_states_s,
             epochs_s,
             train_btn,
