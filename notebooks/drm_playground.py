@@ -1,3 +1,15 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "marimo>=0.23.2",
+#     "matplotlib==3.10.8",
+#     "numpy==2.4.4",
+#     "pandas==3.0.2",
+#     "scipy==1.17.1",
+#     "sqlalchemy==2.0.49",
+# ]
+# ///
+
 import marimo
 
 __generated_with = "0.23.1"
@@ -51,7 +63,18 @@ def _():
     import yaml
     import pandas as pd
 
-    return base64, io, matplotlib, np, pd, plt, tempfile, threading, to_rgba, yaml
+    return (
+        base64,
+        io,
+        matplotlib,
+        np,
+        pd,
+        plt,
+        tempfile,
+        threading,
+        to_rgba,
+        yaml,
+    )
 
 
 @app.cell
@@ -78,7 +101,7 @@ def _():
 
 
 @app.cell(hide_code=True)
-def _(base64, mo, os):
+def _(base64, mo):
     _candidates = [
         "docs/figures/DRM_architecture.jpeg",
         "mdp-world-model/docs/figures/DRM_architecture.jpeg",
@@ -96,16 +119,14 @@ def _(base64, mo, os):
             _arch_bytes = _r.read()
     _arch_img = mo.Html(
         f'<img src="data:image/jpeg;base64,{base64.b64encode(_arch_bytes).decode()}"'
-        ' style="width:640px;max-width:100%">'
+        ' style="width:700px;max-width:100%">'
     )
-    mo.vstack(
-        [
-            mo.md(r"""
+    _intro = mo.md(r"""
     # DRM Playground
 
-    This notebook walks through the full **Discrete Representation Model (DRM)** pipeline:
+    This notebook interactively walks through the full **Discrete Representation Model (DRM)** pipeline:
     - configure a dynamical system (toy saddle system with two controls)
-    - sample data from the system
+    - sample data from the dynamical system and store in an SQLite database
     - train the DRM to learn the system's dynamics in a discrete latent space
     - visualise the resulting discrete states
 
@@ -113,17 +134,24 @@ def _(base64, mo, os):
 
     The DRM learns a finite discrete MDP from continuous dynamical system transition data
     $(x, c, y)$ — current state, control, next state; self-supervised with **no state labels required**.
-
+    """)
+    _table = mo.md(r"""
     | Component | Input → Output | Role |
     |---|---|---|
     | **Encoder** | $x \to s_x$ | Encodes continuous observation into discrete state |
     | **Target Encoder** | $y \to s_y$ | Stable training target; updated via EMA |
     | **Predictor** | $(s_x, c) \to \hat{P}(s_y)$ | Learned MDP transition function |
     | **Value Network** | $s_i \to v_i$ | Prevents state collapse during training |
-
-    $$\mathcal{L} = \mathcal{L}_\text{state}(s_y,\,\hat{P}(s_y)) + w_v\,\mathcal{L}_\text{value}(v_\text{true}, v_\text{pred}) + w_e\,\mathcal{L}_\text{entropy}(s_x)$$
-    """),
-            _arch_img,
+    """)
+    _formula = mo.md(r"""$\displaystyle \mathcal{L} = \mathcal{L}_\text{state}(s_y,\,\hat{P}(s_y)) + w_v\,\mathcal{L}_\text{value}(v_\text{true}, v_\text{pred}) + w_e\,\mathcal{L}_\text{entropy}(s_x)$""")
+    mo.vstack(
+        [
+            _intro,
+            mo.hstack(
+                [_arch_img, mo.vstack([_table, _formula], gap="5rem")],
+                gap="2rem",
+                align="start",
+            ),
             mo.md("---\n**Workflow:** Configure saddle system → inspect streamplot → generate dataset → train DRM → view state assignments"),
         ],
         gap="1rem",
@@ -136,7 +164,8 @@ def _(mo):
     mo.md(r"""
     ## Saddle System
 
-    We designed the Saddle System as a simple way to create customizable 2D dynamics with interesting structure (saddle points, stable/unstable manifolds) that are still easy to visualize and understand.
+    The DRM should be able to learn **any** dynamical system.
+    To test this we designed the Saddle System as a simple way to create customizable 2D dynamics with interesting structure (saddle points, stable/unstable manifolds) that are still easy to visualize and (humanly) understand.
     The system contains two saddle points, each with a stable manifold that divides space into two halfspaces. Where the two stable manifolds intersect, they
     partition the observation space into four regions. As this partition appears to be the most straight-
     forward classification of observations into discrete states, we define these four regions as the ground
@@ -341,11 +370,11 @@ def _(mo):
         full_width=True,
     )
     lambda1_s = mo.ui.slider(
-        start=0.5, stop=1.5, step=0.1, value=1.0,
+        start=0.5, stop=2.0, step=0.1, value=1.0,
         label="λ₁  unstable exponent (> 0)",
     )
     lambda2_s = mo.ui.slider(
-        start=-1.5, stop=-0.5, step=0.1, value=-1.0,
+        start=-2.0, stop=-0.5, step=0.1, value=-1.0,
         label="λ₂  stable exponent (< 0)",
     )
     return angle0_s, angle1_s, lambda1_s, lambda2_s
@@ -615,6 +644,11 @@ def _(
                     save_result=True,
                 )
             )
+        # Both simulate() calls complete within the same second → identical
+        # timestamp-based run_ids → UNIQUE constraint failure in configs table.
+        # Suffix each config row with the control index to guarantee uniqueness.
+        for _i, _idx in enumerate(_sim.configs.index):
+            _sim.configs.at[_idx, "run_id"] = _sim.configs.at[_idx, "run_id"] + f"_c{_i}"
         sim_db_path = db_path_input.value
         os.makedirs(os.path.dirname(os.path.abspath(sim_db_path)), exist_ok=True)
         if os.path.exists(sim_db_path):
@@ -631,10 +665,12 @@ def _(base64, db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
         [
             mo.md("---\n## Data Generation"),
             mo.md(
-                "Simulates the configured saddle system for both controls and persists the "
-                "results to SQLite.  \n"
+                "Uses a numerical ODE solver to simulate the configured saddle system under "
+                "both controls, sampling initial conditions from a uniform grid. Results are "
+                "stored in a local SQLite database for use during training.  \n"
                 "**Grid:** 20×20 &nbsp;·&nbsp; **Samples/cell:** 25 &nbsp;·&nbsp; "
-                "**δt:** 1.0 &nbsp;·&nbsp; **~10 000 transitions per control**"
+                "**δt:** 1.0 &nbsp;·&nbsp; **~10 000 transitions per control**  \n"
+                "Press **Generate Dataset** to simulate and preview the data on the right."
             ),
             db_path_input,
             generate_btn,
@@ -642,41 +678,46 @@ def _(base64, db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
         gap="0.5rem",
     )
 
-    # ── F: sample summary + scatter ─────────────────────────────
+    # ── F: sample summary + dataset preview ─────────────────────
     if sim_df is not None:
         _n_traj = sim_df["trajectory_id"].nunique()
         _n0 = int((sim_df["c0"] == 0).sum())
         _n1 = int((sim_df["c0"] == 1).sum())
         _summary = mo.md(
             f"**Stored** → `{sim_db_path}`  \n"
-            f"{len(sim_df):,} transitions · {_n_traj:,} trajectories  \n"
-            f"Control 0: {_n0:,} &nbsp;·&nbsp; Control 1: {_n1:,}"
+            f"{len(sim_df):,} transitions &nbsp;·&nbsp; "
+            f"Control 0: {_n0:,} &nbsp;·&nbsp; Control 1: {_n1:,}  \n\n"
+            "Each row is a single $(x, c, y)$ tuple — current state, control, next state. "
+            "**No saddle positions, manifold angles, or Lyapunov exponents are stored**: "
+            "the DRM must learn meaningful dynamics from raw transitions alone.  \n"
+            "*Table and plot show one random batch (128 transitions).*"
         )
+        _cols = ["x0", "x1", "c0", "y0", "y1"]
+        _preview = sim_df[_cols].sample(min(128, len(sim_df))).reset_index(drop=True)
+        for _col in ["x0", "x1", "y0", "y1"]:
+            _preview[_col] = _preview[_col].round(4)
         _COLORS = ["#44AA99", "#882255"]
-        _ALPHAS = [0.2, 0.05]
-        _fig, _ax = plt.subplots(figsize=(5.2, 5.2))
+        _samp = sim_df.sample(min(200, len(sim_df)))
+        _fig, _ax = plt.subplots(figsize=(5.0, 5.0))
         for _c in [0, 1]:
-            _mask = sim_df["c0"] == _c
-            _ax.scatter(
-                sim_df.loc[_mask, "x0"],
-                sim_df.loc[_mask, "x1"],
-                c=_COLORS[_c],
-                s=3,
-                alpha=_ALPHAS[_c],
-                label=f"Control {_c}",
-            )
+            _mask = _samp["c0"] == _c
+            _ax.scatter(_samp.loc[_mask, "x0"], _samp.loc[_mask, "x1"],
+                        c=_COLORS[_c], s=15, alpha=0.5, label=f"Control {_c}")
         _ax.set_xlabel(r"$x_1$", fontsize=12)
         _ax.set_ylabel(r"$x_2$", fontsize=12)
-        _ax.set_title("Initial conditions by control", fontsize=12)
-        _ax.legend(markerscale=4)
+        _ax.set_title("Initial conditions — denser near (0, 0)", fontsize=12)
+        _ax.legend(markerscale=2)
         _ax.set_aspect("equal", adjustable="box")
         plt.tight_layout()
         _buf = io.BytesIO()
         _fig.savefig(_buf, format="png", dpi=110, bbox_inches="tight")
         _buf.seek(0)
-        _scatter_bytes = _buf.read()
         plt.close(_fig)
-        panel_F = mo.vstack([_summary, mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_scatter_bytes).decode()}" style="width:420px;max-width:100%">')], gap="0.8rem")
+        _scatter = mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_buf.read()).decode()}" style="width:420px;max-width:100%">')
+        panel_F = mo.vstack(
+            [_summary, mo.ui.tabs({"Table": mo.ui.table(_preview), "Plot": _scatter})],
+            gap="0.8rem",
+        )
     else:
         panel_F = mo.vstack(
             [mo.md("_No data yet. Configure parameters and click **Generate Dataset**._")],
@@ -684,25 +725,6 @@ def _(base64, db_path_input, generate_btn, io, mo, plt, sim_db_path, sim_df):
         )
 
     mo.hstack([panel_E, panel_F], gap="3rem", align="start")
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, sim_df):
-    mo.stop(sim_df is None)
-    mo.vstack(
-        [
-            mo.md(
-                "## Dataset Preview\n\n"
-                "The table below shows a random sample of the generated transitions. "
-                "Each row is a single $(x, c, y)$ tuple — current state, control action, next state. "
-                "**No saddle positions, manifold angles, or Lyapunov exponents are stored**: "
-                "the DRM must discover all discrete structure from raw transition data alone."
-            ),
-            mo.ui.table(sim_df.sample(min(20, len(sim_df))).reset_index(drop=True)),
-        ],
-        gap="0.8rem",
-    )
     return
 
 
@@ -721,8 +743,9 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(
     db_path_input,
+    epochs_s,
     mo,
-    os,
+    num_states_s,
     sim_df,
     tempfile,
     threading,
@@ -843,6 +866,12 @@ def _(
     panel_G = mo.vstack(
         [
             mo.md("---\n## DRM Training"),
+            mo.md(
+                "The model trains self-supervised on the transitions you just generated — "
+                "no state labels, no ground truth MDP. "
+                "The encoder learns to assign observations to discrete states while the predictor "
+                "learns how those states evolve under each control action."
+            ),
             _cfg_line,
             num_states_s,
             epochs_s,
@@ -980,7 +1009,6 @@ def _(
     drm_refresh,
     get_visualization_bounds,
     mo,
-    os,
     plt,
     tempfile,
     training_state,
@@ -1022,6 +1050,90 @@ def _(
         [mo.md("## State Assignments"), mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_viz_bytes).decode()}" style="width:640px;max-width:100%">')],
         gap="0.5rem",
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ---
+    ## Example Results
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    show_examples_btn = mo.ui.button(
+        label="Show example results",
+        value=0,
+        on_click=lambda v: v + 1,
+    )
+    mo.vstack(
+        [
+            mo.md(
+                "In a hurry or want to see exemplary MDPs?   \n"
+                "Press the button below to reveal example results from two pre-trained runs.   \n"
+            ),
+            show_examples_btn,
+        ],
+        gap="0.5rem",
+    )
+    return (show_examples_btn,)
+
+
+@app.cell(hide_code=True)
+def _(base64, mo, show_examples_btn):
+    mo.stop(show_examples_btn.value == 0)
+
+    def _load(rel_path):
+        for prefix in ["", "mdp-world-model/"]:
+            p = prefix + rel_path
+            if os.path.exists(p):
+                with open(p, "rb") as _f:
+                    return _f.read()
+        import urllib.request
+        url = (
+            "https://raw.githubusercontent.com/Lighfe/mdp-world-model/main/"
+            + rel_path
+        )
+        with urllib.request.urlopen(url) as _r:
+            return _r.read()
+
+    def _img(rel_path, width="500px"):
+        data = _load(rel_path)
+        ext = rel_path.rsplit(".", 1)[-1].lower()
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+        return mo.Html(
+            f'<img src="data:{mime};base64,{base64.b64encode(data).decode()}"'
+            f' style="width:{width};max-width:100%">'
+        )
+
+    _row1 = mo.vstack([
+        mo.md("### Saddle System Dynamics"),
+        mo.hstack([
+            _img("docs/figures/multi_saddle_9_streamplot.png"),
+            _img("docs/figures/multi_saddle_8_streamplot.png"),
+        ], gap="6rem", justify="start"),
+    ], gap="0.5rem")
+
+    _row2 = mo.vstack([
+        mo.md("### State Assignments"),
+        mo.hstack([
+            _img("docs/figures/final_state_scatter_ablation_baseline_ds9_seed_713.png"),
+            _img("docs/figures/final_state_scatter_ablation_baseline_ds8_seed_713.png"),
+        ], gap="6rem", justify="start"),
+    ], gap="0.5rem")
+
+    _row3 = mo.vstack([
+        mo.md("### Learned Markov Decision Processes"),
+        mo.hstack([
+            _img("docs/figures/saddle_mdp_9.jpeg"),
+            _img("docs/figures/saddle_mdp_8.jpeg"),
+        ], gap="6rem", justify="start"),
+    ], gap="0.5rem")
+
+    mo.vstack([_row1, _row2, _row3], gap="2rem")
     return
 
 
