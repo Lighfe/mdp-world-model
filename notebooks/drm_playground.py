@@ -1,15 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "marimo>=0.23.2",
-#     "matplotlib==3.10.8",
-#     "numpy==2.4.4",
-#     "pandas==3.0.2",
-#     "scipy==1.17.1",
-#     "sqlalchemy==2.0.49",
-# ]
-# ///
-
 import marimo
 
 __generated_with = "0.23.1"
@@ -84,10 +72,12 @@ def _():
     from data_generation.simulations.grid import Grid, logistic_transformation
     from data_generation.simulations.simulator import Simulator
     from neural_networks.train_drm_simple import train_drm_simple
+    from neural_networks.drm import DiscreteRepresentationsModel
     from neural_networks.drm_viz import visualize_final_state_assignments
     from neural_networks.system_registry import SystemType, get_visualization_bounds
 
     return (
+        DiscreteRepresentationsModel,
         GeneralODENumericalSolver,
         Grid,
         MultiSaddleSystem,
@@ -98,6 +88,25 @@ def _():
         train_drm_simple,
         visualize_final_state_assignments,
     )
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # DRM Playground
+
+    This notebook interactively walks through the full **Discrete Representation Model (DRM)** pipeline:
+    - configure a dynamical system (toy saddle system with two controls)
+    - sample data from the dynamical system and store in an SQLite database
+    - train the DRM to learn the system's dynamics in a discrete latent space
+    - visualise the resulting discrete states
+
+    ## Architecture
+
+    The DRM learns a finite discrete MDP from continuous dynamical system transition data
+    $(x, c, y)$ — current state, control, next state; self-supervised with **no state labels required**.
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -121,20 +130,6 @@ def _(base64, mo):
         f'<img src="data:image/jpeg;base64,{base64.b64encode(_arch_bytes).decode()}"'
         ' style="width:700px;max-width:100%">'
     )
-    _intro = mo.md(r"""
-    # DRM Playground
-
-    This notebook interactively walks through the full **Discrete Representation Model (DRM)** pipeline:
-    - configure a dynamical system (toy saddle system with two controls)
-    - sample data from the dynamical system and store in an SQLite database
-    - train the DRM to learn the system's dynamics in a discrete latent space
-    - visualise the resulting discrete states
-
-    ## Architecture
-
-    The DRM learns a finite discrete MDP from continuous dynamical system transition data
-    $(x, c, y)$ — current state, control, next state; self-supervised with **no state labels required**.
-    """)
     _table = mo.md(r"""
     | Component | Input → Output | Role |
     |---|---|---|
@@ -146,7 +141,6 @@ def _(base64, mo):
     _formula = mo.md(r"""$\displaystyle \mathcal{L} = \mathcal{L}_\text{state}(s_y,\,\hat{P}(s_y)) + w_v\,\mathcal{L}_\text{value}(v_\text{true}, v_\text{pred}) + w_e\,\mathcal{L}_\text{entropy}(s_x)$""")
     mo.vstack(
         [
-            _intro,
             mo.hstack(
                 [_arch_img, mo.vstack([_table, _formula], gap="5rem")],
                 gap="2rem",
@@ -171,7 +165,7 @@ def _(mo):
     forward classification of observations into discrete states, we define these four regions as the ground
     truth states for this system.
 
-    Each saddle is defined by:
+    Each control action is defined by:
     - A **saddle point** $x^* \in \mathbb{R}^2$ (drag the circles below)
     - A **stable manifold angle** — direction along which trajectories converge
     - Shared **Lyapunov exponents** $\lambda_1 > 0$ (unstable) and $\lambda_2 < 0$ (stable)
@@ -224,11 +218,18 @@ def _():
 
     ctx.fillStyle = '#fafafa'; ctx.fillRect(M, M, PW, PH);
 
+    const rawStep = (xr[1] - xr[0]) / 5;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const niceStep = [1, 2, 5].map(n => n * mag).find(s => s >= rawStep) || mag;
+
     ctx.strokeStyle = '#eee'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 10; i++) {
-      const t = i / 10;
-      ctx.beginPath(); ctx.moveTo(M + t*PW, M); ctx.lineTo(M + t*PW, M + PH); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(M, M + t*PH); ctx.lineTo(M + PW, M + t*PH); ctx.stroke();
+    for (let v = Math.ceil(xr[0] / niceStep) * niceStep; v <= xr[1] + 1e-9; v += niceStep) {
+      const [cx] = toCanvas(v, 0);
+      ctx.beginPath(); ctx.moveTo(cx, M); ctx.lineTo(cx, M + PH); ctx.stroke();
+    }
+    for (let v = Math.ceil(yr[0] / niceStep) * niceStep; v <= yr[1] + 1e-9; v += niceStep) {
+      const [, cy] = toCanvas(0, v);
+      ctx.beginPath(); ctx.moveTo(M, cy); ctx.lineTo(M + PW, cy); ctx.stroke();
     }
 
     const [ox, oy] = toCanvas(0, 0);
@@ -237,9 +238,6 @@ def _():
     if (ox >= M && ox <= M + PW) { ctx.beginPath(); ctx.moveTo(ox, M); ctx.lineTo(ox, M + PH); ctx.stroke(); }
 
     ctx.fillStyle = '#666'; ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1;
-    const rawStep = (xr[1] - xr[0]) / 5;
-    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
-    const niceStep = [1, 2, 5].map(n => n * mag).find(s => s >= rawStep) || mag;
     ctx.font = '11px system-ui';
     ctx.textAlign = 'center';
     for (let v = Math.ceil(xr[0] / niceStep) * niceStep; v <= xr[1] + 1e-9; v += niceStep) {
@@ -342,10 +340,10 @@ def _():
     export default { render };
     """
         _css = ""
-        saddle_points = TList([[-2.0, 2.0], [2.0, 0.0]]).tag(sync=True)
-        angles_deg = TList([135.0, 0.0]).tag(sync=True)
-        x_range = TList([-5.0, 5.0]).tag(sync=True)
-        y_range = TList([-5.0, 5.0]).tag(sync=True)
+        saddle_points = TList([[-1.0, 2.0], [1.5, 0.0]]).tag(sync=True)
+        angles_deg = TList([120.0, 0.0]).tag(sync=True)
+        x_range = TList([-4.0, 4.0]).tag(sync=True)
+        y_range = TList([-4.0, 4.0]).tag(sync=True)
 
     return (SaddleDragWidget,)
 
@@ -742,6 +740,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
+    DiscreteRepresentationsModel,
     db_path_input,
     epochs_s,
     mo,
@@ -832,6 +831,13 @@ def _(
         training_state["started"] = True
         training_state["num_states"] = num_states_s.value  # type: ignore[name-defined]
         training_state["epochs"] = epochs_s.value  # type: ignore[name-defined]
+        training_state["architecture_model"] = DiscreteRepresentationsModel(
+            obs_dim=2, control_dim=2, value_dim=2,
+            num_states=num_states_s.value,  # type: ignore[name-defined]
+            hidden_dim=32, predictor_type="standard",
+            use_gumbel=True, initial_temp=1.5, min_temp=0.25,
+            use_target_encoder=True, ema_decay=0.66, value_activation="tanh",
+        )
         threading.Thread(target=_run, daemon=True).start()
     return (training_state,)
 
@@ -863,6 +869,7 @@ def _(
         if _active and "num_states" in training_state
         else mo.md("Set parameters, then click **Train DRM**.")
     )
+    _model_items = [training_state["architecture_model"]] if training_state.get("architecture_model") is not None else []
     panel_G = mo.vstack(
         [
             mo.md("---\n## DRM Training"),
@@ -877,6 +884,7 @@ def _(
             epochs_s,
             train_btn,
             drm_refresh,
+            *_model_items,
         ],
         gap="0.5rem",
     )
@@ -1000,6 +1008,14 @@ def _(
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Visualization
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _(
     SystemType,
     angle0_s,
@@ -1047,7 +1063,7 @@ def _(
         _viz_bytes = _f.read()
     os.unlink(_tmp_png.name)
     mo.vstack(
-        [mo.md("## State Assignments"), mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_viz_bytes).decode()}" style="width:640px;max-width:100%">')],
+        [mo.md("### State Assignments"), mo.Html(f'<img src="data:image/png;base64,{base64.b64encode(_viz_bytes).decode()}" style="width:450px;max-width:100%">')],
         gap="0.5rem",
     )
     return
@@ -1100,7 +1116,7 @@ def _(base64, mo, show_examples_btn):
         with urllib.request.urlopen(url) as _r:
             return _r.read()
 
-    def _img(rel_path, width="500px"):
+    def _img(rel_path, width="450px"):
         data = _load(rel_path)
         ext = rel_path.rsplit(".", 1)[-1].lower()
         mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
@@ -1112,13 +1128,19 @@ def _(base64, mo, show_examples_btn):
     _row1 = mo.vstack([
         mo.md("### Saddle System Dynamics"),
         mo.hstack([
-            _img("docs/figures/multi_saddle_9_streamplot.png"),
-            _img("docs/figures/multi_saddle_8_streamplot.png"),
+            mo.vstack([
+                        _img("docs/figures/multi_saddle_9_streamplot.png"),
+                        mo.md("Centered Saddles, Imbalanced Lyapunov")
+                    ], align="center").style({"width": "450px"}),
+            mo.vstack([
+                _img("docs/figures/multi_saddle_8_streamplot.png"),
+                mo.md("Shifted Saddles, Rotated Manifold")
+            ], align="center").style({"width": "450px"})
         ], gap="6rem", justify="start"),
     ], gap="0.5rem")
 
     _row2 = mo.vstack([
-        mo.md("### State Assignments"),
+        mo.md("### Learned State Assignments"),
         mo.hstack([
             _img("docs/figures/final_state_scatter_ablation_baseline_ds9_seed_713.png"),
             _img("docs/figures/final_state_scatter_ablation_baseline_ds8_seed_713.png"),
@@ -1128,12 +1150,18 @@ def _(base64, mo, show_examples_btn):
     _row3 = mo.vstack([
         mo.md("### Learned Markov Decision Processes"),
         mo.hstack([
-            _img("docs/figures/saddle_mdp_9.jpeg"),
-            _img("docs/figures/saddle_mdp_8.jpeg"),
+            mo.vstack([
+                _img("docs/figures/saddle_mdp_9.jpeg"),
+                mo.md("All States are Self-Loops")
+            ], align="center").style({"width": "450px"}),
+            mo.vstack([
+                _img("docs/figures/saddle_mdp_8.jpeg"),
+                mo.md("States 1 and 4 as Attractor States")
+            ], align="center").style({"width": "450px"}),
         ], gap="6rem", justify="start"),
     ], gap="0.5rem")
 
-    mo.vstack([_row1, _row2, _row3], gap="2rem")
+    mo.vstack([_row1, _row2, _row3], gap="4rem")
     return
 
 
