@@ -160,15 +160,15 @@ def _(base64, mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        "---\n"
-        "**Workflow:** Configure saddle system → generate dataset → train DRM → view state assignments  \n"
-        "*Developed as a master's thesis at "
-        "[TU Berlin](https://www.tu.berlin/) in cooperation with the "
-        "[Potsdam Institute for Climate Impact Research (PIK)](https://www.pik-potsdam.de/). "
-        "Source code: [github.com/Lighfe/mdp-world-model](https://github.com/Lighfe/mdp-world-model)*   \n"
-        "The Dynamical Systems and Data Sampling approach was developed in coordination with Karolin Stiller."
-    )
+    mo.md(r"""
+---
+**Workflow:** Configure saddle system → generate dataset → train DRM → view state assignments
+
+*Developed as a master's thesis at [TU Berlin](https://www.tu.berlin/) in cooperation with the [Potsdam Institute for Climate Impact Research (PIK)](https://www.pik-potsdam.de/). Source code: [github.com/Lighfe/mdp-world-model](https://github.com/Lighfe/mdp-world-model)*
+
+The Dynamical Systems and Data Sampling approach was developed in coordination with Karolin Stiller.
+    """)
+    return
 
 
 @app.cell
