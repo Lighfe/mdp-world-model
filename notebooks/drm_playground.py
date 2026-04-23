@@ -95,11 +95,18 @@ def _(mo):
     mo.md(r"""
     # DRM Playground
 
-    This notebook interactively walks through the full **Discrete Representation Model (DRM)** pipeline:
-    - configure a dynamical system (toy saddle system with two controls)
-    - sample data from the dynamical system and store in an SQLite database
-    - train the DRM to learn the system's dynamics in a discrete latent space
-    - visualise the resulting discrete states
+    Many real-world systems — climate tipping points, economic transitions,
+    ecological regime shifts — are described by continuous differential equations
+    but reasoned about as discrete state machines. The **Discrete Representation
+    Model (DRM)** is a proof-of-concept that this gap can be closed via
+    self-supervised learning.
+
+    This notebook interactively walks through the full pipeline on a 2D toy system:
+
+    - Configure a saddle system (two saddle points, two control actions)
+    - Sample transition data from the system and store it in a local SQLite database
+    - Train the DRM to discover discrete states and transition dynamics
+    - Visualise the resulting state assignments
 
     ## Architecture
 
@@ -145,12 +152,23 @@ def _(base64, mo):
                 [_arch_img, mo.vstack([_table, _formula], gap="5rem")],
                 gap="2rem",
                 align="start",
-            ),
-            mo.md("---\n**Workflow:** Configure saddle system → inspect streamplot → generate dataset → train DRM → view state assignments"),
+            )
         ],
         gap="1rem",
     )
     return
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        "---\n"
+        "**Workflow:** Configure saddle system → generate dataset → train DRM → view state assignments  \n"
+        "*Developed as a master's thesis at "
+        "[TU Berlin](https://www.tu.berlin/) in cooperation with the "
+        "[Potsdam Institute for Climate Impact Research (PIK)](https://www.pik-potsdam.de/). "
+        "Source code: [github.com/Lighfe/mdp-world-model](https://github.com/Lighfe/mdp-world-model)*   \n"
+        "The Dynamical Systems and Data Sampling approach was developed in coordination with Karolin Stiller."
+    )
 
 
 @app.cell

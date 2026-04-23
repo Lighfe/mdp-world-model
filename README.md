@@ -10,7 +10,7 @@ A self-supervised neural network that learns finite, discrete Markov Decision Pr
 ## Overview
 
 Many real-world systems — climate tipping points, economic transitions, ecological
-regime shifts — are described by continuous differential equations but reasoned about as discrete state machines. The **Discrete Representation Model (DRM)** bridges that gap automatically.
+regime shifts — are described by continuous differential equations but reasoned about as discrete state machines. The Discrete Representation Model (DRM) serves as a proof-of-concept that this gap can be closed via self-supervised learning.
 
 Given trajectories from a continuous dynamical system, the DRM simultaneously learns
 a discrete state space (how to partition the continuous phase space into meaningful
