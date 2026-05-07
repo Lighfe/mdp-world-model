@@ -40,6 +40,12 @@ The DRM consists of four neural networks trained simultaneously:
 Loss is computed in discrete representation space: KL divergence for state prediction,
 MSE for value prediction, and entropy regularization to prevent state collapse.
 
+## Try It Interactively
+
+Explore the full pipeline — configure the saddle system, generate data, train the DRM, and inspect the learned state assignments — in an interactive marimo notebook hosted on Molab (no installation required):
+
+**[Open in Molab →](https://molab.marimo.io/notebooks/nb_XVNbr1LPFYw91k7VSvQadJ/app)**
+
 ## Results
 
 The DRM was validated on the **Saddle System**, a family of 2D toy dynamical systems
@@ -58,18 +64,7 @@ learned by the DRM — four coherent regions that closely match potential "groun
 *Exemplary visualization of a learned MDP. Nodes are discrete states; arrow color represents two different actions (saddles) and arrow thickness represents transition probability; node labels show predicted angular value for each state.
 The learned MDP meaningfully represents the dynamics of the saddle system with attractor states 1 and 4 and unstable states 2 and 3.*
 
-**Ablation study** — contribution of each architectural component:
-
-| Removed component | Accuracy impact |
-|---|---|
-| Gumbel-Softmax | −19.8 pp |
-| Entropy regularization | −10 pp |
-| Value network | −3 pp |
-
-Full model: **93–98% balanced state accuracy** across four Saddle System variants.
-
-The DRM was also explored qualitatively on the Technology Substitution system and the
-Social Tipping system.
+The DRM was also explored qualitatively on the Technology Substitution system and the Social Tipping system.
 
 ## Repository Structure
 ```text
@@ -103,13 +98,19 @@ conda env create -f environment.yml
 conda activate mdp-world-model
 ```
 
-Generate a dataset:
+Generate a dataset — the script must be run once per control action (saddle point). Key parameters such as saddle point positions, manifold angles, Lyapunov exponents, and grid resolution are set via CLI flags; see `--help` for the full list:
 
 ```bash
-python datasets/run_saddle_simulation.py
+python datasets/run_saddle_simulation.py \
+    --control 0 --saddle-points "[[0.0, 0.0]]" --angles "[90]"
+
+python datasets/run_saddle_simulation.py \
+    --control 1 --saddle-points "[[2.0, -1.0]]" --angles "[0]"
 ```
 
-Train the model:
+Both runs write to the same database (`--db-name`, default `datasets/results/saddle_system.db`), which is then used for training.
+
+Train the model — all hyperparameters (architecture, optimizer, loss weights, scheduler) are configured via a YAML file. `scripts/configs/base.yaml` contains sensible defaults for the saddle system:
 
 ```bash
 python neural_networks/train_drm.py scripts/configs/base.yaml
